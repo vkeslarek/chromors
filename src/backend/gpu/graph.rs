@@ -287,7 +287,7 @@ impl Graph {
         roots: &[(NodeId, crate::geometry::Rect)],
         lod: super::Lod,
     ) -> HashMap<NodeId, crate::geometry::Rect> {
-        use super::op::WorkUnit;
+        use super::work_unit::WorkUnit;
 
         let mut node_rects: HashMap<NodeId, crate::geometry::Rect> = HashMap::new();
         let mut pending: Vec<(NodeId, WorkUnit)> = roots

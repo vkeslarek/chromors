@@ -1,8 +1,11 @@
+use crate::backend::gpu::gpu_data::{HistogramData, ImageData};
 use crate::backend::gpu::graph::{Graph, NodeId};
 use crate::backend::gpu::op::GpuOperation;
+use crate::backend::gpu::op::MaterializePlan;
 use crate::backend::gpu::op::emit_unary;
 use crate::backend::gpu::param::Param;
 use crate::backend::gpu::value::ValueKind;
+use crate::backend::gpu::work_unit::{Atomic, Region, WorkUnit};
 use crate::geometry::Rect;
 use std::sync::Arc;
 
@@ -671,14 +674,19 @@ impl GpuOperation for HistogramOp {
 
     fn input_demands(
         &self,
-        _out: &crate::backend::gpu::op::WorkUnit,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, crate::backend::gpu::op::WorkUnit)> {
-        // A histogram reduces over the entire input regardless of what the
-        // consumer asked for — there is no meaningful sub-region of a histogram.
-        vec![(0, crate::backend::gpu::op::WorkUnit::Atomic)]
+        out: &WorkUnit,
+        w: u32,
+        h: u32,
+        lod: crate::backend::gpu::Lod,
+    ) -> Vec<(usize, WorkUnit)> {
+        use crate::backend::gpu::work_unit::AnyWorkUnit;
+        MaterializePlan::<HistogramData>::plan(
+            self,
+            Atomic::from_work_unit(out).unwrap_or(Atomic),
+            w,
+            h,
+            lod,
+        )
     }
 
     fn output_encoder(&self) -> crate::backend::gpu::op::Encoder {
@@ -690,6 +698,16 @@ impl GpuOperation for HistogramOp {
         // Scans the input image to fold pixels into bins — the thread grid
         // must cover the source pixels, not the `bins`-shaped output.
         crate::backend::gpu::op::DispatchGrid::Input(0)
+    }
+}
+
+impl MaterializePlan<HistogramData> for HistogramOp {
+    fn plan(&self, _request: Atomic, w: u32, h: u32, lod: crate::backend::gpu::Lod) -> Vec<(usize, WorkUnit)> {
+        let s = lod.scale_factor();
+        let full = Rect::new(0, 0, (w as f64 / s).ceil() as i32, (h as f64 / s).ceil() as i32);
+        // Histogram scans its full image input regardless of output demand.
+        // The input's natural WU is Region — we request the full bounds.
+        vec![(0, WorkUnit::Region(full))]
     }
 }
 
@@ -790,13 +808,19 @@ impl GpuOperation for VectorscopeOp {
 
     fn input_demands(
         &self,
-        _out: &crate::backend::gpu::op::WorkUnit,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, crate::backend::gpu::op::WorkUnit)> {
-        // A vectorscope grid reduces over the entire input — same as histogram.
-        vec![(0, crate::backend::gpu::op::WorkUnit::Atomic)]
+        out: &WorkUnit,
+        w: u32,
+        h: u32,
+        lod: crate::backend::gpu::Lod,
+    ) -> Vec<(usize, WorkUnit)> {
+        use crate::backend::gpu::work_unit::AnyWorkUnit;
+        MaterializePlan::<HistogramData>::plan(
+            self,
+            Atomic::from_work_unit(out).unwrap_or(Atomic),
+            w,
+            h,
+            lod,
+        )
     }
 
     fn output_encoder(&self) -> crate::backend::gpu::op::Encoder {
@@ -807,5 +831,14 @@ impl GpuOperation for VectorscopeOp {
     fn dispatch_grid(&self) -> crate::backend::gpu::op::DispatchGrid {
         // Scans the input image to plot Cb/Cr density — same as histogram.
         crate::backend::gpu::op::DispatchGrid::Input(0)
+    }
+}
+
+impl MaterializePlan<HistogramData> for VectorscopeOp {
+    fn plan(&self, _request: Atomic, w: u32, h: u32, lod: crate::backend::gpu::Lod) -> Vec<(usize, WorkUnit)> {
+        let s = lod.scale_factor();
+        let full = Rect::new(0, 0, (w as f64 / s).ceil() as i32, (h as f64 / s).ceil() as i32);
+        // Vectorscope scans the entire input image to plot Cb/Cr density.
+        vec![(0, WorkUnit::Region(full))]
     }
 }

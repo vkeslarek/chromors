@@ -11,6 +11,7 @@ pub mod compile;
 pub mod context;
 pub mod data;
 pub mod emit;
+pub mod gpu_data;
 pub mod graph;
 pub mod handle;
 pub mod materialize;
@@ -25,6 +26,7 @@ pub mod slang;
 pub mod source;
 pub mod target;
 pub mod value;
+pub mod work_unit;
 
 pub use crate::geometry::Rect;
 pub use buffer::{GpuBuffer, ImageBuffer};
@@ -34,7 +36,12 @@ pub use context::RegionCache;
 pub use graph::NodeEval;
 pub use graph::{Graph, GraphNode, KernelSpec, NodeId, SourceNode};
 pub use handle::{GpuImageHandle, GraphNodeHandle, Lod};
-pub use op::{Decoder, DispatchGrid, Encoder, GpuOperation, OutputSpec, WorkUnit};
+pub use gpu_data::{
+    FeatureMapData, Fft1DData, Fft2DData, GpuData, HistogramData, ImageData, Mask1DData,
+    Mask2DData, PointListData, ScalarData,
+};
+pub use op::{Decoder, DispatchGrid, Encoder, GpuOperation, MaterializePlan, OutputSpec};
+pub use work_unit::{AnyWorkUnit, Atomic, Range, Region, WorkUnit};
 pub use source::{AnyGpuSource, GpuSource};
 pub use target::GpuTarget;
 pub use value::GraphValue;

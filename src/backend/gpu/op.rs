@@ -1,4 +1,6 @@
+use super::gpu_data::GpuData;
 use super::param::Param;
+use super::work_unit::{AnyWorkUnit, WorkUnit};
 use crate::backend::ColorConversionCapability;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -74,47 +76,35 @@ pub struct OutputCodec {
     pub format: PixelFormat,
 }
 
-// ── WorkUnit ────────────────────────────────────────────────────────────────
+// ── MaterializePlan ───────────────────────────────────────────────────────────
 
-/// The division strategy a [`ValueKind`] declares for how its output can be
-/// split into independently-fetchable/cacheable/dispatchable chunks — and the
-/// wire format `input_demands` uses to propagate "what do I need from you"
-/// across the graph between nodes of (possibly different) DataTypes.
+/// Typed demand-mapping for an operation whose output DataType is known.
 ///
-/// Each variant corresponds to a family of DataTypes' natural shape:
-/// `Region` — Image, Mask2D, Fft2D (2-D grids that subdivide into rects);
-/// `Atomic` — Histogram, VectorScope, Scalar (indivisible: the only unit is
-/// the whole result, there's no meaningful sub-piece). `Range` for 1-D types
-/// (Mask1D, Fft1D) and `Frame`/`FrameFragment` for video join this catalog
-/// once an operation actually needs to express demand in those shapes.
+/// `Out` is the DataType this operation produces (e.g. [`HistogramData`],
+/// [`ImageData`]).  `plan` receives the caller's typed [`WorkUnit`] request
+/// (e.g. `Atomic` for a histogram consumer, `Region(r)` for a tiled image
+/// consumer) and returns the erased [`WorkUnit`]s the operation needs from
+/// each of its inputs.
 ///
-/// Stays a closed enum (not a per-DataType associated type) because nodes are
-/// stored as `Arc<dyn GpuOperation>` in a flat heterogeneous graph — demand has
-/// to cross DataType boundaries dynamically, so both sides need a shared
-/// vocabulary to translate through (same reason `Param` is `I32|U32|F32`
-/// rather than generic).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorkUnit {
-    /// 2-D sub-rectangle — the division strategy of Image, Mask2D, Fft2D.
-    Region(Rect),
-    /// No subdivision exists — the division strategy of Histogram, VectorScope,
-    /// Scalar. The only unit is the entire result.
-    Atomic,
-}
-
-impl WorkUnit {
-    /// Resolve to a concrete bounding rect against a node's full output
-    /// dimensions. `Atomic` becomes the full output rect (its one and only
-    /// unit); `Region` passes through unchanged. Used wherever a concrete
-    /// `Rect` is still required (source fetches, kernel dispatch sizing) —
-    /// today every `ValueKind` that can appear mid-graph is region-shaped at
-    /// the storage level, even when its *demand* semantics are `Atomic`.
-    pub fn resolve(&self, w: u32, h: u32) -> Rect {
-        match self {
-            WorkUnit::Region(r) => *r,
-            WorkUnit::Atomic => Rect::new(0, 0, w as i32, h as i32),
-        }
-    }
+/// This is the typed surface — concrete ops implement it here.  The dyn-
+/// dispatch bridge lives in [`GpuOperation::input_demands`], which downcasts
+/// the erased [`WorkUnit`] to `Out::WorkUnit` and delegates to `plan`.
+///
+/// [`HistogramData`]: super::gpu_data::HistogramData
+/// [`ImageData`]: super::gpu_data::ImageData
+pub trait MaterializePlan<Out: GpuData>: GpuOperation {
+    /// Map an output demand to input demands.
+    ///
+    /// `w` and `h` are the full (un-LOD-scaled) output dimensions.
+    /// Returns `(input_index, WorkUnit)` — index 0 = primary input,
+    /// 1+ = extra inputs (same convention as `inverse_map` / `inputs`).
+    fn plan(
+        &self,
+        request: Out::WorkUnit,
+        w: u32,
+        h: u32,
+        lod: super::Lod,
+    ) -> Vec<(usize, WorkUnit)>;
 }
 
 // ── GpuOperation ─────────────────────────────────────────────────────────────
@@ -150,13 +140,16 @@ pub trait GpuOperation: Send + Sync + Debug {
         vec![(0, output_rect)]
     }
 
-    /// Given an output demand, return what input demands this op needs.
-    /// Image ops map `Region→Region` (with halo, via `inverse_map`); reductions
-    /// (histogram, vectorscope) override this directly to always demand `Atomic`
-    /// regardless of what the consumer asked for — their division strategy has
-    /// no sub-pieces. Default: `Region` delegates to `inverse_map`; `Atomic`
-    /// resolves to the full input rect (no halo needed — a full-bounds rect
-    /// already saturates any halo expansion via clamping).
+    /// Dyn-dispatch demand bridge for the heterogeneous graph walk.
+    ///
+    /// Receives the type-erased [`WorkUnit`] from the graph walker and returns
+    /// the erased demands this op needs from each input.  Typed operations
+    /// should implement [`MaterializePlan<Out>`] and call through to `plan`
+    /// here after downcasting via [`AnyWorkUnit::from_work_unit`].
+    ///
+    /// Default: `Region` delegates to `inverse_map` (image-to-image path);
+    /// `Atomic` and `Range` resolve to the full input rect (their storage has
+    /// no spatial sub-division so the input must be fully scanned).
     fn input_demands(
         &self,
         out: &WorkUnit,
@@ -170,7 +163,7 @@ pub trait GpuOperation: Send + Sync + Debug {
                 .into_iter()
                 .map(|(i, r)| (i, WorkUnit::Region(r)))
                 .collect(),
-            WorkUnit::Atomic => {
+            WorkUnit::Atomic | WorkUnit::Range { .. } => {
                 let s = lod.scale_factor();
                 let full = Rect::new(
                     0,

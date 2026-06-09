@@ -12,6 +12,8 @@ use std::sync::Arc;
 use crate::geometry::Rect;
 use crate::pixel::PixelFormat;
 
+use super::work_unit::WorkUnit;
+
 use super::buffer::ImageBuffer;
 
 // ── ValueKind ─────────────────────────────────────────────────────────────────
@@ -76,6 +78,28 @@ impl ValueKind {
     #[inline]
     pub fn needs_fused_temp(&self) -> bool {
         matches!(self, ValueKind::Image)
+    }
+
+    /// Type-erased default [`WorkUnit`] for this value kind.
+    ///
+    /// Used by the graph walker to seed the initial demand when materializing
+    /// a root node — each DataType's natural division strategy is expressed
+    /// here so the walker never hardcodes `Region` for non-image roots.
+    pub fn default_work_unit(&self, w: u32, h: u32) -> WorkUnit {
+        match self {
+            ValueKind::Image
+            | ValueKind::Mask2D { .. }
+            | ValueKind::Fft2D
+            | ValueKind::Features { .. } => WorkUnit::Region(Rect::new(0, 0, w as i32, h as i32)),
+
+            ValueKind::Histogram { .. }
+            | ValueKind::PointList { .. }
+            | ValueKind::Scalar => WorkUnit::Atomic,
+
+            ValueKind::Mask1D { length } | ValueKind::Fft1D { length } => {
+                WorkUnit::Range { start: 0, end: *length }
+            }
+        }
     }
 
     /// How the emitter wraps writes to a buffer of this kind.
