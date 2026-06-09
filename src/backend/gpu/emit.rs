@@ -7,7 +7,7 @@ use crate::pixel::PixelFormat;
 use super::graph::NodeEval;
 use super::graph::{Graph, NodeId};
 use super::materialize::MaterializePlan;
-use super::op::{Decoder, DispatchGrid, Encoder};
+use super::op::{DispatchGrid, InputEncoder, OutputDecoder};
 use super::param::{GpuPixelEncoding, Param};
 use super::source::AnyGpuSource;
 use super::value::{ValueKind, WriteMode};
@@ -22,6 +22,8 @@ pub struct EmittedIr {
     pub params_bytes: Vec<u8>,
     pub entry_points: Vec<(String, u32, u32)>,
     pub target_output_kinds: Vec<ValueKind>,
+    /// Output pixel format for image passes — `None` for non-image outputs.
+    pub dst_format: Option<PixelFormat>,
 }
 
 impl EmittedIr {
@@ -39,15 +41,9 @@ impl EmittedIr {
 }
 
 impl MaterializePlan {
-    pub fn emit_ir(&self, graph: &Graph, wg_dim: u32) -> EmittedIr {
-        let (layout, color) = LayoutPlan::build(graph, self);
-        SlangEmitter::new(&layout, &color, graph).emit(wg_dim)
-    }
-
-    /// Like `emit_ir` but also returns the `LayoutPlan` so callers can
-    /// apply LOD-dependent param scaling without rebuilding the layout.
-    pub fn emit_ir_with_layout(&self, graph: &Graph, wg_dim: u32) -> (EmittedIr, LayoutPlan) {
-        let (layout, color) = LayoutPlan::build(graph, self);
+    /// Emit IR with LOD-scaled params baked in.
+    pub fn emit_ir_with_layout(&self, graph: &Graph, wg_dim: u32, lod: super::Lod) -> (EmittedIr, LayoutPlan) {
+        let (layout, color) = LayoutPlan::build(graph, self, lod);
         let emitter = SlangEmitter::new(&layout, &color, graph);
         let ir = emitter.emit(wg_dim);
         (ir, layout)
@@ -84,15 +80,17 @@ pub struct LayoutPlan {
 ///
 /// Separated from [`LayoutPlan`] because color/format concerns are image-domain
 /// knowledge that the generic buffer-allocation layer should not carry.
+///
+/// Both `dst_encoding` and `dst_format` are `None` for non-image passes
+/// (histograms, masks, FFT) that never execute the `from_working` encode step.
 #[derive(Debug)]
 pub struct ColorPipeline {
     /// Per-source color encoding (one per [`SourceSlot`]).
     pub src_encodings: Vec<GpuPixelEncoding>,
-    /// Output color encoding — derived from the last node's `output_codec_override`,
-    /// or the source color space if no override is present.
-    pub dst_encoding: GpuPixelEncoding,
-    /// Output pixel format — used to select the Slang codec and compute buffer sizes.
-    pub dst_format: PixelFormat,
+    /// Output color encoding — `None` for non-image output kinds.
+    pub dst_encoding: Option<GpuPixelEncoding>,
+    /// Output pixel format — `None` for non-image output kinds.
+    pub dst_format: Option<PixelFormat>,
 }
 
 #[derive(Debug)]
@@ -131,10 +129,6 @@ pub struct ParamLayout {
     pub bytes: Vec<u8>,
     /// First param field index (into `fields`) for each op node.
     pub node_base: HashMap<NodeId, u32>,
-    /// Field indices (into `fields`) that contain full-resolution pixel-space
-    /// magnitudes (e.g. blur sigma) and must be divided by `lod.scale_factor()`
-    /// before GPU dispatch when materialising at LOD > 0.
-    pub lod_scale_fields: Vec<u32>,
 }
 
 // ── GpuPixelEncoding does not derive Debug — provide a minimal impl ──────────────
@@ -163,20 +157,20 @@ impl GpuPixelEncoding {
 // ── LayoutPlan construction ───────────────────────────────────────────────────
 
 impl LayoutPlan {
-    /// Build the layout plan and color pipeline for one materialization pass.
-    pub fn build(graph: &Graph, plan: &MaterializePlan) -> (Self, ColorPipeline) {
-        LayoutBuilder::new(graph, plan).build()
+    pub fn build(graph: &Graph, plan: &MaterializePlan, lod: super::Lod) -> (Self, ColorPipeline) {
+        LayoutBuilder::new(graph, plan, lod).build()
     }
 }
 
 struct LayoutBuilder<'a> {
     graph: &'a Graph,
     plan: &'a MaterializePlan,
+    lod: super::Lod,
 }
 
 impl<'a> LayoutBuilder<'a> {
-    fn new(graph: &'a Graph, plan: &'a MaterializePlan) -> Self {
-        Self { graph, plan }
+    fn new(graph: &'a Graph, plan: &'a MaterializePlan, lod: super::Lod) -> Self {
+        Self { graph, plan, lod }
     }
 
     fn build(&self) -> (LayoutPlan, ColorPipeline) {
@@ -205,7 +199,7 @@ impl<'a> LayoutBuilder<'a> {
             .map(|t| (t.node_id, t.binding as usize))
             .collect();
 
-        let params = self.build_params(&order, &needed, &sources, &temps, &targets);
+        let params = self.build_params(&order, &needed, &sources, &temps, &targets, self.lod);
 
         // ── Color pipeline (image-domain, separate from alloc) ─────────────────
         let src_encodings = sources
@@ -228,11 +222,21 @@ impl<'a> LayoutBuilder<'a> {
             })
             .collect();
 
-        let dst_encoding = {
+        let has_image_output = self.plan.targets.iter().any(|t| {
+            self.graph
+                .get_node(t.node_id)
+                .map(|n| matches!(n.op.output_decoder(), OutputDecoder::WorkingEncodeRegion { .. }))
+                .unwrap_or(false)
+        });
+
+        let (dst_encoding, dst_format) = if has_image_output {
             let override_codec = order.iter().rev().find_map(|&id| {
-                self.graph
-                    .get_node(id)
-                    .and_then(|n| n.op.output_codec_override())
+                self.graph.get_node(id).and_then(|n| {
+                    match n.op.output_decoder() {
+                        OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => Some(c),
+                        _ => None,
+                    }
+                })
             });
             match override_codec {
                 Some(codec) => {
@@ -241,27 +245,26 @@ impl<'a> LayoutBuilder<'a> {
                         codec.color_space,
                         crate::pixel::AlphaPolicy::Straight,
                     );
-                    GpuPixelEncoding::from_meta(&meta, false)
+                    (Some(GpuPixelEncoding::from_meta(&meta, false)), Some(codec.format))
                 }
                 None => {
-                    let img =
-                        self.plan.image.as_ref().expect(
-                            "MaterializePlan::image must be set for image materializations",
-                        );
-                    GpuPixelEncoding::from_color_space(img.dst_color_space)
+                    let src_cs = self
+                        .graph
+                        .sources
+                        .first()
+                        .map(|s| s.source.color_space())
+                        .unwrap_or(ColorSpace::SRGB);
+                    (Some(GpuPixelEncoding::from_color_space(src_cs)), Some(PixelFormat::RgbaF32))
                 }
             }
+        } else {
+            (None, None)
         };
 
-        let img_plan = self
-            .plan
-            .image
-            .as_ref()
-            .expect("MaterializePlan::image must be set for image materializations");
         let color = ColorPipeline {
             src_encodings,
             dst_encoding,
-            dst_format: img_plan.dst_format,
+            dst_format,
         };
 
         let layout = LayoutPlan {
@@ -475,6 +478,7 @@ impl<'a> LayoutBuilder<'a> {
         sources: &[SourceSlot],
         temps: &BTreeMap<NodeId, TempSlot>,
         targets: &[TargetSlot],
+        lod: super::Lod,
     ) -> ParamLayout {
         let mut fields: Vec<(String, &'static str)> = Vec::new();
         let mut bytes: Vec<u8> = Vec::new();
@@ -541,18 +545,13 @@ impl<'a> LayoutBuilder<'a> {
             }
         }
 
-        let node_params_global_base = fields.len() as u32;
         let mut node_base: HashMap<NodeId, u32> = HashMap::new();
-        let mut lod_scale_fields: Vec<u32> = Vec::new();
         let mut ui = 0u32;
         for &id in order.iter().filter(|&&id| needed.contains(&id)) {
             if let Some(node) = self.graph.get_node(id) {
                 node_base.insert(id, ui);
-                let scale_indices = node.op.lod_scale_param_indices();
-                for (param_local_idx, p) in node.params.iter().enumerate() {
-                    if scale_indices.contains(&param_local_idx) {
-                        lod_scale_fields.push(node_params_global_base + ui);
-                    }
+                let scaled = node.op.scale_params_for_lod(&node.params, lod);
+                for p in &scaled {
                     match p {
                         Param::I32(v) => {
                             fields.push((format!("u{ui}"), "int"));
@@ -581,7 +580,6 @@ impl<'a> LayoutBuilder<'a> {
             fields,
             bytes,
             node_base,
-            lod_scale_fields,
         }
     }
 
@@ -700,7 +698,7 @@ struct ShaderTemplate {
     num_temp_bindings: u32,
     targets: Vec<TargetData>,
     src_color_spaces: Vec<ColorSpaceData>,
-    dst_cs: ColorSpaceData,
+    dst_cs: Option<ColorSpaceData>,
     param_fields: Vec<ParamFieldData>,
     entries: Vec<EntryData>,
     wg_dim: u32,
@@ -855,21 +853,22 @@ impl<'a> SlangEmitter<'a> {
         is_histogram_target: bool,
     ) -> String {
         let NodeEval::Kernel(k) = &node.eval;
-        let decoders = node.op.input_decoders(node.inputs.len());
+        let encoders = node.op.input_encoders(node.inputs.len());
         let mut args: Vec<String> = vec!["idx".into()];
         for (slot, &inp) in node.inputs.iter().enumerate() {
-            let decoder = decoders.get(slot).unwrap_or(&Decoder::WorkingSpace);
+            let encoder = encoders.get(slot).unwrap_or(&InputEncoder::WorkingDecodeRegion);
             let name = if let Some(&si) = self.layout.source_pos.get(&inp) {
-                // `_raw_src_{si}` (undecoded `CodecRegion`) vs `region_src_{si}`
-                // (`WorkingDecodeRegion`-wrapped) — both are always declared by
-                // `build_source_vars`; the op's `Decoder` picks which view it reads.
-                match decoder {
-                    Decoder::Passthrough => format!("_raw_src_{si}"),
-                    Decoder::WorkingSpace => format!("region_src_{si}"),
+                // For image sources both `_raw_src_{si}` (CodecRegion) and
+                // `region_src_{si}` (WorkingDecodeRegion) are declared by
+                // `build_source_vars`; the op's InputEncoder picks which one.
+                match encoder {
+                    InputEncoder::CodecRegion => format!("_raw_src_{si}"),
+                    InputEncoder::WorkingDecodeRegion => format!("region_src_{si}"),
+                    InputEncoder::ComplexRegion => format!("complex_src_{si}"),
+                    InputEncoder::MaskRegion => format!("mask_src_{si}"),
                 }
             } else if let Some(tmp) = self.layout.temps.get(&inp) {
-                // Temps only exist for `Image`-kind nodes, which are always
-                // `WorkingSpace` — they hold working-space `float4`, no raw view.
+                // Temps hold working-space float4 — always WorkingDecodeRegion-compatible.
                 format!("region_tmp_{}", tmp.binding)
             } else {
                 "region_src_0".into()
@@ -897,8 +896,9 @@ impl<'a> SlangEmitter<'a> {
         let ti = self.layout.target_pos.get(&id).copied().unwrap_or(0);
         let tname = format!("target_{ti}");
         let region_param = format!("region_target_{ti}");
-        let dst_codec = self.color.dst_format.slang_codec();
-        let dst_ch_layout = self.color.dst_format.slang_layout();
+        let fmt = self.color.dst_format.unwrap_or(PixelFormat::RgbaF32);
+        let dst_codec = fmt.slang_codec();
+        let dst_ch_layout = fmt.slang_layout();
         let mut out = String::new();
         out.push('\n');
         out.push_str("    float4 _packed;\n");
@@ -969,7 +969,7 @@ impl<'a> SlangEmitter<'a> {
             .iter()
             .map(ColorSpaceData::from)
             .collect();
-        let dst_cs = ColorSpaceData::from(&self.color.dst_encoding);
+        let dst_cs = self.color.dst_encoding.as_ref().map(ColorSpaceData::from);
 
         let param_fields: Vec<ParamFieldData> = self
             .layout
@@ -1037,10 +1037,9 @@ impl<'a> SlangEmitter<'a> {
                     ));
                 }
                 body.push_str(&self.build_kernel_call(id, node, is_histogram_target));
-                // The op declares whether its raw result needs the
-                // `from_working` + `codec::encode` wrap or writes straight
-                // through (histogram bins, scalars, raw masks/FFT, …).
-                skip_encode = matches!(node.op.output_encoder(), Encoder::Passthrough);
+                // Skip the from_working + codec::encode step for non-image outputs
+                // (histogram bins, raw masks, FFT, …).
+                skip_encode = !matches!(node.op.output_decoder(), OutputDecoder::WorkingEncodeRegion { .. });
             }
             if !skip_encode {
                 body.push_str(&self.build_output_encode(id, final_target_id));
@@ -1105,6 +1104,7 @@ impl<'a> SlangEmitter<'a> {
             params_bytes: self.layout.params.bytes.clone(),
             entry_points,
             target_output_kinds,
+            dst_format: self.color.dst_format,
         }
     }
 }

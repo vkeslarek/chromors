@@ -115,11 +115,8 @@ impl Graph {
         for p in &node.params {
             fnv(h, &p.to_bytes());
         }
-        // Output codec (color space + format) — distinguishes convert nodes that
-        // differ only by target space. Debug is derived and unambiguous here.
-        if let Some(codec) = node.op.output_codec_override() {
-            fnv(h, format!("{codec:?}").as_bytes());
-        }
+        // Output decoder — distinguishes convert nodes that differ only by target space.
+        fnv(h, format!("{:?}", node.op.output_decoder()).as_bytes());
         fnv(h, format!("{:?}", node.output).as_bytes());
         for &inp in &node.inputs {
             fnv(h, b"|");
@@ -284,26 +281,19 @@ impl Graph {
     /// integer-overflow risk of `(1i32 << lod.0)` for large LOD values.
     pub fn walk_inverse(
         &self,
-        roots: &[(NodeId, crate::geometry::Rect)],
-        lod: super::Lod,
+        roots: &[(NodeId, super::work_unit::WorkUnit)],
+        _lod: super::Lod,
     ) -> HashMap<NodeId, crate::geometry::Rect> {
-        use super::work_unit::WorkUnit;
-
         let mut node_rects: HashMap<NodeId, crate::geometry::Rect> = HashMap::new();
-        let mut pending: Vec<(NodeId, WorkUnit)> = roots
-            .iter()
-            .map(|&(id, r)| (id, WorkUnit::Region(r)))
-            .collect();
+        let mut pending: Vec<(NodeId, super::work_unit::WorkUnit)> = roots.to_vec();
 
         while let Some((node_id, unit)) = pending.pop() {
+            let unit_lod = unit.lod();
             let (iw, ih) = self
-                .sources
-                .first()
-                .map(|s| {
-                    let scale = lod.scale_factor();
-                    let w = (s.source.width() as f64 / scale).ceil() as u32;
-                    let h = (s.source.height() as f64 / scale).ceil() as u32;
-                    (w, h)
+                .source_dimensions(node_id)
+                .map(|(w, h)| {
+                    let scale = unit_lod.scale_factor();
+                    ((w as f64 / scale).ceil() as u32, (h as f64 / scale).ceil() as u32)
                 })
                 .unwrap_or((0, 0));
 
@@ -321,7 +311,7 @@ impl Graph {
                 continue;
             };
 
-            let requests = node.op.input_demands(&unit, iw, ih, lod);
+            let requests = node.op.input_demands(&unit);
             for (input_idx, req_unit) in requests {
                 if let Some(&target) = node.inputs.get(input_idx) {
                     pending.push((target, req_unit));
@@ -340,7 +330,7 @@ impl Graph {
         rect: crate::geometry::Rect,
         lod: super::Lod,
     ) -> crate::geometry::Rect {
-        let node_rects = self.walk_inverse(&[(root_id, rect)], lod);
+        let node_rects = self.walk_inverse(&[(root_id, super::work_unit::WorkUnit::Region { rect, lod })], lod);
         let mut bounding: Option<crate::geometry::Rect> = None;
         for s in &self.sources {
             if let Some(&r) = node_rects.get(&s.id) {

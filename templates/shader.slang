@@ -32,8 +32,10 @@ import lib.io;
     static const Matrix3 src_cs_{{ loop.index0 }}_mat = { {{ cs.mat_row0 }}, {{ cs.mat_row1 }}, {{ cs.mat_row2 }} };
     static const ColorSpace src_cs_{{ loop.index0 }} = { (TransferFn){{ cs.transfer }}u, (AlphaPolicy){{ cs.alpha }}u, (ColorModel){{ cs.model }}u, (ChannelLayout){{ cs.channels }}u, src_cs_{{ loop.index0 }}_mat };
 {%- endfor %}
-    static const Matrix3 dst_cs_mat = { {{ dst_cs.mat_row0 }}, {{ dst_cs.mat_row1 }}, {{ dst_cs.mat_row2 }} };
-    static const ColorSpace dst_cs = { (TransferFn){{ dst_cs.transfer }}u, (AlphaPolicy){{ dst_cs.alpha }}u, (ColorModel){{ dst_cs.model }}u, (ChannelLayout){{ dst_cs.channels }}u, dst_cs_mat };
+{%- if let Some(cs) = dst_cs %}
+    static const Matrix3 dst_cs_mat = { {{ cs.mat_row0 }}, {{ cs.mat_row1 }}, {{ cs.mat_row2 }} };
+    static const ColorSpace dst_cs = { (TransferFn){{ cs.transfer }}u, (AlphaPolicy){{ cs.alpha }}u, (ColorModel){{ cs.model }}u, (ChannelLayout){{ cs.channels }}u, dst_cs_mat };
+{%- endif %}
 
 // ── ChainParams ───────────────────────────────────────────────────────────────
 struct ChainParams {

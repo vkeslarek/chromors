@@ -6,7 +6,7 @@
 //! Architecture:
 //! - **MaterializePipeline**: The entry point that orchestrates typestate transitions.
 //! - **Typestates**: `CachedBatch` -> `PlannedBatch` -> `CompiledBatch` -> `SubmittedBatch`.
-//! - **Capabilities**: `LodParamScaler` trait for scaling LOD fields, `CacheKey` namespace.
+//! - **Capabilities**: `CacheKey` namespace.
 
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::color::space::ColorSpace;
 use crate::geometry::{Rect, merge_overlapping};
-use crate::pixel::PixelFormat;
+use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use super::Lod;
 use super::buffer::{GpuBuffer, ImageBuffer};
@@ -90,42 +90,6 @@ impl CacheKey {
     }
 }
 
-// ── TRAITS & STRATEGIES ───────────────────────────────────────────────────────
-
-pub trait LodParamScaler {
-    fn scale_for_lod(&self, params_bytes: &[u8], lod: Lod) -> Vec<u8>;
-}
-
-impl LodParamScaler for super::emit::LayoutPlan {
-    fn scale_for_lod(&self, params_bytes: &[u8], lod: Lod) -> Vec<u8> {
-        let scale = lod.scale_factor() as f32;
-        let mut out = params_bytes.to_vec();
-
-        let field_byte_offset = |k: u32| -> usize {
-            self.params.fields[..k as usize]
-                .iter()
-                .map(|(_, ty)| {
-                    if *ty == "BufferRegion" {
-                        20usize
-                    } else {
-                        4usize
-                    }
-                })
-                .sum()
-        };
-
-        for &field_idx in &self.params.lod_scale_fields {
-            let offset = field_byte_offset(field_idx);
-            if offset + 4 <= out.len() {
-                let bytes: [u8; 4] = out[offset..offset + 4].try_into().unwrap_or_default();
-                let v = f32::from_le_bytes(bytes);
-                out[offset..offset + 4].copy_from_slice(&(v / scale).to_le_bytes());
-            }
-        }
-        out
-    }
-}
-
 // ── CORE DATA STRUCTURES ──────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
@@ -150,54 +114,30 @@ pub struct BufferRegion {
     pub height: u32,
 }
 
-/// Image-specific fields extracted from the materialization plan.
-///
-/// Only present when the plan targets image nodes. Non-image materializations
-/// (histograms, scalars, …) do not carry color-space or pixel-format info.
-#[derive(Debug, Clone)]
-pub struct ImagePlan {
-    pub src_color_space: ColorSpace,
-    pub dst_color_space: ColorSpace,
-    pub dst_format: PixelFormat,
-}
-
 #[derive(Debug)]
 pub struct MaterializePlan {
     pub sources: Vec<NodeId>,
     pub targets: Vec<BufferTarget>,
     pub source_fetches: Vec<(NodeId, Vec<(Rect, BufferRegion)>)>,
     pub node_outputs: Vec<(NodeId, Rect)>,
-    /// Present only for image-producing plans. Non-image materializations leave
-    /// this `None`.
-    pub image: Option<ImagePlan>,
 }
 
 // ── GRAPH MATERIALIZATION ─────────────────────────────────────────────────────
 
 impl Graph {
-    /// Build a materialization plan for the given `(node_id, output_rect)` targets.
-    pub fn materialize(&self, targets_info: &[(NodeId, Rect)], lod: Lod) -> MaterializePlan {
+    /// Build a materialization plan for the given `(node_id, WorkUnit)` targets.
+    pub fn materialize(&self, targets_info: &[(NodeId, super::work_unit::WorkUnit)], lod: Lod) -> MaterializePlan {
         let node_rects = self.walk_inverse(targets_info, lod);
         let sources = self.filter_reachable_sources(&node_rects);
         let source_fetches = self.build_source_fetches(&sources, &node_rects, lod);
         let node_outputs = self.sort_node_outputs(&node_rects);
-        let targets = self.build_targets(targets_info);
-
-        let src_cs = self.get_source_color_space();
-        let (dst_cs, dst_fmt) = self
-            .get_destination_codec()
-            .unwrap_or((src_cs, PixelFormat::RgbaF32));
+        let targets = self.build_targets(targets_info, &node_rects);
 
         MaterializePlan {
             sources,
             targets,
             source_fetches,
             node_outputs,
-            image: Some(ImagePlan {
-                src_color_space: src_cs,
-                dst_color_space: dst_cs,
-                dst_format: dst_fmt,
-            }),
         }
     }
 
@@ -269,31 +209,20 @@ impl Graph {
         node_outputs
     }
 
-    fn build_targets(&self, targets_info: &[(NodeId, Rect)]) -> Vec<BufferTarget> {
+    fn build_targets(
+        &self,
+        targets_info: &[(NodeId, super::work_unit::WorkUnit)],
+        node_rects: &HashMap<NodeId, Rect>,
+    ) -> Vec<BufferTarget> {
         targets_info
             .iter()
-            .map(|&(node_id, rect)| BufferTarget {
-                node_id,
-                rect,
-                buffer: None,
+            .map(|(node_id, _)| {
+                let rect = node_rects.get(node_id).copied().unwrap_or(Rect::new(0, 0, 0, 0));
+                BufferTarget { node_id: *node_id, rect, buffer: None }
             })
             .collect()
     }
 
-    fn get_source_color_space(&self) -> ColorSpace {
-        self.sources
-            .first()
-            .map(|s| s.source.color_space())
-            .unwrap_or(ColorSpace::SRGB)
-    }
-
-    fn get_destination_codec(&self) -> Option<(ColorSpace, PixelFormat)> {
-        self.topo_order().iter().rev().find_map(|&id| {
-            self.get_node(id)
-                .and_then(|n| n.op.output_codec_override())
-                .map(|c| (c.color_space, c.format))
-        })
-    }
 }
 
 // ── TYPESTATE PIPELINE STRUCTS ────────────────────────────────────────────────
@@ -308,27 +237,28 @@ struct PlannedJob {
     layout: super::emit::LayoutPlan,
     value_kind: ValueKind,
     source_fetch_rects: HashMap<NodeId, Rect>,
+    target_meta: Option<PixelMeta>,
 }
 
 struct CompiledJob {
     i: usize,
     rect: Rect,
     key: RegionKey,
-    plan: MaterializePlan,
     sources_snapshot: Vec<(NodeId, Arc<super::source::GpuSource>)>,
     value_kind: ValueKind,
     compiled: super::compile::DispatchPass,
     fetched_buffers: Vec<Arc<ImageBuffer>>,
     params_bytes: Vec<u8>,
+    target_meta: Option<PixelMeta>,
 }
 
 struct SubmittedJob {
     i: usize,
     rect: Rect,
     key: RegionKey,
-    plan: MaterializePlan,
     value_kind: ValueKind,
     out_bufs: Vec<wgpu::Buffer>,
+    target_meta: Option<PixelMeta>,
 }
 
 // ── PIPELINE STATE INITIAL ──
@@ -417,8 +347,8 @@ impl<'a> CachedBatch<'a> {
             .map_err(|_| MaterializeError::LockPoisoned)?;
 
         for &(i, rect, key) in &self.uncached {
-            let plan = graph.materialize(&[(self.region.node_id, rect)], self.region.lod);
-            let (ir, layout) = plan.emit_ir_with_layout(&graph, self.region.ctx.wg_dim);
+            let plan = graph.materialize(&[(self.region.node_id, super::work_unit::WorkUnit::Region { rect, lod: self.region.lod })], self.region.lod);
+            let (ir, layout) = plan.emit_ir_with_layout(&graph, self.region.ctx.wg_dim, self.region.lod);
 
             let limit = self.region.ctx.max_storage_buffers as usize;
             let g0 = ir.source_count + 1;
@@ -458,6 +388,28 @@ impl<'a> CachedBatch<'a> {
                 .map(|n| n.output.clone())
                 .unwrap_or(ValueKind::Image);
 
+            let target_meta = {
+                use super::op::OutputDecoder;
+                match graph
+                    .get_node(self.region.node_id)
+                    .map(|n| n.op.output_decoder())
+                    .unwrap_or(OutputDecoder::WorkingEncodeRegion { codec: None })
+                {
+                    OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => {
+                        Some(PixelMeta::new(c.format, c.color_space, AlphaPolicy::Straight))
+                    }
+                    OutputDecoder::WorkingEncodeRegion { codec: None } => {
+                        let src_cs = graph
+                            .sources
+                            .first()
+                            .map(|s| s.source.color_space())
+                            .unwrap_or(ColorSpace::SRGB);
+                        Some(PixelMeta::new(PixelFormat::RgbaF32, src_cs, AlphaPolicy::Straight))
+                    }
+                    _ => None,
+                }
+            };
+
             let sources_snapshot: Vec<_> = topo
                 .iter()
                 .filter_map(|&id| graph.get_source(id).map(|s| (id, s.source.clone())))
@@ -479,6 +431,7 @@ impl<'a> CachedBatch<'a> {
                 layout,
                 value_kind,
                 source_fetch_rects,
+                target_meta,
             });
         }
 
@@ -646,12 +599,7 @@ impl<'a> PlannedBatch<'a> {
             .jobs
             .into_par_iter()
             .map(|job| {
-                let params_bytes = if self.region.lod.0 > 0 {
-                    job.layout
-                        .scale_for_lod(&job.ir.params_bytes, self.region.lod)
-                } else {
-                    job.ir.params_bytes.clone()
-                };
+                let params_bytes = job.ir.params_bytes.clone();
 
                 let (compiled_res, fetched_res) = rayon::join(
                     || {
@@ -727,12 +675,12 @@ impl<'a> PlannedBatch<'a> {
                     i: job.i,
                     rect: job.rect,
                     key: job.key,
-                    plan: job.plan,
                     sources_snapshot: job.sources_snapshot,
                     value_kind: job.value_kind,
                     compiled: compiled_res?,
                     fetched_buffers: fetched_res?,
                     params_bytes,
+                    target_meta: job.target_meta,
                 })
             })
             .collect();
@@ -803,9 +751,9 @@ impl<'a> CompiledBatch<'a> {
                 i: job.i,
                 rect: job.rect,
                 key: job.key,
-                plan: job.plan,
                 value_kind: job.value_kind,
                 out_bufs,
+                target_meta: job.target_meta,
             });
         }
 
@@ -842,18 +790,10 @@ impl<'a> SubmittedBatch<'a> {
                 .out_bufs
                 .pop()
                 .expect("Encode should have produced at least one buffer");
-            let img = job.plan.image.as_ref();
-            let target_meta = img.map(|p| {
-                crate::pixel::PixelMeta::new(
-                    p.dst_format,
-                    p.dst_color_space,
-                    crate::pixel::AlphaPolicy::Straight,
-                )
-            });
 
             let out = match &job.value_kind {
                 ValueKind::Image => {
-                    let meta = target_meta.expect("ImagePlan required for Image output");
+                    let meta = job.target_meta.expect("target_meta required for Image output");
                     let img_buf = ImageBuffer::from_raw(
                         Arc::new(buf),
                         job.rect.width as u32,

@@ -1,21 +1,16 @@
-use crate::backend::gpu::gpu_data::{HistogramData, ImageData};
 use crate::backend::gpu::graph::{Graph, NodeId};
 use crate::backend::gpu::op::GpuOperation;
-use crate::backend::gpu::op::MaterializePlan;
 use crate::backend::gpu::op::emit_unary;
 use crate::backend::gpu::param::Param;
 use crate::backend::gpu::value::ValueKind;
-use crate::backend::gpu::work_unit::{Atomic, Region, WorkUnit};
-use crate::geometry::Rect;
+use crate::backend::gpu::work_unit::WorkUnit;
 use std::sync::Arc;
 
 use super::Direction;
-use crate::backend::gpu::op::OutputSpec;
 use crate::backend::vips::IntoVipsEnum;
 use crate::backend::vips::gobject::Runner;
 use crate::backend::vips::gobject::VipsGObject;
 use crate::backend::vips::operation::VipsOperation;
-use crate::data::histogram::HistogramResult;
 use crate::error::Error;
 use crate::libvips_ffi as ffi;
 
@@ -592,69 +587,6 @@ pub struct HistogramOp {
     pub channel: u32,
 }
 
-pub struct HistogramHandle {
-    pub node: crate::backend::gpu::GraphNodeHandle,
-    pub width: u32,
-    pub height: u32,
-}
-
-impl HistogramHandle {
-    pub fn materialize(&self) -> Result<HistogramResult, crate::error::Error> {
-        self.materialize_at_lod(crate::backend::gpu::Lod::FULL)
-    }
-
-    pub fn materialize_at_lod(
-        &self,
-        lod: crate::backend::gpu::Lod,
-    ) -> Result<HistogramResult, crate::error::Error> {
-        let region = crate::backend::gpu::region::GpuRegion::new(
-            self.node.graph.clone(),
-            self.node.ctx.cache.clone(),
-            self.node.root_id,
-            self.node.ctx.clone(),
-            lod,
-        );
-        let scale = 1.0 / lod.scale_factor();
-        let w = (self.width as f64 * scale).ceil() as i32;
-        let h = (self.height as f64 * scale).ceil() as i32;
-        region.prepare(Rect::new(0, 0, w, h));
-        let mat = region
-            .materialize()
-            .map_err(|e| crate::Error::Gpu(format!("{:?}", e)))?;
-        match &*mat {
-            crate::backend::gpu::GraphValue::Raw { bytes, .. } => {
-                Ok(HistogramResult::from_bytes(bytes))
-            }
-            _ => Err(crate::Error::Gpu("expected raw bytes for histogram".into())),
-        }
-    }
-}
-
-impl HistogramOp {
-    /// Compute a histogram from `image`. Returns a `HistogramHandle` for lazy
-    /// materialization.
-    pub fn apply(
-        &self,
-        image: &crate::data::image::Image<crate::backend::gpu::GpuBackend>,
-    ) -> Result<HistogramHandle, crate::error::Error> {
-        let handle = &image.handle;
-        let self_arc: Arc<dyn GpuOperation> = Arc::new(self.clone());
-        let node_id = {
-            let mut graph = handle.node.graph.lock().unwrap();
-            self.emit(handle.node.root_id, &mut graph, self_arc)
-        };
-        Ok(HistogramHandle {
-            node: crate::backend::gpu::GraphNodeHandle {
-                graph: handle.node.graph.clone(),
-                root_id: node_id,
-                ctx: handle.node.ctx.clone(),
-            },
-            width: handle.width,
-            height: handle.height,
-        })
-    }
-}
-
 impl GpuOperation for HistogramOp {
     fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
         emit_unary(
@@ -668,46 +600,24 @@ impl GpuOperation for HistogramOp {
         )
     }
 
-    fn output_spec(&self, _w: u32, _h: u32) -> OutputSpec {
-        OutputSpec::Histogram { bins: self.bins }
+    fn output_kind(&self, _input_w: u32, _input_h: u32) -> ValueKind {
+        ValueKind::Histogram { bins: self.bins }
     }
 
-    fn input_demands(
-        &self,
-        out: &WorkUnit,
-        w: u32,
-        h: u32,
-        lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, WorkUnit)> {
-        use crate::backend::gpu::work_unit::AnyWorkUnit;
-        MaterializePlan::<HistogramData>::plan(
-            self,
-            Atomic::from_work_unit(out).unwrap_or(Atomic),
-            w,
-            h,
-            lod,
-        )
+    fn output_dims(&self, _input_w: u32, _input_h: u32) -> Option<(u32, u32)> {
+        None
     }
 
-    fn output_encoder(&self) -> crate::backend::gpu::op::Encoder {
-        // Raw u32 atomic bin counters — no color encode, write straight through.
-        crate::backend::gpu::op::Encoder::Passthrough
+    fn input_demands(&self, _wu: &WorkUnit) -> Vec<(usize, WorkUnit)> {
+        vec![(0, WorkUnit::Atomic)]
+    }
+
+    fn output_decoder(&self) -> crate::backend::gpu::op::OutputDecoder {
+        crate::backend::gpu::op::OutputDecoder::HistogramOut
     }
 
     fn dispatch_grid(&self) -> crate::backend::gpu::op::DispatchGrid {
-        // Scans the input image to fold pixels into bins — the thread grid
-        // must cover the source pixels, not the `bins`-shaped output.
         crate::backend::gpu::op::DispatchGrid::Input(0)
-    }
-}
-
-impl MaterializePlan<HistogramData> for HistogramOp {
-    fn plan(&self, _request: Atomic, w: u32, h: u32, lod: crate::backend::gpu::Lod) -> Vec<(usize, WorkUnit)> {
-        let s = lod.scale_factor();
-        let full = Rect::new(0, 0, (w as f64 / s).ceil() as i32, (h as f64 / s).ceil() as i32);
-        // Histogram scans its full image input regardless of output demand.
-        // The input's natural WU is Region — we request the full bounds.
-        vec![(0, WorkUnit::Region(full))]
     }
 }
 
@@ -721,68 +631,6 @@ impl MaterializePlan<HistogramData> for HistogramOp {
 #[derive(Clone, Debug)]
 pub struct VectorscopeOp {
     pub grid_size: u32,
-}
-
-pub struct VectorscopeHandle {
-    pub node: crate::backend::gpu::GraphNodeHandle,
-    pub width: u32,
-    pub height: u32,
-    pub grid_size: u32,
-}
-
-impl VectorscopeHandle {
-    pub fn materialize_at_lod(
-        &self,
-        lod: crate::backend::gpu::Lod,
-    ) -> Result<Vec<u32>, crate::error::Error> {
-        let region = crate::backend::gpu::region::GpuRegion::new(
-            self.node.graph.clone(),
-            self.node.ctx.cache.clone(),
-            self.node.root_id,
-            self.node.ctx.clone(),
-            lod,
-        );
-        let scale = 1.0 / lod.scale_factor();
-        let w = (self.width as f64 * scale).ceil() as i32;
-        let h = (self.height as f64 * scale).ceil() as i32;
-        region.prepare(Rect::new(0, 0, w, h));
-        let mat = region
-            .materialize()
-            .map_err(|e| crate::Error::Gpu(format!("{:?}", e)))?;
-        match &*mat {
-            crate::backend::gpu::GraphValue::Raw { bytes, .. } => Ok(bytes
-                .chunks_exact(4)
-                .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                .collect()),
-            _ => Err(crate::Error::Gpu(
-                "expected raw bytes for vectorscope".into(),
-            )),
-        }
-    }
-}
-
-impl VectorscopeOp {
-    pub fn apply(
-        &self,
-        image: &crate::data::image::Image<crate::backend::gpu::GpuBackend>,
-    ) -> Result<VectorscopeHandle, crate::error::Error> {
-        let handle = &image.handle;
-        let self_arc: Arc<dyn GpuOperation> = Arc::new(self.clone());
-        let node_id = {
-            let mut graph = handle.node.graph.lock().unwrap();
-            self.emit(handle.node.root_id, &mut graph, self_arc)
-        };
-        Ok(VectorscopeHandle {
-            node: crate::backend::gpu::GraphNodeHandle {
-                graph: handle.node.graph.clone(),
-                root_id: node_id,
-                ctx: handle.node.ctx.clone(),
-            },
-            width: handle.width,
-            height: handle.height,
-            grid_size: self.grid_size,
-        })
-    }
 }
 
 impl GpuOperation for VectorscopeOp {
@@ -800,45 +648,23 @@ impl GpuOperation for VectorscopeOp {
         )
     }
 
-    fn output_spec(&self, _w: u32, _h: u32) -> OutputSpec {
-        OutputSpec::Histogram {
-            bins: self.grid_size * self.grid_size,
-        }
+    fn output_kind(&self, _input_w: u32, _input_h: u32) -> ValueKind {
+        ValueKind::Histogram { bins: self.grid_size * self.grid_size }
     }
 
-    fn input_demands(
-        &self,
-        out: &WorkUnit,
-        w: u32,
-        h: u32,
-        lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, WorkUnit)> {
-        use crate::backend::gpu::work_unit::AnyWorkUnit;
-        MaterializePlan::<HistogramData>::plan(
-            self,
-            Atomic::from_work_unit(out).unwrap_or(Atomic),
-            w,
-            h,
-            lod,
-        )
+    fn output_dims(&self, _input_w: u32, _input_h: u32) -> Option<(u32, u32)> {
+        None
     }
 
-    fn output_encoder(&self) -> crate::backend::gpu::op::Encoder {
-        // Raw u32 grid bins — no color encode, write straight through.
-        crate::backend::gpu::op::Encoder::Passthrough
+    fn input_demands(&self, _wu: &WorkUnit) -> Vec<(usize, WorkUnit)> {
+        vec![(0, WorkUnit::Atomic)]
+    }
+
+    fn output_decoder(&self) -> crate::backend::gpu::op::OutputDecoder {
+        crate::backend::gpu::op::OutputDecoder::HistogramOut
     }
 
     fn dispatch_grid(&self) -> crate::backend::gpu::op::DispatchGrid {
-        // Scans the input image to plot Cb/Cr density — same as histogram.
         crate::backend::gpu::op::DispatchGrid::Input(0)
-    }
-}
-
-impl MaterializePlan<HistogramData> for VectorscopeOp {
-    fn plan(&self, _request: Atomic, w: u32, h: u32, lod: crate::backend::gpu::Lod) -> Vec<(usize, WorkUnit)> {
-        let s = lod.scale_factor();
-        let full = Rect::new(0, 0, (w as f64 / s).ceil() as i32, (h as f64 / s).ceil() as i32);
-        // Vectorscope scans the entire input image to plot Cb/Cr density.
-        vec![(0, WorkUnit::Region(full))]
     }
 }

@@ -10,7 +10,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::Lod;
 use super::graph::{Graph, NodeId};
-use super::source::AnyGpuSource;
 use crate::geometry::Rect;
 
 /// The set of nodes that must be pre-materialised before the main pass.
@@ -131,14 +130,16 @@ impl<'a> CutFinder<'a> {
 
             expanded.insert(nid);
 
-            let requests = node.op.inverse_map(rect, iw, ih, self.lod);
-            for (idx, req_rect) in requests {
+            let wu = super::work_unit::WorkUnit::Region { rect, lod: self.lod };
+            let requests = node.op.input_demands(&wu);
+            for (idx, req_unit) in requests {
                 let Some(&child_id) = node.inputs.get(idx) else {
                     continue;
                 };
                 if self.graph.get_source(child_id).is_some() && !expanded.contains(&child_id) {
                     included_sources.insert(child_id);
                 }
+                let req_rect = req_unit.resolve(iw, ih);
                 stack.push((child_id, req_rect));
             }
         }
@@ -168,13 +169,10 @@ impl<'a> CutFinder<'a> {
 
     fn source_dims(&self) -> (u32, u32) {
         self.graph
-            .sources
-            .first()
-            .map(|s| {
+            .source_dimensions(self.root_id)
+            .map(|(w, h)| {
                 let scale = self.lod.scale_factor();
-                let w = (s.source.width() as f64 / scale).ceil() as u32;
-                let h = (s.source.height() as f64 / scale).ceil() as u32;
-                (w, h)
+                ((w as f64 / scale).ceil() as u32, (h as f64 / scale).ceil() as u32)
             })
             .unwrap_or((0, 0))
     }

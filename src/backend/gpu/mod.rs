@@ -11,7 +11,6 @@ pub mod compile;
 pub mod context;
 pub mod data;
 pub mod emit;
-pub mod gpu_data;
 pub mod graph;
 pub mod handle;
 pub mod materialize;
@@ -36,11 +35,10 @@ pub use context::RegionCache;
 pub use graph::NodeEval;
 pub use graph::{Graph, GraphNode, KernelSpec, NodeId, SourceNode};
 pub use handle::{GpuImageHandle, GraphNodeHandle, Lod};
-pub use gpu_data::{
-    FeatureMapData, Fft1DData, Fft2DData, GpuData, HistogramData, ImageData, Mask1DData,
-    Mask2DData, PointListData, ScalarData,
+pub use data::{
+    Fft1dData, Fft2dData, GpuData, HistogramData, ImageData, Mask1dData, Mask2dData,
 };
-pub use op::{Decoder, DispatchGrid, Encoder, GpuOperation, MaterializePlan, OutputSpec};
+pub use op::{DispatchGrid, GpuOperation, InputEncoder, OutputDecoder, OutputCodec};
 pub use work_unit::{AnyWorkUnit, Atomic, Range, Region, WorkUnit};
 pub use source::{AnyGpuSource, GpuSource};
 pub use target::GpuTarget;

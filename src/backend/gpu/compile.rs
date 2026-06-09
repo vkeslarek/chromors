@@ -131,7 +131,7 @@ impl DispatchPass {
             .map(|t| (t.rect.width as u32, t.rect.height as u32))
             .collect();
 
-        let (temp_bufs, out_bufs) = Self::allocate_buffers(ctx, plan, &ir, &target_rects);
+        let (temp_bufs, out_bufs) = Self::allocate_buffers(ctx, &ir, &target_rects);
         let params_gpu = Self::create_params_buffer(ctx, &ir.params_bytes);
 
         Ok(DispatchPass {
@@ -330,7 +330,6 @@ impl DispatchPass {
 
     fn allocate_buffers(
         ctx: &GpuContext,
-        plan: &MaterializePlan,
         ir: &EmittedIr,
         target_rects: &[(u32, u32)],
     ) -> (Vec<wgpu::Buffer>, Vec<wgpu::Buffer>) {
@@ -348,11 +347,7 @@ impl DispatchPass {
             .enumerate()
             .map(|(i, &(tw, th))| {
                 let kind = ir.target_output_kinds.get(i).unwrap_or(&ValueKind::Image);
-                let fmt = plan
-                    .image
-                    .as_ref()
-                    .map(|p| p.dst_format)
-                    .unwrap_or(PixelFormat::RgbaF32);
+                let fmt = ir.dst_format.unwrap_or(PixelFormat::RgbaF32);
                 let sz = kind.output_byte_size(tw, th, fmt);
                 ctx.arena.allocate(
                     &ctx.device,
