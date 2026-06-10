@@ -1,6 +1,6 @@
 use crate::backend::{Backend, HistogramTargetCapability, ImageTargetCapability};
 use crate::data::histogram::Histogram;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::geometry::Rect;
 use crate::pixel::PixelMeta;
@@ -27,17 +27,17 @@ pub struct MaterializedHistogram<B: Backend> {
 
 /// A logical output sink for 2D Images.
 ///
-/// Use this target to force the evaluation of an `Image` graph and
+/// Use this target to force the evaluation of an `Image2D` graph and
 /// extract a concrete pixel buffer.
 pub struct ImageTarget<B: Backend> {
-    image: Image<B>,
+    image: Image2D<B>,
 }
 
 impl<B: Backend> ImageTarget<B>
 where
     B: ImageTargetCapability,
 {
-    pub fn new(image: Image<B>) -> Self {
+    pub fn new(image: Image2D<B>) -> Self {
         Self { image }
     }
 

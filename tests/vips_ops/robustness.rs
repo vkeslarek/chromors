@@ -7,7 +7,7 @@
 
 use crate::common::{init, rgb};
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::*;
 
 /// Call an expression and discard its `Result` — we only care that it returned.
@@ -112,8 +112,8 @@ fn filter_absurd_params() {
     }
     // Convolution with an empty / 1×1 / huge mask.
     for mask in [
-        Image::<VipsBackend>::from_memory(&[0u8], 1, 1, 1, PixelFormat::Gray8),
-        Image::<VipsBackend>::from_memory(&[], 0, 0, 1, PixelFormat::Gray8),
+        Image2D::<VipsBackend>::from_memory(&[0u8], 1, 1, 1, PixelFormat::Gray8),
+        Image2D::<VipsBackend>::from_memory(&[], 0, 0, 1, PixelFormat::Gray8),
     ]
     .into_iter()
     .flatten()
@@ -194,33 +194,33 @@ fn band_and_cast_absurd_params() {
 fn io_absurd_inputs() {
     init();
     // Decode garbage / empty buffers.
-    safe!(Image::<VipsBackend>::from_buffer(&[]));
-    safe!(Image::<VipsBackend>::from_buffer(&[
+    safe!(Image2D::<VipsBackend>::from_buffer(&[]));
+    safe!(Image2D::<VipsBackend>::from_buffer(&[
         0xFF, 0xD8, 0xFF, 0x00, 0x01, 0x02
     ])); // truncated JPEG header
-    safe!(Image::<VipsBackend>::from_buffer(&vec![0u8; 4096]));
+    safe!(Image2D::<VipsBackend>::from_buffer(&vec![0u8; 4096]));
     // Open a non-existent / non-image file.
-    safe!(Image::<VipsBackend>::open(
+    safe!(Image2D::<VipsBackend>::open(
         "tests/fixtures/does_not_exist.jpg"
     ));
-    safe!(Image::<VipsBackend>::open("tests/common/mod.rs"));
+    safe!(Image2D::<VipsBackend>::open("tests/common/mod.rs"));
     // from_memory with mismatched / zero / huge dims.
     let buf = vec![0u8; 12];
-    safe!(Image::<VipsBackend>::from_memory(
+    safe!(Image2D::<VipsBackend>::from_memory(
         &buf,
         -1,
         -1,
         3,
         PixelFormat::Rgb8
     ));
-    safe!(Image::<VipsBackend>::from_memory(
+    safe!(Image2D::<VipsBackend>::from_memory(
         &buf,
         100000,
         100000,
         4,
         PixelFormat::Rgba8
     ));
-    safe!(Image::<VipsBackend>::from_memory(
+    safe!(Image2D::<VipsBackend>::from_memory(
         &[],
         0,
         0,
@@ -237,7 +237,7 @@ fn generator_absurd_params() {
     init();
     // Masks with zero / negative dims and degenerate cutoffs.
     for (w, h) in [(0, 0), (-8, -8), (1, 1)] {
-        safe!(Image::<VipsBackend>::generate(&MaskIdeal {
+        safe!(Image2D::<VipsBackend>::generate(&MaskIdeal {
             width: w,
             height: h,
             frequency_cutoff: -1.0,
@@ -246,7 +246,7 @@ fn generator_absurd_params() {
             reject: None,
             optical: None,
         }));
-        safe!(Image::<VipsBackend>::generate(&MaskGaussian {
+        safe!(Image2D::<VipsBackend>::generate(&MaskGaussian {
             width: w,
             height: h,
             frequency_cutoff: f64::NAN,
@@ -263,18 +263,18 @@ fn generator_absurd_params() {
 fn thumbnail_absurd_params() {
     init();
     for size in [0, -10, 1000000] {
-        safe!(Image::<VipsBackend>::thumbnail(
+        safe!(Image2D::<VipsBackend>::thumbnail(
             "tests/fixtures/rgb.jpg",
             size,
             &ThumbnailParams::default()
         ));
     }
-    safe!(Image::<VipsBackend>::thumbnail(
+    safe!(Image2D::<VipsBackend>::thumbnail(
         "tests/fixtures/does_not_exist.jpg",
         64,
         &ThumbnailParams::default()
     ));
-    safe!(Image::<VipsBackend>::thumbnail_buffer(
+    safe!(Image2D::<VipsBackend>::thumbnail_buffer(
         &[],
         64,
         &ThumbnailParams::default()

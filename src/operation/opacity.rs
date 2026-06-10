@@ -1,6 +1,7 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
 use std::sync::Arc;
 
@@ -13,12 +14,14 @@ pub struct OpacityOperation {
     pub amount: f32,
 }
 
-impl Operation<crate::data::image::Image<crate::backend::vips::VipsBackend>> for OpacityOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+impl Operation<crate::data::image::Image2D<crate::backend::vips::VipsBackend>>
+    for OpacityOperation
+{
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
 
     fn execute(
         &self,
-        img: &crate::data::image::Image<crate::backend::vips::VipsBackend>,
+        img: &crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     ) -> Result<Self::Output, Error> {
         if !img.has_alpha() {
             let max_val =
@@ -78,14 +81,24 @@ impl Operation<crate::data::image::Image<crate::backend::vips::VipsBackend>> for
         if ret != 0 {
             return Err(Error::Vips(crate::backend::vips::vips_error()));
         }
-        Ok(crate::data::image::Image::from_vips_ptr(out))
+        Ok(crate::data::image::Image2D::from_vips_ptr(out))
     }
 }
 
 // ── OpacityOperation ──────────────────────────────────────────────────────────
 
+impl TypedOperation for OpacityOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for OpacityOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,

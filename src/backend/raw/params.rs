@@ -161,8 +161,8 @@ pub enum ImageFormat {
 /// All decode-time parameters for `RawBackend`.
 ///
 /// These map 1-to-1 to `libraw_output_params_t` and `libraw_raw_unpack_params_t`.
-/// After calling `Image::open`, modify params through operations or directly, then
-/// call `Image::materialize()` to run the demosaic pipeline.
+/// After calling `Image2D::open`, modify params through operations or directly, then
+/// call `Image2D::materialize()` to run the demosaic pipeline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawDecodeParams {
     // ── Output format ──────────────────────────────────────────────────────

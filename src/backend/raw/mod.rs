@@ -5,7 +5,7 @@ mod params;
 use std::sync::Arc;
 
 use crate::backend::{Backend, OpenBuffer, OpenFile, Operation};
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::operation::raw::RawOperation;
 use crate::pixel::PixelFormat;
@@ -45,18 +45,18 @@ impl OpenBuffer for RawBackend {
 
 // ── Operations (via RawOperation blanket impl) ─────────────────────────────────
 
-impl<Op: RawOperation> Operation<Image<RawBackend>> for Op {
-    type Output = Image<RawBackend>;
+impl<Op: RawOperation> Operation<Image2D<RawBackend>> for Op {
+    type Output = Image2D<RawBackend>;
 
     /// Clone the image, update decode params, invalidate cached pixels.
     ///
-    /// Does NOT run demosaic — call `Image::materialize()` when pixel data is
+    /// Does NOT run demosaic — call `Image2D::materialize()` when pixel data is
     /// needed.
-    fn execute(&self, input: &Image<RawBackend>) -> Result<Image<RawBackend>, Error> {
+    fn execute(&self, input: &Image2D<RawBackend>) -> Result<Image2D<RawBackend>, Error> {
         let mut new_handle = input.handle.clone();
         new_handle.pixels = None;
         self.apply_to_params(&mut new_handle.params);
-        Ok(Image::from_handle(new_handle))
+        Ok(Image2D::from_handle(new_handle))
     }
 }
 
@@ -69,7 +69,7 @@ impl RawFrame {
     /// params that were active at materialize time.  For linear output, a
     /// `pixors-cs` metadata int is set so the GPU pipeline uses the correct
     /// primary matrix.
-    pub fn to_vips_image(&self) -> Result<Image<crate::backend::vips::VipsBackend>, Error> {
+    pub fn to_vips_image(&self) -> Result<Image2D<crate::backend::vips::VipsBackend>, Error> {
         use crate::color::primaries::{RgbPrimaries, WhitePoint};
         use crate::color::space::ColorSpace as CS;
 
@@ -92,11 +92,11 @@ impl RawFrame {
                 .flat_map(|p| &p[..dst_bpp])
                 .copied()
                 .collect();
-            Image::<crate::backend::vips::VipsBackend>::from_memory(
+            Image2D::<crate::backend::vips::VipsBackend>::from_memory(
                 &rgb, w as i32, h as i32, 3, fmt,
             )?
         } else {
-            Image::<crate::backend::vips::VipsBackend>::from_memory(
+            Image2D::<crate::backend::vips::VipsBackend>::from_memory(
                 data,
                 w as i32,
                 h as i32,
@@ -143,9 +143,9 @@ impl RawFrame {
     }
 }
 
-// ── Image<RawBackend> API ──────────────────────────────────────────────────────
+// ── Image2D<RawBackend> API ──────────────────────────────────────────────────────
 
-impl Image<RawBackend> {
+impl Image2D<RawBackend> {
     // ── Constructors ─────────────────────────────────────────────────────────
 
     /// Open a RAW file with custom decode parameters.
@@ -153,13 +153,17 @@ impl Image<RawBackend> {
     /// Does NOT run demosaic — call `materialize()` to decode pixel data.
     pub fn open_with(path: &str, params: RawDecodeParams) -> Result<Self, Error> {
         let source = Arc::new(handle::RawSource::File(path.to_owned()));
-        Ok(Image::from_handle(decode::open_raw_source(source, params)?))
+        Ok(Image2D::from_handle(decode::open_raw_source(
+            source, params,
+        )?))
     }
 
     /// Decode a RAW file from an in-memory buffer with custom parameters.
     pub fn from_buffer_with(data: &[u8], params: RawDecodeParams) -> Result<Self, Error> {
         let source = Arc::new(handle::RawSource::Buffer(Arc::new(data.to_vec())));
-        Ok(Image::from_handle(decode::open_raw_source(source, params)?))
+        Ok(Image2D::from_handle(decode::open_raw_source(
+            source, params,
+        )?))
     }
 
     // ── Operations ───────────────────────────────────────────────────────────
@@ -168,7 +172,7 @@ impl Image<RawBackend> {
     ///
     /// Lazy: returns a new image with updated params. Call `materialize()` to
     /// re-decode with the new settings.
-    pub fn execute<O: Operation<Image<RawBackend>>>(&self, op: &O) -> Result<O::Output, Error> {
+    pub fn execute<O: Operation<Image2D<RawBackend>>>(&self, op: &O) -> Result<O::Output, Error> {
         op.execute(self)
     }
 
@@ -180,7 +184,7 @@ impl Image<RawBackend> {
         handle.pixels = None;
         handle.params.output_color = space;
         handle.params.output_bps = bps;
-        Image::from_handle(handle)
+        Image2D::from_handle(handle)
     }
 
     // ── Materialize (lazy decode) ─────────────────────────────────────────────
@@ -394,7 +398,7 @@ impl Image<RawBackend> {
     ///
     /// Calls `materialize()` if not done yet, then delegates to
     /// `RawFrame::to_vips_image()`.
-    pub fn to_vips_image(&mut self) -> Result<Image<crate::backend::vips::VipsBackend>, Error> {
+    pub fn to_vips_image(&mut self) -> Result<Image2D<crate::backend::vips::VipsBackend>, Error> {
         self.materialize()?.to_vips_image()
     }
 
@@ -403,7 +407,7 @@ impl Image<RawBackend> {
     /// Returns `None` if no JPEG thumbnail is present in the file.
     pub fn to_thumbnail_image(
         &self,
-    ) -> Result<Option<Image<crate::backend::vips::VipsBackend>>, Error> {
+    ) -> Result<Option<Image2D<crate::backend::vips::VipsBackend>>, Error> {
         let thumb = match &self.handle.thumb {
             Some(t) => t,
             None => return Ok(None),
@@ -415,7 +419,7 @@ impl Image<RawBackend> {
             )
         };
         Ok(Some(
-            Image::<crate::backend::vips::VipsBackend>::from_buffer(data)?,
+            Image2D::<crate::backend::vips::VipsBackend>::from_buffer(data)?,
         ))
     }
 

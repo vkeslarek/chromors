@@ -1,11 +1,11 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
 use crate::geometry::Rect;
 use std::sync::Arc;
 
-use crate::backend::gpu::op::OutputSpec;
 use crate::backend::vips::IntoVipsEnum;
 use crate::backend::vips::gobject::VipsGObject;
 use crate::backend::vips::operation::VipsOperation;
@@ -126,7 +126,7 @@ pub struct CropOperation {
 }
 
 impl VipsOperation for CropOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"crop\0"
     }
@@ -140,14 +140,17 @@ impl VipsOperation for CropOperation {
 }
 
 impl GpuOperation for CropOperation {
-    fn output_spec(&self, _w: u32, _h: u32) -> OutputSpec {
-        OutputSpec::Image {
-            width: self.width as u32,
-            height: self.height as u32,
-        }
+    fn output_dims(&self, _input_w: u32, _input_h: u32) -> Option<(u32, u32)> {
+        Some((self.width as u32, self.height as u32))
     }
 
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -163,23 +166,25 @@ impl GpuOperation for CropOperation {
         )
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        // Offset the output rect by (left, top) to get source rect.
-        vec![(
-            0,
-            Rect::new(
-                output_rect.x + self.left,
-                output_rect.y + self.top,
-                output_rect.width,
-                output_rect.height,
-            ),
-        )]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => vec![(
+                0,
+                crate::backend::gpu::work_unit::WorkUnit::Region {
+                    rect: Rect::new(
+                        rect.x + self.left,
+                        rect.y + self.top,
+                        rect.width,
+                        rect.height,
+                    ),
+                    lod: *lod,
+                },
+            )],
+            _ => vec![(0, wu.clone())],
+        }
     }
 }
 
@@ -193,7 +198,7 @@ pub struct EmbedOperation {
 }
 
 impl VipsOperation for EmbedOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"embed\0"
     }
@@ -217,7 +222,7 @@ pub struct FlipOperation {
 }
 
 impl VipsOperation for FlipOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"flip\0"
     }
@@ -232,7 +237,7 @@ pub struct Rot90Operation {
 }
 
 impl VipsOperation for Rot90Operation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"rot\0"
     }
@@ -247,7 +252,7 @@ pub struct Rot45Operation {
 }
 
 impl VipsOperation for Rot45Operation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"rot45\0"
     }
@@ -268,7 +273,7 @@ pub struct RotateOperation<'a> {
 }
 
 impl VipsOperation for RotateOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"rotate\0"
     }
@@ -303,7 +308,7 @@ pub struct SmartcropOperation {
 }
 
 impl VipsOperation for SmartcropOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"smartcrop\0"
     }
@@ -326,7 +331,7 @@ pub struct GravityOperation {
 }
 
 impl VipsOperation for GravityOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"gravity\0"
     }
@@ -352,7 +357,7 @@ pub struct ResizeOperation {
 }
 
 impl VipsOperation for ResizeOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"resize\0"
     }
@@ -379,7 +384,7 @@ pub struct ShrinkOperation {
 }
 
 impl VipsOperation for ShrinkOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"shrink\0"
     }
@@ -401,7 +406,7 @@ pub struct ReduceOperation {
 }
 
 impl VipsOperation for ReduceOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"reduce\0"
     }
@@ -433,7 +438,7 @@ pub struct ThumbnailOperation {
 }
 
 impl VipsOperation for ThumbnailOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"thumbnail_image\0"
     }
@@ -486,7 +491,7 @@ pub struct AffineOperation<'a> {
     pub extend: Option<Extend>,
 }
 impl VipsOperation for AffineOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"affine\0"
     }
@@ -534,7 +539,7 @@ pub struct SimilarityOperation<'a> {
     pub offset_output_y: Option<f64>,
 }
 impl VipsOperation for SimilarityOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"similarity\0"
     }
@@ -568,14 +573,14 @@ impl VipsOperation for SimilarityOperation<'_> {
 }
 
 pub struct MapimOperation<'a> {
-    pub index: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub index: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub interpolate: Option<&'a crate::backend::vips::Interpolate>,
     pub background: Option<Vec<f64>>,
     pub premultiplied: Option<bool>,
     pub extend: Option<Extend>,
 }
 impl VipsOperation for MapimOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"mapim\0"
     }
@@ -598,11 +603,11 @@ impl VipsOperation for MapimOperation<'_> {
 }
 
 pub struct QuadraticOperation<'a> {
-    pub coeff: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub coeff: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub interpolate: Option<&'a crate::backend::vips::Interpolate>,
 }
 impl VipsOperation for QuadraticOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"quadratic\0"
     }
@@ -622,7 +627,7 @@ pub struct ExtractAreaOperation {
     pub height: i32,
 }
 impl VipsOperation for ExtractAreaOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"extract_area\0"
     }
@@ -641,7 +646,7 @@ pub struct SubsampleOperation {
     pub point: Option<bool>,
 }
 impl VipsOperation for SubsampleOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"subsample\0"
     }
@@ -660,7 +665,7 @@ pub struct ZoomOperation {
     pub vertical: i32,
 }
 impl VipsOperation for ZoomOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"zoom\0"
     }
@@ -676,7 +681,7 @@ pub struct ReplicateOperation {
     pub down: i32,
 }
 impl VipsOperation for ReplicateOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"replicate\0"
     }
@@ -693,7 +698,7 @@ pub struct GridOperation {
     pub down: i32,
 }
 impl VipsOperation for GridOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"grid\0"
     }
@@ -725,7 +730,7 @@ pub struct ReduceHorizontalOperation {
     pub gap: Option<f64>,
 }
 impl VipsOperation for ReduceHorizontalOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"reduceh\0"
     }
@@ -747,7 +752,7 @@ pub struct ReduceVerticalOperation {
     pub gap: Option<f64>,
 }
 impl VipsOperation for ReduceVerticalOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"reducev\0"
     }
@@ -768,7 +773,7 @@ pub struct ShrinkHorizontalOperation {
     pub ceil: Option<bool>,
 }
 impl VipsOperation for ShrinkHorizontalOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"shrinkh\0"
     }
@@ -786,7 +791,7 @@ pub struct ShrinkVerticalOperation {
     pub ceil: Option<bool>,
 }
 impl VipsOperation for ShrinkVerticalOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"shrinkv\0"
     }
@@ -801,8 +806,18 @@ impl VipsOperation for ShrinkVerticalOperation {
 
 // ── ShrinkOperation ───────────────────────────────────────────────────────────
 
+impl TypedOperation for ShrinkOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ShrinkOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         let h = self.horizontal.ceil() as u32;
         let v = self.vertical.ceil() as u32;
         emit_image(
@@ -815,34 +830,34 @@ impl GpuOperation for ShrinkOperation {
         )
     }
 
-    fn output_spec(&self, w: u32, h: u32) -> OutputSpec {
+    fn output_dims(&self, w: u32, h: u32) -> Option<(u32, u32)> {
         let hf = self.horizontal.ceil() as u32;
         let vf = self.vertical.ceil() as u32;
-        OutputSpec::Image {
-            width: w.div_ceil(hf),
-            height: h.div_ceil(vf),
-        }
+        Some((w.div_ceil(hf), h.div_ceil(vf)))
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let hf = self.horizontal.ceil() as i32;
-        let vf = self.vertical.ceil() as i32;
-        let bounds = Rect::new(0, 0, w as i32, h as i32);
-        vec![(
-            0,
-            Rect::new(
-                output_rect.x * hf,
-                output_rect.y * vf,
-                output_rect.width * hf,
-                output_rect.height * vf,
-            )
-            .clamp(bounds),
-        )]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let hf = self.horizontal.ceil() as i32;
+                let vf = self.vertical.ceil() as i32;
+                vec![(
+                    0,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: Rect::new(
+                            rect.x * hf,
+                            rect.y * vf,
+                            rect.width * hf,
+                            rect.height * vf,
+                        ),
+                        lod: *lod,
+                    },
+                )]
+            }
+            _ => vec![(0, wu.clone())],
+        }
     }
 }

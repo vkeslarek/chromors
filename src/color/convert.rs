@@ -1,7 +1,7 @@
 use crate::backend::vips::VipsBackend;
 use crate::backend::vips::gobject::VipsGObject;
 use crate::backend::vips::{IntoVipsBandFormat, IntoVipsInterpretation};
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::pixel::PixelMeta;
 
@@ -15,7 +15,7 @@ impl ColorConversion {
         ColorConversion { from, to }
     }
 
-    pub fn execute(&self, image: &Image<VipsBackend>) -> Result<Image<VipsBackend>, Error> {
+    pub fn execute(&self, image: &Image2D<VipsBackend>) -> Result<Image2D<VipsBackend>, Error> {
         let mut img = image.clone();
 
         let from_premultiplied = matches!(

@@ -5,8 +5,8 @@
 //! [`super::context::GpuContext`], shared by every graph on that device.
 //!
 //! ## Tiers
-//! * **VRAM** — live image values (`GraphValue::Image`) resident in GPU memory.
-//! * **RAM**  — live raw values (`GraphValue::Raw`, e.g. histograms) *and* images
+//! * **VRAM** — live image values (`Storage::Vram`) resident in GPU memory.
+//! * **RAM**  — live raw values (`Storage::Host`, e.g. histograms) *and* images
 //!   spilled to host bytes (downloaded, kept for cheap re-upload).
 //! * **Disk** — image or raw bytes written to a scratch file.
 //!
@@ -32,13 +32,15 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use crate::geometry::Rect;
-use crate::pixel::PixelMeta;
+use crate::color::space::ColorSpace;
+use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use super::buffer::ImageBuffer;
 use super::context::GpuContext;
+use super::datatype::{DataType, ImageType};
 use super::graph::RegionKey;
-use super::value::{GraphValue, ValueKind};
+use super::value::{MaterializedValue, Storage};
+use super::work_unit::WorkUnit;
 
 const MIB: u64 = 1024 * 1024;
 const DEFAULT_GPU_BUDGET: u64 = 256 * MIB;
@@ -52,36 +54,37 @@ enum Tier {
     Disk,
 }
 
-/// How to rebuild a live [`GraphValue`] from spilled raw bytes.
+/// How to rebuild a live [`MaterializedValue`] from spilled raw bytes.
 #[derive(Clone)]
 enum Payload {
-    Image {
+    Vram {
         width: u32,
         height: u32,
         meta: PixelMeta,
-        source_rect: Rect,
+        datatype: Arc<dyn DataType>,
+        extent: WorkUnit,
     },
-    Raw {
-        kind: ValueKind,
-        source_rect: Rect,
+    Host {
+        datatype: Arc<dyn DataType>,
+        extent: WorkUnit,
     },
 }
 
 impl Payload {
     fn is_image(&self) -> bool {
-        matches!(self, Payload::Image { .. })
+        matches!(self, Payload::Vram { .. })
     }
 }
 
 enum Res {
     /// Live, in-memory value — an image in VRAM, or a raw value's CPU bytes.
-    Live(Arc<GraphValue>),
-    /// Image/raw bytes spilled to host RAM, plus how to rebuild the value.
+    Live(Arc<MaterializedValue>),
+    /// Image2D/raw bytes spilled to host RAM, plus how to rebuild the value.
     Ram {
         bytes: Arc<Vec<u8>>,
         payload: Payload,
     },
-    /// Image/raw bytes spilled to a disk file, plus how to rebuild the value.
+    /// Image2D/raw bytes spilled to a disk file, plus how to rebuild the value.
     Disk { path: PathBuf, payload: Payload },
 }
 
@@ -197,7 +200,7 @@ impl TieredCache {
     /// Look up a key, promoting it back into memory if it was spilled. Sets the
     /// recency bit. Returns `None` on a miss (or if a spilled image cannot be
     /// re-uploaded because no GPU context is bound).
-    pub fn get(&mut self, key: &RegionKey) -> Option<Arc<GraphValue>> {
+    pub fn get(&mut self, key: &RegionKey) -> Option<Arc<MaterializedValue>> {
         match self.map.get_mut(key) {
             None => {
                 self.misses += 1;
@@ -219,10 +222,10 @@ impl TieredCache {
     /// Insert a freshly materialised value. Images go to the VRAM tier, raw
     /// values to the RAM tier. The entry starts *cold* (ring position protects
     /// it from premature eviction); re-inserting an existing key replaces it.
-    pub fn insert(&mut self, key: RegionKey, value: Arc<GraphValue>) {
-        let (len, is_image) = match &*value {
-            GraphValue::Image { buffer, .. } => (buffer.total_bytes(), true),
-            GraphValue::Raw { bytes, .. } => (bytes.len() as u64, false),
+    pub fn insert(&mut self, key: RegionKey, value: Arc<MaterializedValue>) {
+        let (len, is_image) = match &value.storage {
+            Storage::Vram(buffer) => (buffer.byte_len, true),
+            Storage::Host(bytes) => (bytes.len() as u64, false),
         };
         // Clean any prior entry so byte accounting stays exact.
         self.remove(&key);
@@ -244,7 +247,7 @@ impl TieredCache {
 
     /// Remove an entry (any tier). Returns its live value if it was resident.
     /// Deletes the backing disk file if spilled. Ring slots are skipped lazily.
-    pub fn remove(&mut self, key: &RegionKey) -> Option<Arc<GraphValue>> {
+    pub fn remove(&mut self, key: &RegionKey) -> Option<Arc<MaterializedValue>> {
         let e = self.map.remove(key)?;
         let tier = e.tier();
         self.sub_bytes(tier, e.len);
@@ -366,29 +369,34 @@ impl TieredCache {
         self.disk_dir.join(format!("tile_{id:016x}.blob"))
     }
 
-    fn rebuild(&self, bytes: &[u8], payload: &Payload) -> Option<Arc<GraphValue>> {
+    fn rebuild(&self, bytes: &[u8], payload: &Payload) -> Option<Arc<MaterializedValue>> {
         match payload {
-            Payload::Raw { kind, source_rect } => Some(Arc::new(GraphValue::raw(
+            Payload::Host { datatype, extent } => Some(Arc::new(MaterializedValue::host(
                 bytes.to_vec(),
-                kind.clone(),
-                *source_rect,
+                datatype.clone(),
+                extent.clone(),
             ))),
-            Payload::Image {
+            Payload::Vram {
                 width,
                 height,
                 meta,
-                source_rect,
+                datatype,
+                extent,
             } => {
                 let ctx = self.ctx.upgrade()?;
                 let img = ImageBuffer::upload(bytes, *width, *height, *meta, &ctx).ok()?;
-                Some(Arc::new(GraphValue::image(img, *source_rect)))
+                Some(Arc::new(MaterializedValue::vram(
+                    img.buffer.clone(),
+                    datatype.clone(),
+                    extent.clone(),
+                )))
             }
         }
     }
 
     // ── Promotion (spilled → live) ───────────────────────────────────────
 
-    fn promote(&mut self, key: RegionKey) -> Option<Arc<GraphValue>> {
+    fn promote(&mut self, key: RegionKey) -> Option<Arc<MaterializedValue>> {
         // Snapshot the spill, then release the borrow before any IO.
         let (bytes, payload, from_tier, disk_path) = {
             let e = self.map.get(&key)?;
@@ -515,13 +523,12 @@ impl TieredCache {
             },
             None => return,
         };
-        let GraphValue::Image {
-            buffer,
-            source_rect,
-            ..
-        } = &*v
-        else {
+        let Storage::Vram(buffer) = &v.storage else {
             return; // VRAM tier only holds images
+        };
+        let region = match v.region() {
+            Some(r) => r,
+            None => return, // VRAM tier only holds spatially-divisible values
         };
         let ctx = match self.ctx.upgrade() {
             Some(c) => c,
@@ -537,11 +544,24 @@ impl TieredCache {
                 return;
             }
         };
-        let payload = Payload::Image {
-            width: buffer.width,
-            height: buffer.height,
-            meta: buffer.meta,
-            source_rect: *source_rect,
+        let meta = v
+            .datatype
+            .as_any()
+            .downcast_ref::<ImageType>()
+            .map(|it| PixelMeta::new(it.format, it.color_space, AlphaPolicy::Straight))
+            .unwrap_or_else(|| {
+                PixelMeta::new(
+                    PixelFormat::RgbaF32,
+                    ColorSpace::ACES_CG,
+                    AlphaPolicy::Straight,
+                )
+            });
+        let payload = Payload::Vram {
+            width: region.rect.width as u32,
+            height: region.rect.height as u32,
+            meta,
+            datatype: v.datatype.clone(),
+            extent: v.extent.clone(),
         };
         if let Some(e) = self.map.get_mut(&key) {
             e.res = Res::Ram {
@@ -563,20 +583,16 @@ impl TieredCache {
         let (bytes, payload, len) = match self.map.get(&key) {
             Some(e) => match &e.res {
                 Res::Ram { bytes, payload } => (Arc::clone(bytes), payload.clone(), e.len),
-                Res::Live(v) => match &**v {
-                    GraphValue::Raw {
-                        bytes,
-                        kind,
-                        source_rect,
-                    } => (
+                Res::Live(v) => match &v.storage {
+                    Storage::Host(bytes) => (
                         Arc::new(bytes.clone()),
-                        Payload::Raw {
-                            kind: kind.clone(),
-                            source_rect: *source_rect,
+                        Payload::Host {
+                            datatype: v.datatype.clone(),
+                            extent: v.extent.clone(),
                         },
                         e.len,
                     ),
-                    GraphValue::Image { .. } => return, // image in RAM tier shouldn't be Live
+                    Storage::Vram(_) => return, // image in RAM tier shouldn't be Live
                 },
                 Res::Disk { .. } => return,
             },
@@ -622,19 +638,18 @@ impl Drop for TieredCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::gpu::value::ValueKind;
-    use crate::geometry::Rect;
+    use crate::backend::gpu::datatype::ScalarType;
 
     // Raw values exercise the full tier state machine without a GPU:
     // insert → RAM(live) → demote to Disk → promote back, with byte-exact
     // round-trips. The image path uses identical transitions with GPU
     // upload/download swapped in (validated on hardware).
 
-    fn raw(n: usize, fill: u8) -> Arc<GraphValue> {
-        Arc::new(GraphValue::raw(
+    fn raw(n: usize, fill: u8) -> Arc<MaterializedValue> {
+        Arc::new(MaterializedValue::host(
             vec![fill; n],
-            ValueKind::Scalar,
-            Rect::new(0, 0, 1, 1),
+            Arc::new(ScalarType),
+            WorkUnit::Atomic,
         ))
     }
     fn key(n: u64) -> RegionKey {
@@ -665,8 +680,8 @@ mod tests {
             let v = c
                 .get(&key(k))
                 .expect("entry must survive (in RAM or on disk)");
-            match &*v {
-                GraphValue::Raw { bytes, .. } => {
+            match &v.storage {
+                Storage::Host(bytes) => {
                     assert_eq!(bytes.len(), 40);
                     assert!(bytes.iter().all(|&b| b == fill), "round-trip must be exact");
                 }

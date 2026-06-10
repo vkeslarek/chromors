@@ -5,14 +5,14 @@ use crate::backend::vips::gobject::VipsGObject;
 use crate::backend::vips::operation::VipsOperation;
 use crate::backend::vips::{FromVipsBandFormat, IntoVipsBandFormat, IntoVipsEnum, null};
 use crate::backend::vips::{VipsBackend, VipsHandle};
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::generator::GenerateOperation;
 use crate::libvips_ffi as ffi;
 
 // ---- VipsBackend internal helpers -------------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     /// Raw libvips pointer. For vips-internal code only — never expose through
     /// the public API.
     pub(crate) fn vips_ptr(&self) -> *mut ffi::VipsImage {
@@ -20,7 +20,7 @@ impl Image<VipsBackend> {
     }
 
     pub(crate) fn from_vips_ptr(ptr: *mut ffi::VipsImage) -> Self {
-        Image::from_handle(VipsHandle { ptr })
+        Image2D::from_handle(VipsHandle { ptr })
     }
 
     pub fn n_pages(&self) -> i32 {
@@ -66,14 +66,14 @@ impl Image<VipsBackend> {
             if ptr.is_null() {
                 return Err(Error::Vips(crate::backend::vips::vips_error()));
             }
-            Ok(Image::from_vips_ptr(ptr))
+            Ok(Image2D::from_vips_ptr(ptr))
         }
     }
 }
 
 // ---- VipsBackend I/O --------------------------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     /// Wraps a raw pixel buffer. `bands` is independent of the format's own
     /// channel count; validates `width*height*bands*sample_size` before copying.
     pub fn from_memory(
@@ -116,7 +116,7 @@ impl Image<VipsBackend> {
         if ptr.is_null() {
             return Err(Error::Vips(crate::backend::vips::vips_error()));
         }
-        Ok(Image::from_vips_ptr(ptr))
+        Ok(Image2D::from_vips_ptr(ptr))
     }
 
     /// Build a Vips image from raw row-major memory and tag it with
@@ -188,7 +188,7 @@ impl Image<VipsBackend> {
 
 // ---- VipsBackend properties -------------------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     pub fn width(&self) -> i32 {
         unsafe { ffi::vips_image_get_width(self.vips_ptr()) }
     }
@@ -215,7 +215,7 @@ impl Image<VipsBackend> {
 
 // ---- VipsBackend color ------------------------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     /// Read the `pixors-cs` metadata integer (set for non-Vips-native color spaces).
     pub(crate) fn get_pixors_cs(&self) -> Option<crate::color::space::ColorSpace> {
         // Check for the field before reading to avoid Vips printing an error
@@ -250,7 +250,7 @@ impl Image<VipsBackend> {
 
 // ---- VipsBackend metadata ---------------------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     pub fn get_fields(&self) -> Vec<String> {
         unsafe {
             let ptrs = ffi::vips_image_get_fields(self.vips_ptr());
@@ -318,7 +318,7 @@ impl Image<VipsBackend> {
 
 // ---- VipsBackend draw / generate / misc -------------------------------------------
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     pub fn draw<D: VipsOperation<Output = ()>>(&self, params: &D) -> Result<(), Error> {
         self.execute(params)
     }
@@ -343,7 +343,7 @@ impl Image<VipsBackend> {
                 return Err(Error::Vips(crate::backend::vips::vips_error()));
             }
         }
-        Ok(Image::from_vips_ptr(out))
+        Ok(Image2D::from_vips_ptr(out))
     }
 
     pub fn bandjoin_const(&self, constants: &[f64]) -> Result<Self, Error> {
@@ -480,7 +480,7 @@ impl Image<VipsBackend> {
 
 // ---- Parameter structs ------------------------------------------------------------
 
-/// Optional parameters for [`Image::array_join`].
+/// Optional parameters for [`Image2D::array_join`].
 #[derive(Default)]
 pub struct ArrayJoinParams {
     pub across: Option<i32>,
@@ -492,7 +492,7 @@ pub struct ArrayJoinParams {
     pub vspacing: Option<i32>,
 }
 
-/// Optional parameters for [`Image::composite`].
+/// Optional parameters for [`Image2D::composite`].
 #[derive(Default)]
 pub struct CompositeParams {
     pub x: Option<Vec<i32>>,

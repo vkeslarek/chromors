@@ -4,7 +4,7 @@ use crate::backend::gpu::buffer::ImageBuffer;
 use crate::backend::gpu::source::GpuSource;
 use crate::backend::gpu::{GpuBackend, GpuContext};
 use crate::color::space::ColorSpace;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use vello::Scene;
@@ -49,7 +49,7 @@ impl GpuVectorGraphicsSource {
         &self,
         graphics: &dyn VectorGraphics,
         ctx: &Arc<GpuContext>,
-    ) -> Result<Image<GpuBackend>, crate::error::Error> {
+    ) -> Result<Image2D<GpuBackend>, crate::error::Error> {
         let width = self.config.width;
         let height = self.config.height;
         // Force width to be a multiple of 64 so width * 4 is a multiple of 256 (wgpu COPY_BYTES_PER_ROW_ALIGNMENT)
@@ -138,6 +138,6 @@ impl GpuVectorGraphicsSource {
         queue.submit(std::iter::once(encoder.finish()));
 
         let source = GpuSource::new_buffer(gpu_buffer, ctx.clone());
-        Image::<GpuBackend>::new_from_source(&source)
+        Image2D::<GpuBackend>::new_from_source(&source)
     }
 }

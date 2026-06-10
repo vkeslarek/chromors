@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::backend::gpu::source::{AnyGpuSource, GpuSource};
 
-pub use super::value::ValueKind;
+pub use super::datatype::DataType;
 
 /// A shader kernel specification — module + function name in Slang.
 #[derive(Clone, Debug)]
@@ -46,7 +46,7 @@ pub struct GraphNode {
     pub op: Arc<dyn super::op::GpuOperation>,
     pub params: Vec<super::param::Param>,
     /// What kind of value this node outputs.
-    pub output: ValueKind,
+    pub datatype: Arc<dyn DataType>,
 }
 
 /// A source (leaf) node — provides input pixels to the graph.
@@ -54,6 +54,10 @@ pub struct GraphNode {
 pub struct SourceNode {
     pub id: NodeId,
     pub source: Arc<super::source::GpuSource>,
+    /// What kind of value this source provides — mirrors [`GraphNode::datatype`].
+    /// Every [`GpuSource`] today is image-shaped, so this is always
+    /// [`super::datatype::ImageType`]; derived in [`Graph::add_source`].
+    pub datatype: Arc<dyn DataType>,
 }
 
 /// Cache key for a materialised region: content hash + rect (x, y, w, h).
@@ -117,7 +121,7 @@ impl Graph {
         }
         // Output decoder — distinguishes convert nodes that differ only by target space.
         fnv(h, format!("{:?}", node.op.output_decoder()).as_bytes());
-        fnv(h, format!("{:?}", node.output).as_bytes());
+        fnv(h, format!("{:?}", node.datatype).as_bytes());
         for &inp in &node.inputs {
             fnv(h, b"|");
             self.fold_content(inp, h, depth + 1);
@@ -136,7 +140,7 @@ impl Graph {
     ///
     /// Uses a global atomic salt to carve out a unique ID range per fork
     /// (upper 12 bits = fork salt, lower 20 bits = node index).
-    /// Call this immediately after `Graph::clone()` in `Image::fork()`.
+    /// Call this immediately after `Graph::clone()` in `Image2D::fork()`.
     pub fn salt_fork(&mut self) {
         use std::sync::atomic::{AtomicU32, Ordering};
         static SALT: AtomicU32 = AtomicU32::new(0);
@@ -153,7 +157,15 @@ impl Graph {
 
     pub fn add_source(&mut self, source: Arc<super::source::GpuSource>) -> NodeId {
         let id = self.alloc_id();
-        self.sources.push(SourceNode { id, source });
+        let datatype: Arc<dyn DataType> = Arc::new(super::datatype::ImageType {
+            color_space: source.color_space(),
+            format: source.format(),
+        });
+        self.sources.push(SourceNode {
+            id,
+            source,
+            datatype,
+        });
         id
     }
 
@@ -168,6 +180,7 @@ impl Graph {
             self.sources.push(SourceNode {
                 id: new_id,
                 source: src.source.clone(),
+                datatype: src.datatype.clone(),
             });
         }
 
@@ -188,7 +201,7 @@ impl Graph {
                 eval: node.eval.clone(),
                 op: node.op.clone(),
                 params: node.params.clone(),
-                output: node.output.clone(),
+                datatype: node.datatype.clone(),
             });
         }
 
@@ -262,6 +275,59 @@ impl Graph {
         None
     }
 
+    /// Output pixel dimensions of `id`, derived by walking from sources
+    /// forward through each op's [`super::op::GpuOperation::output_dims`].
+    ///
+    /// This is the single source of truth for "what size is this node's
+    /// output" — replaces the old per-handle `(width, height)` cache that
+    /// `Image2D::execute` used to compute and store redundantly.
+    /// Returns `None` for non-spatial outputs (histograms, scalars, …) or
+    /// orphaned nodes.
+    pub fn node_dims(&self, id: NodeId) -> Option<(u32, u32)> {
+        if let Some(src) = self.get_source(id) {
+            return Some((src.source.width(), src.source.height()));
+        }
+        let node = self.get_node(id)?;
+        let primary_input = *node.inputs.first()?;
+        let (in_w, in_h) = self.node_dims(primary_input)?;
+        node.op.output_dims(in_w, in_h)
+    }
+
+    /// Resolved [`super::datatype::ImageType`] (format + color space) of `id`'s
+    /// output, walking forward from sources through each op's
+    /// [`super::op::GpuOperation::output_decoder`].
+    ///
+    /// `node.datatype` tags *that this node is image-shaped* for the generic
+    /// materialize/cache machinery (always the ACEScg/F32 working-space tag for
+    /// fused intermediates — see [`super::op::working_image_type`]); this method
+    /// resolves the *boundary* type a pull will actually produce, the single
+    /// source of truth replacing the old per-handle format/color-space cache and
+    /// the `target_meta` "first source's color space" heuristic.
+    /// Returns `None` for non-image outputs.
+    pub fn resolve_image_type(&self, id: NodeId) -> Option<super::datatype::ImageType> {
+        if let Some(src) = self.get_source(id) {
+            return src
+                .datatype
+                .as_any()
+                .downcast_ref::<super::datatype::ImageType>()
+                .cloned();
+        }
+        let node = self.get_node(id)?;
+        match node.op.output_decoder() {
+            super::op::OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => {
+                Some(super::datatype::ImageType {
+                    color_space: c.color_space,
+                    format: c.format,
+                })
+            }
+            super::op::OutputDecoder::WorkingEncodeRegion { codec: None } => {
+                let primary_input = *node.inputs.first()?;
+                self.resolve_image_type(primary_input)
+            }
+            _ => None,
+        }
+    }
+
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
@@ -293,7 +359,10 @@ impl Graph {
                 .source_dimensions(node_id)
                 .map(|(w, h)| {
                     let scale = unit_lod.scale_factor();
-                    ((w as f64 / scale).ceil() as u32, (h as f64 / scale).ceil() as u32)
+                    (
+                        (w as f64 / scale).ceil() as u32,
+                        (h as f64 / scale).ceil() as u32,
+                    )
                 })
                 .unwrap_or((0, 0));
 
@@ -330,7 +399,10 @@ impl Graph {
         rect: crate::geometry::Rect,
         lod: super::Lod,
     ) -> crate::geometry::Rect {
-        let node_rects = self.walk_inverse(&[(root_id, super::work_unit::WorkUnit::Region { rect, lod })], lod);
+        let node_rects = self.walk_inverse(
+            &[(root_id, super::work_unit::WorkUnit::Region { rect, lod })],
+            lod,
+        );
         let mut bounding: Option<crate::geometry::Rect> = None;
         for s in &self.sources {
             if let Some(&r) = node_rects.get(&s.id) {
@@ -400,7 +472,7 @@ impl Graph {
                     eval: node.eval.clone(),
                     op: node.op.clone(),
                     params: node.params.clone(),
-                    output: node.output.clone(),
+                    datatype: node.datatype.clone(),
                 })
             } else {
                 continue;

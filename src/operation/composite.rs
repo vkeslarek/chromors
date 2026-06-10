@@ -1,8 +1,9 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::NodeEval;
 use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeId};
-use crate::backend::gpu::op::GpuOperation;
+use crate::backend::gpu::op::working_image_type;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
-use crate::backend::gpu::value::ValueKind;
 use crate::geometry::Rect;
 use std::sync::Arc;
 
@@ -71,7 +72,7 @@ impl std::fmt::Display for BlendMode {
 }
 
 pub struct Composite2Operation<B: Backend> {
-    pub overlay: crate::data::image::Image<B>,
+    pub overlay: crate::data::image::Image2D<B>,
     pub mode: BlendMode,
     pub x: Option<i32>,
     pub y: Option<i32>,
@@ -108,7 +109,7 @@ where
 }
 
 impl VipsOperation for Composite2Operation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"composite2\0"
     }
@@ -132,7 +133,7 @@ impl VipsOperation for Composite2Operation<crate::backend::vips::VipsBackend> {
 }
 
 pub struct JoinOperation<B: Backend> {
-    pub right: crate::data::image::Image<B>,
+    pub right: crate::data::image::Image2D<B>,
     pub direction: Direction,
     pub expand: Option<bool>,
     pub shim: Option<i32>,
@@ -168,7 +169,7 @@ where
 }
 
 impl VipsOperation for JoinOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"join\0"
     }
@@ -191,30 +192,19 @@ impl VipsOperation for JoinOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
-impl GpuOperation for JoinOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        use crate::backend::gpu::buffer::ImageBuffer;
-        use crate::backend::gpu::source::GpuSource;
+impl TypedOperation for JoinOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
 
-        let right_id = if graph.get_node(self.right.root_id()).is_some()
-            || graph.get_source(self.right.root_id()).is_some()
-        {
-            self.right.root_id()
-        } else {
-            let (w, h) = (self.right.width(), self.right.height());
-            let target = crate::target::ImageTarget::new(self.right.clone());
-            let mat = target
-                .pull(crate::geometry::Rect::new(0, 0, w as i32, h as i32), 0)
-                .expect("JoinOperation::emit: failed to pull right");
-            let img_buf = Arc::new(ImageBuffer {
-                buffer: mat.buffer.clone(),
-                width: mat.buffer_rect.width as u32,
-                height: mat.buffer_rect.height as u32,
-                meta: mat.meta,
-            });
-            let source = GpuSource::new_buffer(img_buf, self.right.handle.node.ctx.clone());
-            graph.add_source(Arc::new(source))
-        };
+impl GpuOperation for JoinOperation<crate::backend::gpu::GpuBackend> {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let right_id = crate::backend::gpu::op::splice_sibling(graph, &self.right);
 
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let dir = self.direction as i32 as u32;
@@ -243,38 +233,28 @@ impl GpuOperation for JoinOperation<crate::backend::gpu::GpuBackend> {
                 Param::F32(bg[2] as f32),
             ],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn output_spec(&self, w: u32, h: u32) -> crate::backend::gpu::op::OutputSpec {
+    fn output_dims(&self, w: u32, h: u32) -> Option<(u32, u32)> {
         let shim = self.shim.unwrap_or(0) as u32;
-        let (ow, oh) = match self.direction {
+        Some(match self.direction {
             Direction::Horizontal => (w + shim + self.right.width(), h.max(self.right.height())),
             Direction::Vertical => (w.max(self.right.width()), h + shim + self.right.height()),
-        };
-        crate::backend::gpu::op::OutputSpec::Image {
-            width: ow,
-            height: oh,
-        }
+        })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        // Both inputs need the same spatial region; the kernel selects based on
-        // src0_w / src1_w coordinates.
-        vec![(0, output_rect), (1, output_rect)]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        vec![(0, wu.clone()), (1, wu.clone())]
     }
 }
 
-
 pub struct InsertOperation<B: Backend> {
-    pub sub: crate::data::image::Image<B>,
+    pub sub: crate::data::image::Image2D<B>,
     pub x: i32,
     pub y: i32,
     pub expand: Option<bool>,
@@ -307,7 +287,7 @@ where
 }
 
 impl VipsOperation for InsertOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"insert\0"
     }
@@ -325,30 +305,19 @@ impl VipsOperation for InsertOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
-impl GpuOperation for InsertOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        use crate::backend::gpu::buffer::ImageBuffer;
-        use crate::backend::gpu::source::GpuSource;
+impl TypedOperation for InsertOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
 
-        let sub_id = if graph.get_node(self.sub.root_id()).is_some()
-            || graph.get_source(self.sub.root_id()).is_some()
-        {
-            self.sub.root_id()
-        } else {
-            let (w, h) = (self.sub.width(), self.sub.height());
-            let target = crate::target::ImageTarget::new(self.sub.clone());
-            let mat = target
-                .pull(crate::geometry::Rect::new(0, 0, w as i32, h as i32), 0)
-                .expect("InsertOperation::emit: failed to pull sub");
-            let img_buf = Arc::new(ImageBuffer {
-                buffer: mat.buffer.clone(),
-                width: mat.buffer_rect.width as u32,
-                height: mat.buffer_rect.height as u32,
-                meta: mat.meta,
-            });
-            let source = GpuSource::new_buffer(img_buf, self.sub.handle.node.ctx.clone());
-            graph.add_source(Arc::new(source))
-        };
+impl GpuOperation for InsertOperation<crate::backend::gpu::GpuBackend> {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let sub_id = crate::backend::gpu::op::splice_sibling(graph, &self.sub);
 
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
 
@@ -369,65 +338,43 @@ impl GpuOperation for InsertOperation<crate::backend::gpu::GpuBackend> {
                 Param::F32(bg[2] as f32),
             ],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn output_spec(&self, w: u32, h: u32) -> crate::backend::gpu::op::OutputSpec {
+    fn output_dims(&self, w: u32, h: u32) -> Option<(u32, u32)> {
         if self.expand.unwrap_or(false) {
             let ow = (w as i32).max(self.x + self.sub.width() as i32).max(0) as u32;
             let oh = (h as i32).max(self.y + self.sub.height() as i32).max(0) as u32;
-            crate::backend::gpu::op::OutputSpec::Image {
-                width: ow,
-                height: oh,
-            }
+            Some((ow, oh))
         } else {
-            crate::backend::gpu::op::OutputSpec::Image {
-                width: w,
-                height: h,
-            }
+            Some((w, h))
         }
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        vec![(0, output_rect), (1, output_rect)]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        vec![(0, wu.clone()), (1, wu.clone())]
     }
 }
 
 // ── Composite2Operation ───────────────────────────────────────────────────────
 
+impl TypedOperation for Composite2Operation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for Composite2Operation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        // If the overlay is already a node/source in this graph, reference it directly.
-        // Otherwise materialize it and inject as a new source node.
-        let overlay_node_id = if graph.get_node(self.overlay.root_id()).is_some()
-            || graph.get_source(self.overlay.root_id()).is_some()
-        {
-            self.overlay.root_id()
-        } else {
-            let (ow, oh) = (self.overlay.width(), self.overlay.height());
-            let target = crate::target::ImageTarget::new(self.overlay.clone());
-            let mat = target
-                .pull(crate::geometry::Rect::new(0, 0, ow as i32, oh as i32), 0)
-                .expect("Composite2Operation::emit: failed to pull overlay");
-            let img_buf = std::sync::Arc::new(crate::backend::gpu::buffer::ImageBuffer {
-                buffer: mat.buffer.clone(),
-                width: mat.buffer_rect.width as u32,
-                height: mat.buffer_rect.height as u32,
-                meta: mat.meta,
-            });
-            let source = crate::backend::gpu::source::GpuSource::new_buffer(
-                img_buf,
-                self.overlay.handle.node.ctx.clone(),
-            );
-            graph.add_source(Arc::new(source))
-        };
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let overlay_node_id = crate::backend::gpu::op::splice_sibling(graph, &self.overlay);
 
         let mode = self.mode as i32 as u32;
         graph.add_node(GraphNode {
@@ -443,31 +390,27 @@ impl GpuOperation for Composite2Operation<crate::backend::gpu::GpuBackend> {
                 Param::I32(self.y.unwrap_or(0)),
             ],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
         let (ox, oy) = (self.x.unwrap_or(0), self.y.unwrap_or(0));
-        vec![
-            (0, output_rect),
-            (
-                1,
-                Rect::new(
-                    output_rect.x - ox,
-                    output_rect.y - oy,
-                    output_rect.width,
-                    output_rect.height,
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => vec![
+                (0, wu.clone()),
+                (
+                    1,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: Rect::new(rect.x - ox, rect.y - oy, rect.width, rect.height),
+                        lod: *lod,
+                    },
                 ),
-            ),
-        ]
+            ],
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
-
-

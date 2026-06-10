@@ -1,5 +1,5 @@
 use crate::backend::vips::VipsBackend;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::libvips_ffi as ffi;
 use std::ffi::{CStr, CString};
@@ -36,8 +36,8 @@ pub trait Runner: Sized {
     fn run(op: VipsGObject) -> Result<Self, Error>;
 }
 
-impl Runner for Image<VipsBackend> {
-    fn run(op: VipsGObject) -> Result<Image<VipsBackend>, Error> {
+impl Runner for Image2D<VipsBackend> {
+    fn run(op: VipsGObject) -> Result<Image2D<VipsBackend>, Error> {
         op.run()
     }
 }
@@ -187,7 +187,7 @@ impl VipsGObject {
         Ok(())
     }
 
-    fn run_body(self) -> Result<Image<VipsBackend>, Error> {
+    fn run_body(self) -> Result<Image2D<VipsBackend>, Error> {
         unsafe {
             let mut op = self;
             op.build()?;
@@ -196,17 +196,17 @@ impl VipsGObject {
             if out_ptr.is_null() {
                 return Err(Error::Vips(crate::backend::vips::vips_error()));
             }
-            Ok(Image::from_vips_ptr(out_ptr))
+            Ok(Image2D::from_vips_ptr(out_ptr))
         }
     }
 
-    pub fn run(self) -> Result<Image<VipsBackend>, Error> {
+    pub fn run(self) -> Result<Image2D<VipsBackend>, Error> {
         self.run_body()
     }
 
     /// Run a generator/sink op. Same exclusive lock as [`run`] — kept as a
     /// distinct name so the generator call sites read clearly.
-    pub(crate) fn run_generator(self) -> Result<Image<VipsBackend>, Error> {
+    pub(crate) fn run_generator(self) -> Result<Image2D<VipsBackend>, Error> {
         self.run_body()
     }
 
@@ -270,11 +270,11 @@ impl VipsGObject {
         }
     }
 
-    /// Reads a named output image property, returning an owned `Image<VipsBackend>`.
+    /// Reads a named output image property, returning an owned `Image2D<VipsBackend>`.
     ///
     /// # Safety
     /// `self` must already have been built successfully.
-    pub(crate) unsafe fn output_image(&self, prop: &str) -> Result<Image<VipsBackend>, Error> {
+    pub(crate) unsafe fn output_image(&self, prop: &str) -> Result<Image2D<VipsBackend>, Error> {
         unsafe {
             let mut val = std::mem::MaybeUninit::<ffi::GValue>::zeroed();
             ffi::g_value_init(val.as_mut_ptr(), ffi::vips_image_get_type());
@@ -285,7 +285,7 @@ impl VipsGObject {
             if ptr.is_null() {
                 return Err(Error::Vips(crate::backend::vips::vips_error()));
             }
-            Ok(Image::from_vips_ptr(ptr))
+            Ok(Image2D::from_vips_ptr(ptr))
         }
     }
 

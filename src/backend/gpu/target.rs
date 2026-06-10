@@ -1,76 +1,42 @@
-use crate::backend::TargetOutput;
-/// Output handle — placeholder. Will hold a GPU buffer + metadata
-/// for writing results back to CPU or to a file.
-#[derive(Clone)]
-pub struct GpuTarget {
-    pub buffer: std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>,
-}
-
-impl GpuTarget {
-    pub fn new() -> Self {
-        Self {
-            buffer: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        }
-    }
-}
-
 use super::GpuBackend;
-use super::handle::GpuImageHandle;
+use super::datatype::Targetable;
+use super::handle::GraphNodeHandle;
 use super::handle::Lod;
-use super::value::GraphValue;
-use crate::backend::gpu::op::GpuOperation;
-use crate::backend::{HistogramTargetCapability, ImageTargetCapability};
-use crate::data::image::Image;
+use super::value::{MaterializedValue, Storage};
+use crate::backend::gpu::datatype::Executable;
+use crate::backend::{ColorConversionCapability, HistogramTargetCapability, ImageTargetCapability};
 use crate::geometry::Rect;
 use crate::target::{MaterializedHistogram, MaterializedImage};
-// ── TargetOutput ──────────────────────────────────────────────────────────────
-
-impl TargetOutput<Image<GpuBackend>> for GpuBackend {
-    type Target = GpuTarget;
-
-    fn write_to_target(image: &Image<Self>, target: &Self::Target) -> Result<(), crate::Error> {
-        let rect = Rect::new(0, 0, image.width() as i32, image.height() as i32);
-        let region = crate::backend::gpu::region::GpuRegion::new(
-            image.handle.node.graph.clone(),
-            image.handle.node.ctx.cache.clone(),
-            image.handle.node.root_id,
-            image.handle.node.ctx.clone(),
-            Lod::FULL,
-        );
-        region.prepare(rect);
-        let compiled = region
-            .materialize()
-            .map_err(|e| crate::Error::Vips(format!("compile error: {:?}", e)))?;
-
-        let bytes = compiled
-            .read_bytes(&image.handle.node.ctx)
-            .map_err(|e| crate::Error::Vips(e.to_string()))?;
-        *target.buffer.lock().unwrap() = Some(bytes);
-        Ok(())
-    }
-}
 
 // ── Target Capabilities ───────────────────────────────────────────────────────
 
-/// Lift a `GraphValue::Image` to a `MaterializedImage`, using the
-/// handle's pixel metadata.  Returns `Err` if the buffer is `Raw`.
+/// Lift a `MaterializedValue` to a `MaterializedImage`, using the handle's
+/// pixel metadata. Returns `Err` if storage is `Host` (not an image buffer).
 fn mat_to_image(
-    mat: &std::sync::Arc<GraphValue>,
-    handle: &GpuImageHandle,
+    mat: &std::sync::Arc<MaterializedValue>,
+    handle: &GraphNodeHandle,
     rect: Rect,
 ) -> Result<MaterializedImage<GpuBackend>, crate::Error> {
-    match &**mat {
-        GraphValue::Image { buffer, .. } => {
-            let coords = mat.buffer_coords(rect);
+    match &mat.storage {
+        Storage::Vram(buffer) => {
+            // Translate `rect` (source coordinates) into coordinates local to
+            // the materialized buffer, which tightly covers `mat`'s extent.
+            let buf_rect = mat.region().map(|r| r.rect).unwrap_or(rect);
+            let buffer_rect = Rect::new(
+                rect.x - buf_rect.x,
+                rect.y - buf_rect.y,
+                rect.width,
+                rect.height,
+            );
             Ok(MaterializedImage {
-                buffer: buffer.buffer.clone(),
-                meta: handle.pixel_meta(),
+                buffer: buffer.clone(),
+                meta: <GpuBackend as ColorConversionCapability>::pixel_meta(handle),
                 rect,
-                buffer_rect: coords,
+                buffer_rect,
             })
         }
-        GraphValue::Raw { .. } => Err(crate::Error::Gpu(
-            "Expected Image buffer but got Raw".into(),
+        Storage::Host(_) => Err(crate::Error::Gpu(
+            "Expected Vram (image) storage but got Host".into(),
         )),
     }
 }
@@ -82,10 +48,10 @@ impl ImageTargetCapability for GpuBackend {
         lod: u32,
     ) -> Result<MaterializedImage<Self>, crate::Error> {
         let region = crate::backend::gpu::region::GpuRegion::new(
-            handle.node.graph.clone(),
-            handle.node.ctx.cache.clone(),
-            handle.node.root_id,
-            handle.node.ctx.clone(),
+            handle.graph.clone(),
+            handle.ctx.cache.clone(),
+            handle.root_id,
+            handle.ctx.clone(),
             Lod(lod),
         );
         region.prepare(rect);
@@ -98,10 +64,10 @@ impl ImageTargetCapability for GpuBackend {
         lod: u32,
     ) -> Result<Vec<MaterializedImage<Self>>, crate::Error> {
         let region = crate::backend::gpu::region::GpuRegion::new(
-            handle.node.graph.clone(),
-            handle.node.ctx.cache.clone(),
-            handle.node.root_id,
-            handle.node.ctx.clone(),
+            handle.graph.clone(),
+            handle.ctx.cache.clone(),
+            handle.root_id,
+            handle.ctx.clone(),
             Lod(lod),
         );
         region
@@ -121,17 +87,7 @@ impl HistogramTargetCapability for GpuBackend {
             bins: 256,
             channel: 4,
         };
-        let self_arc: std::sync::Arc<dyn crate::backend::gpu::op::GpuOperation> =
-            std::sync::Arc::new(op.clone());
-        let node_id = {
-            let mut graph = handle.node.graph.lock().unwrap();
-            op.emit(handle.node.root_id, &mut graph, self_arc)
-        };
-        Ok(crate::backend::gpu::GraphNodeHandle {
-            graph: handle.node.graph.clone(),
-            root_id: node_id,
-            ctx: handle.node.ctx.clone(),
-        })
+        Ok(crate::backend::gpu::HistogramType::execute(&op, handle))
     }
 
     fn pull_histogram(
@@ -140,27 +96,22 @@ impl HistogramTargetCapability for GpuBackend {
         let bins = {
             let graph = handle.graph.lock().unwrap();
             let node = graph.get_node(handle.root_id);
-            match node.map(|n| &n.output) {
-                Some(crate::backend::gpu::value::ValueKind::Histogram { bins }) => *bins,
-                _ => return Err(crate::Error::Gpu("not a histogram node".into())),
+            match node.and_then(|n| {
+                n.datatype
+                    .as_any()
+                    .downcast_ref::<crate::backend::gpu::HistogramType>()
+            }) {
+                Some(hist) => hist.bins,
+                None => return Err(crate::Error::Gpu("not a histogram node".into())),
             }
         };
-        let request = crate::backend::gpu::request::GpuRequest::new(
-            handle.graph.clone(),
-            handle.ctx.cache.clone(),
-            handle.root_id,
-            handle.ctx.clone(),
-            Lod::FULL,
-            crate::backend::gpu::data::HistogramData,
-            (Lod::FULL, bins),
-        );
-        let data = request
-            .materialize()
+        let hist_type = crate::backend::gpu::HistogramType { bins };
+        let data = hist_type
+            .pull(handle, Lod::FULL, &crate::backend::gpu::work_unit::Atomic)
             .map_err(|e| crate::Error::Gpu(format!("{:?}", e)))?;
-        let bytes: Vec<u8> = data.into_iter().flat_map(|v| v.to_le_bytes()).collect();
         Ok(MaterializedHistogram {
             _marker: std::marker::PhantomData,
-            buffer: bytes,
+            buffer: data.as_bytes().to_vec(),
             bins,
         })
     }

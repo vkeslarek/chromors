@@ -130,7 +130,10 @@ impl<'a> CutFinder<'a> {
 
             expanded.insert(nid);
 
-            let wu = super::work_unit::WorkUnit::Region { rect, lod: self.lod };
+            let wu = super::work_unit::WorkUnit::Region {
+                rect,
+                lod: self.lod,
+            };
             let requests = node.op.input_demands(&wu);
             for (idx, req_unit) in requests {
                 let Some(&child_id) = node.inputs.get(idx) else {
@@ -172,7 +175,10 @@ impl<'a> CutFinder<'a> {
             .source_dimensions(self.root_id)
             .map(|(w, h)| {
                 let scale = self.lod.scale_factor();
-                ((w as f64 / scale).ceil() as u32, (h as f64 / scale).ceil() as u32)
+                (
+                    (w as f64 / scale).ceil() as u32,
+                    (h as f64 / scale).ceil() as u32,
+                )
             })
             .unwrap_or((0, 0))
     }

@@ -1,6 +1,7 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ pub struct IccImportOperation {
     pub intent: Option<i32>,
 }
 impl VipsOperation for IccImportOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"icc_import\0"
     }
@@ -38,7 +39,7 @@ pub struct IccExportOperation {
     pub depth: Option<i32>,
 }
 impl VipsOperation for IccExportOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"icc_export\0"
     }
@@ -64,7 +65,7 @@ pub struct IccTransformOperation {
     pub depth: Option<i32>,
 }
 impl VipsOperation for IccTransformOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"icc_transform\0"
     }
@@ -91,7 +92,7 @@ pub struct GammaOperation {
     pub exponent: Option<f64>,
 }
 impl VipsOperation for GammaOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"gamma\0"
     }
@@ -103,7 +104,7 @@ impl VipsOperation for GammaOperation {
     }
 }
 
-// ColourspaceOperation removed — use Image::convert(PixelMeta) instead.
+// ColourspaceOperation removed — use Image2D::convert(PixelMeta) instead.
 
 /// Adjusts saturation by blending the image with its grayscale version.
 /// `amount = 0` produces grayscale, `amount = 1` is identity, `amount > 1` boosts.
@@ -115,13 +116,13 @@ pub struct SaturationOperation {
     pub amount: f64,
 }
 
-impl crate::backend::Operation<crate::data::image::Image<crate::backend::vips::VipsBackend>>
+impl crate::backend::Operation<crate::data::image::Image2D<crate::backend::vips::VipsBackend>>
     for SaturationOperation
 {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn execute(
         &self,
-        image: &crate::data::image::Image<crate::backend::vips::VipsBackend>,
+        image: &crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     ) -> Result<Self::Output, crate::error::Error> {
         let amount = self.amount;
         let bands = image.bands();
@@ -199,7 +200,7 @@ impl crate::backend::Operation<crate::data::image::Image<crate::backend::vips::V
             if ret != 0 {
                 return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
             }
-            crate::data::image::Image::from_handle(crate::backend::vips::VipsHandle { ptr: out })
+            crate::data::image::Image2D::from_handle(crate::backend::vips::VipsHandle { ptr: out })
         } else {
             out_rgb
         };
@@ -213,8 +214,18 @@ impl crate::backend::Operation<crate::data::image::Image<crate::backend::vips::V
 
 // ── SaturationOperation ───────────────────────────────────────────────────────
 
+impl TypedOperation for SaturationOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for SaturationOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -228,8 +239,18 @@ impl GpuOperation for SaturationOperation {
 
 // ── GammaOperation ────────────────────────────────────────────────────────────
 
+impl TypedOperation for GammaOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for GammaOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         let exponent = self.exponent.unwrap_or(1.0);
         let shader_exp = if exponent != 0.0 {
             (1.0 / exponent) as f32

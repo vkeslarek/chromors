@@ -3,47 +3,47 @@
 //!
 //! - [`HistogramSink`] — a [`VipsCustomSink`] reduction whose output is an
 //!   arbitrary Rust value (per-band [`Histogram`]); no image produced.
-//! - [`Invert`] — a [`VipsCustomOperation`] producing an output `Image`.
+//! - [`Invert`] — a [`VipsCustomOperation`] producing an output `Image2D`.
 //!
 //! Both run region by region inside the vips pipeline (no download).
 //!
 //! ```ignore
 //! let hist = img.sink(HistogramSink)?;     // Histogram { bins: Vec<[u32; 256]> }
-//! let inv  = img.custom(Invert)?;          // Image
+//! let inv  = img.custom(Invert)?;          // Image2D
 //! ```
 
 use crate::backend::Operation;
 use crate::backend::vips::{CustomRegion, VipsBackend, VipsCustomOperation, VipsCustomSink};
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 
 // ── execute() bridge ─────────────────────────────────────────────────────────
 //
-// `Image::execute` takes any `Operation<VipsBackend>`. A blanket
+// `Image2D::execute` takes any `Operation<VipsBackend>`. A blanket
 // `impl<T: VipsOperation> Operation<VipsBackend> for T` already exists, and Rust
 // coherence forbids a second blanket (or a bare concrete impl) for the same
 // backend. These local wrappers sidestep it: Rust knows `Custom<O>` / `Reduce<S>`
 // are local types that don't implement `VipsOperation`, so the impls don't
 // overlap. Usage: `img.execute(&Custom(Invert))`, `img.execute(&Reduce(HistogramSink))`.
 
-/// Wraps a [`VipsCustomOperation`] so it runs through [`Image::execute`].
+/// Wraps a [`VipsCustomOperation`] so it runs through [`Image2D::execute`].
 pub struct Custom<O>(pub O);
 
-impl<O: VipsCustomOperation + Clone> Operation<Image<VipsBackend>> for Custom<O> {
-    type Output = Image<VipsBackend>;
+impl<O: VipsCustomOperation + Clone> Operation<Image2D<VipsBackend>> for Custom<O> {
+    type Output = Image2D<VipsBackend>;
 
-    fn execute(&self, image: &Image<VipsBackend>) -> Result<Self::Output, Error> {
+    fn execute(&self, image: &Image2D<VipsBackend>) -> Result<Self::Output, Error> {
         image.custom(self.0.clone())
     }
 }
 
-/// Wraps a [`VipsCustomSink`] so it runs through [`Image::execute`].
+/// Wraps a [`VipsCustomSink`] so it runs through [`Image2D::execute`].
 pub struct Reduce<S>(pub S);
 
-impl<S: VipsCustomSink + Clone> Operation<Image<VipsBackend>> for Reduce<S> {
+impl<S: VipsCustomSink + Clone> Operation<Image2D<VipsBackend>> for Reduce<S> {
     type Output = S::Output;
 
-    fn execute(&self, image: &Image<VipsBackend>) -> Result<Self::Output, Error> {
+    fn execute(&self, image: &Image2D<VipsBackend>) -> Result<Self::Output, Error> {
         image.sink(self.0.clone())
     }
 }

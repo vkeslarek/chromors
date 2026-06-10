@@ -1,16 +1,18 @@
 use askama::Template;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use crate::color::space::ColorSpace;
 use crate::pixel::PixelFormat;
 
+use super::datatype::DataType;
 use super::graph::NodeEval;
 use super::graph::{Graph, NodeId};
 use super::materialize::MaterializePlan;
-use super::op::{DispatchGrid, InputEncoder, OutputDecoder};
+use super::op::{DispatchGrid, InputEncoder, OutputDecoder, working_image_type};
 use super::param::{GpuPixelEncoding, Param};
 use super::source::AnyGpuSource;
-use super::value::{ValueKind, WriteMode};
+use super::value::WriteMode;
 
 // ── Public output ─────────────────────────────────────────────────────────────
 
@@ -21,7 +23,7 @@ pub struct EmittedIr {
     pub temp_buffer_sizes: Vec<u64>,
     pub params_bytes: Vec<u8>,
     pub entry_points: Vec<(String, u32, u32)>,
-    pub target_output_kinds: Vec<ValueKind>,
+    pub target_output_kinds: Vec<Arc<dyn DataType>>,
     /// Output pixel format for image passes — `None` for non-image outputs.
     pub dst_format: Option<PixelFormat>,
 }
@@ -42,7 +44,12 @@ impl EmittedIr {
 
 impl MaterializePlan {
     /// Emit IR with LOD-scaled params baked in.
-    pub fn emit_ir_with_layout(&self, graph: &Graph, wg_dim: u32, lod: super::Lod) -> (EmittedIr, LayoutPlan) {
+    pub fn emit_ir_with_layout(
+        &self,
+        graph: &Graph,
+        wg_dim: u32,
+        lod: super::Lod,
+    ) -> (EmittedIr, LayoutPlan) {
         let (layout, color) = LayoutPlan::build(graph, self, lod);
         let emitter = SlangEmitter::new(&layout, &color, graph);
         let ir = emitter.emit(wg_dim);
@@ -117,7 +124,7 @@ pub struct TempSlot {
 pub struct TargetSlot {
     pub node_id: NodeId,
     pub binding: u32, // group 2, positional index
-    pub output: ValueKind,
+    pub output: Arc<dyn DataType>,
     pub dims: (u32, u32),
 }
 
@@ -225,18 +232,23 @@ impl<'a> LayoutBuilder<'a> {
         let has_image_output = self.plan.targets.iter().any(|t| {
             self.graph
                 .get_node(t.node_id)
-                .map(|n| matches!(n.op.output_decoder(), OutputDecoder::WorkingEncodeRegion { .. }))
+                .map(|n| {
+                    matches!(
+                        n.op.output_decoder(),
+                        OutputDecoder::WorkingEncodeRegion { .. }
+                    )
+                })
                 .unwrap_or(false)
         });
 
         let (dst_encoding, dst_format) = if has_image_output {
             let override_codec = order.iter().rev().find_map(|&id| {
-                self.graph.get_node(id).and_then(|n| {
-                    match n.op.output_decoder() {
+                self.graph
+                    .get_node(id)
+                    .and_then(|n| match n.op.output_decoder() {
                         OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => Some(c),
                         _ => None,
-                    }
-                })
+                    })
             });
             match override_codec {
                 Some(codec) => {
@@ -245,7 +257,10 @@ impl<'a> LayoutBuilder<'a> {
                         codec.color_space,
                         crate::pixel::AlphaPolicy::Straight,
                     );
-                    (Some(GpuPixelEncoding::from_meta(&meta, false)), Some(codec.format))
+                    (
+                        Some(GpuPixelEncoding::from_meta(&meta, false)),
+                        Some(codec.format),
+                    )
                 }
                 None => {
                     let src_cs = self
@@ -254,7 +269,10 @@ impl<'a> LayoutBuilder<'a> {
                         .first()
                         .map(|s| s.source.color_space())
                         .unwrap_or(ColorSpace::SRGB);
-                    (Some(GpuPixelEncoding::from_color_space(src_cs)), Some(PixelFormat::RgbaF32))
+                    (
+                        Some(GpuPixelEncoding::from_color_space(src_cs)),
+                        Some(PixelFormat::RgbaF32),
+                    )
                 }
             }
         } else {
@@ -381,8 +399,8 @@ impl<'a> LayoutBuilder<'a> {
             let kind = self
                 .graph
                 .get_node(id)
-                .map(|n| n.output.clone())
-                .unwrap_or(ValueKind::Image);
+                .map(|n| n.datatype.clone())
+                .unwrap_or_else(working_image_type);
             if !kind.needs_fused_temp() {
                 continue;
             }
@@ -459,8 +477,8 @@ impl<'a> LayoutBuilder<'a> {
                 let output = self
                     .graph
                     .get_node(t.node_id)
-                    .map(|n| n.output.clone())
-                    .unwrap_or(ValueKind::Image);
+                    .map(|n| n.datatype.clone())
+                    .unwrap_or_else(working_image_type);
                 TargetSlot {
                     node_id: t.node_id,
                     binding: i as u32,
@@ -856,7 +874,9 @@ impl<'a> SlangEmitter<'a> {
         let encoders = node.op.input_encoders(node.inputs.len());
         let mut args: Vec<String> = vec!["idx".into()];
         for (slot, &inp) in node.inputs.iter().enumerate() {
-            let encoder = encoders.get(slot).unwrap_or(&InputEncoder::WorkingDecodeRegion);
+            let encoder = encoders
+                .get(slot)
+                .unwrap_or(&InputEncoder::WorkingDecodeRegion);
             let name = if let Some(&si) = self.layout.source_pos.get(&inp) {
                 // For image sources both `_raw_src_{si}` (CodecRegion) and
                 // `region_src_{si}` (WorkingDecodeRegion) are declared by
@@ -999,7 +1019,7 @@ impl<'a> SlangEmitter<'a> {
                 .iter()
                 .find(|t| t.node_id == id)
                 .map(|t| t.output.clone())
-                .unwrap_or(ValueKind::Image);
+                .unwrap_or_else(working_image_type);
             let is_atomic_accumulate =
                 matches!(output_kind.write_mode(), WriteMode::AtomicAccumulate { .. });
             let is_target = final_target_id == Some(id) || self.layout.target_map.contains_key(&id);
@@ -1008,9 +1028,7 @@ impl<'a> SlangEmitter<'a> {
             let grid_node = self.dispatch_grid_node(id);
             let bounds_check = if grid_node != id {
                 let region = self.region_bounds_param(grid_node);
-                format!(
-                    "if (tid.x >= {region}.width || tid.y >= {region}.height) return;"
-                )
+                format!("if (tid.x >= {region}.width || tid.y >= {region}.height) return;")
             } else if is_target {
                 let ti = self.layout.target_pos.get(&id).copied().unwrap_or(0);
                 format!(
@@ -1039,7 +1057,10 @@ impl<'a> SlangEmitter<'a> {
                 body.push_str(&self.build_kernel_call(id, node, is_histogram_target));
                 // Skip the from_working + codec::encode step for non-image outputs
                 // (histogram bins, raw masks, FFT, …).
-                skip_encode = !matches!(node.op.output_decoder(), OutputDecoder::WorkingEncodeRegion { .. });
+                skip_encode = !matches!(
+                    node.op.output_decoder(),
+                    OutputDecoder::WorkingEncodeRegion { .. }
+                );
             }
             if !skip_encode {
                 body.push_str(&self.build_output_encode(id, final_target_id));
@@ -1064,7 +1085,7 @@ impl<'a> SlangEmitter<'a> {
             })
             .collect();
 
-        let target_output_kinds: Vec<ValueKind> = self
+        let target_output_kinds: Vec<Arc<dyn DataType>> = self
             .layout
             .targets
             .iter()

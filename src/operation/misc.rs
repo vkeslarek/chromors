@@ -1,6 +1,7 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
 use std::sync::Arc;
 
@@ -30,7 +31,7 @@ pub struct CastOperation {
     pub shift: Option<bool>,
 }
 impl VipsOperation for CastOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"cast\0"
     }
@@ -55,7 +56,7 @@ pub struct CopyOperation {
     pub offset_y: Option<i32>,
 }
 impl VipsOperation for CopyOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"copy\0"
     }
@@ -100,7 +101,7 @@ pub struct TileCacheOperation {
     pub persistent: Option<bool>,
 }
 impl VipsOperation for TileCacheOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"tilecache\0"
     }
@@ -129,7 +130,7 @@ impl VipsOperation for TileCacheOperation {
 
 pub struct ClampOperation;
 impl VipsOperation for ClampOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"clamp\0"
     }
@@ -140,7 +141,7 @@ impl VipsOperation for ClampOperation {
 
 pub struct ScaleImageOperation;
 impl VipsOperation for ScaleImageOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"scale\0"
     }
@@ -151,7 +152,7 @@ impl VipsOperation for ScaleImageOperation {
 
 pub struct WrapOperation;
 impl VipsOperation for WrapOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"wrap\0"
     }
@@ -162,7 +163,7 @@ impl VipsOperation for WrapOperation {
 
 pub struct SequentialOperation;
 impl VipsOperation for SequentialOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"sequential\0"
     }
@@ -173,7 +174,7 @@ impl VipsOperation for SequentialOperation {
 
 pub struct AutorotateOperation;
 impl VipsOperation for AutorotateOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"autorot\0"
     }
@@ -184,7 +185,7 @@ impl VipsOperation for AutorotateOperation {
 
 pub struct ByteswapOperation;
 impl VipsOperation for ByteswapOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"byteswap\0"
     }
@@ -195,7 +196,7 @@ impl VipsOperation for ByteswapOperation {
 
 pub struct Transpose3dOperation;
 impl VipsOperation for Transpose3dOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"transpose3d\0"
     }
@@ -206,7 +207,7 @@ impl VipsOperation for Transpose3dOperation {
 
 pub struct FalsecolourOperation;
 impl VipsOperation for FalsecolourOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"falsecolour\0"
     }
@@ -219,7 +220,7 @@ pub struct MsbOperation {
     pub band: Option<i32>,
 }
 impl VipsOperation for MsbOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"msb\0"
     }
@@ -232,11 +233,11 @@ impl VipsOperation for MsbOperation {
 }
 
 pub struct MaplutOperation<'a> {
-    pub lut: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub lut: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub band: Option<i32>,
 }
 impl VipsOperation for MaplutOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"maplut\0"
     }
@@ -250,10 +251,10 @@ impl VipsOperation for MaplutOperation<'_> {
 }
 
 pub struct RecombOperation<'a> {
-    pub matrix: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub matrix: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
 }
 impl VipsOperation for RecombOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"recomb\0"
     }
@@ -264,12 +265,12 @@ impl VipsOperation for RecombOperation<'_> {
 }
 
 pub struct IfthenelseOperation<'a> {
-    pub if_true: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
-    pub if_false: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub if_true: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
+    pub if_false: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub blend: Option<bool>,
 }
 impl VipsOperation for IfthenelseOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"ifthenelse\0"
     }
@@ -287,7 +288,7 @@ pub struct InvertlutOperation {
     pub size: Option<i32>,
 }
 impl VipsOperation for InvertlutOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"invertlut\0"
     }
@@ -301,7 +302,7 @@ impl VipsOperation for InvertlutOperation {
 
 pub struct Rad2floatOperation;
 impl VipsOperation for Rad2floatOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"rad2float\0"
     }
@@ -312,7 +313,7 @@ impl VipsOperation for Rad2floatOperation {
 
 pub struct Float2radOperation;
 impl VipsOperation for Float2radOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"float2rad\0"
     }
@@ -328,7 +329,7 @@ pub struct LinecacheOperation {
     pub persistent: Option<bool>,
 }
 impl VipsOperation for LinecacheOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"linecache\0"
     }
@@ -351,10 +352,10 @@ impl VipsOperation for LinecacheOperation {
 
 /// `case`: use `self` as the index image selecting among `cases`.
 pub struct CaseOperation<'a> {
-    pub cases: &'a [&'a crate::data::image::Image<crate::backend::vips::VipsBackend>],
+    pub cases: &'a [&'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>],
 }
 impl VipsOperation for CaseOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"case\0"
     }
@@ -367,7 +368,7 @@ impl VipsOperation for CaseOperation<'_> {
 
 pub struct MatrixInvertOperation;
 impl VipsOperation for MatrixInvertOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"matrixinvert\0"
     }
@@ -391,8 +392,18 @@ pub struct ExposureOperation {
     pub preserve: f32,
 }
 
+impl TypedOperation for ExposureOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ExposureOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         let gain = 2.0f32.powf(self.stops);
         emit_image(
             graph,
@@ -406,7 +417,7 @@ impl GpuOperation for ExposureOperation {
 }
 
 impl crate::backend::vips::operation::VipsOperation for ExposureOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"linear\0"
     }
@@ -432,7 +443,7 @@ pub struct BrightnessOperation {
 }
 
 impl crate::backend::vips::operation::VipsOperation for BrightnessOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"linear\0"
     }
@@ -443,8 +454,18 @@ impl crate::backend::vips::operation::VipsOperation for BrightnessOperation {
     }
 }
 
+impl TypedOperation for BrightnessOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for BrightnessOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         // Reuse exposure kernel: gain = value, preserve = 0 (hard clip).
         emit_image(
             graph,
@@ -472,14 +493,14 @@ pub struct WhiteBalanceOperation {
     pub mul: [f32; 4],
 }
 
-impl crate::backend::Operation<crate::data::image::Image<crate::backend::vips::VipsBackend>>
+impl crate::backend::Operation<crate::data::image::Image2D<crate::backend::vips::VipsBackend>>
     for WhiteBalanceOperation
 {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
 
     fn execute(
         &self,
-        input: &crate::data::image::Image<crate::backend::vips::VipsBackend>,
+        input: &crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     ) -> Result<Self::Output, crate::error::Error> {
         use crate::backend::vips::gobject::VipsGObject;
         use crate::operation::arithmetic::LinearOperation;
@@ -526,7 +547,7 @@ pub struct NoiseReductionOperation {
 }
 
 impl crate::backend::vips::operation::VipsOperation for NoiseReductionOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"median\0"
     }
@@ -537,4 +558,4 @@ impl crate::backend::vips::operation::VipsOperation for NoiseReductionOperation 
     }
 }
 
-// ColorConvertOp removed — use Image::convert(PixelMeta) instead.
+// ColorConvertOp removed — use Image2D::convert(PixelMeta) instead.

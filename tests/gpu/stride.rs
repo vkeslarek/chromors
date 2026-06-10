@@ -2,7 +2,7 @@ use pixors_engine::backend::gpu::GpuBackend;
 use pixors_engine::backend::gpu::{GpuContext, GpuSource};
 use pixors_engine::backend::vips::VipsBackend;
 use pixors_engine::color::space::ColorSpace;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::geometry::Rect;
 use pixors_engine::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 use std::sync::Arc;
@@ -35,9 +35,10 @@ fn vips_source_stride_subrect() {
         pixels[i * 4 + 3] = 255;
     }
 
-    let vips_image = Image::<VipsBackend>::from_memory(&pixels, 100, 100, 4, meta.format).unwrap();
+    let vips_image =
+        Image2D::<VipsBackend>::from_memory(&pixels, 100, 100, 4, meta.format).unwrap();
     let gpu_image =
-        Image::<GpuBackend>::new_from_source(&GpuSource::new_vips(vips_image, ctx.clone()))
+        Image2D::<GpuBackend>::new_from_source(&GpuSource::new_vips(vips_image, ctx.clone()))
             .unwrap();
 
     use pixors_engine::operation::misc::ExposureOperation;
@@ -60,8 +61,8 @@ fn vips_source_stride_subrect() {
     let mat = region.materialize().unwrap();
 
     let buf = match &*mat {
-        pixors_engine::backend::gpu::GraphValue::Image { buffer, .. } => buffer,
-        _ => panic!("Expected Image buffer"),
+        pixors_engine::backend::gpu::GraphValue::Image2D { buffer, .. } => buffer,
+        _ => panic!("Expected Image2D buffer"),
     };
     assert_eq!(buf.width, 20);
     assert_eq!(buf.height, 20);

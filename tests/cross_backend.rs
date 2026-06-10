@@ -1,7 +1,7 @@
 mod common;
 use common::init;
 use pixors_engine::backend::gpu::GpuBackend;
-use pixors_engine::data::image::Image as GenImage;
+use pixors_engine::data::image::Image2D as GenImage;
 use pixors_engine::operation::composite::BlendMode;
 use pixors_engine::{
     Composite2Operation, GammaOperation, GaussianBlurOperation, OpacityOperation,
@@ -611,7 +611,7 @@ fn scale_red_band_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
 
     // Vips: extract R, scale by 0.5, join G + B + A back
-    let red: pixors_engine::data::image::Image<pixors_engine::backend::vips::VipsBackend> = img
+    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
         .execute(&pixors_engine::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -708,7 +708,7 @@ fn chain_add_and_scale_band_matches_vips() {
 
     // Vips: (R + 0.1 clamped) then scale blue by 0.5
     // Step 1: add 0.1 to red (linear a=1.0 b=25.5 on extracted red band, then bandjoin)
-    let red: pixors_engine::data::image::Image<pixors_engine::backend::vips::VipsBackend> = img
+    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
         .execute(&pixors_engine::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -1088,7 +1088,7 @@ fn bandjoin4_matches_vips() {
     let img = common::rgba();
     let (w, h) = (img.width() as usize, img.height() as usize);
 
-    let r: pixors_engine::data::image::Image<pixors_engine::backend::vips::VipsBackend> = img
+    let r: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
         .execute(&ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -1167,7 +1167,7 @@ fn bandjoin2_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let red: pixors_engine::data::image::Image<pixors_engine::backend::vips::VipsBackend> = img
+    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
         .execute(&ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -1231,14 +1231,18 @@ fn divide_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::DivideOperation { right: img2.clone() };
+    let op = pixors_engine::operation::arithmetic::DivideOperation {
+        right: img2.clone(),
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::DivideOperation { right: gpu2.clone() };
+    let op_gpu = pixors_engine::operation::arithmetic::DivideOperation {
+        right: gpu2.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1257,14 +1261,18 @@ fn maxpair_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::MaxPairOperation { right: img2.clone() };
+    let op = pixors_engine::operation::arithmetic::MaxPairOperation {
+        right: img2.clone(),
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::MaxPairOperation { right: gpu2.clone() };
+    let op_gpu = pixors_engine::operation::arithmetic::MaxPairOperation {
+        right: gpu2.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1283,14 +1291,18 @@ fn minpair_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::MinPairOperation { right: img2.clone() };
+    let op = pixors_engine::operation::arithmetic::MinPairOperation {
+        right: img2.clone(),
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::MinPairOperation { right: gpu2.clone() };
+    let op_gpu = pixors_engine::operation::arithmetic::MinPairOperation {
+        right: gpu2.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1309,14 +1321,18 @@ fn remainder_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RemainderOperation { right: img2.clone() };
+    let op = pixors_engine::operation::arithmetic::RemainderOperation {
+        right: img2.clone(),
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::RemainderOperation { right: gpu2.clone() };
+    let op_gpu = pixors_engine::operation::arithmetic::RemainderOperation {
+        right: gpu2.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1335,14 +1351,20 @@ fn boolean_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::BooleanOperation { right: img2.clone(), boolean: pixors_engine::operation::OperationBoolean::And };
+    let op = pixors_engine::operation::arithmetic::BooleanOperation {
+        right: img2.clone(),
+        boolean: pixors_engine::operation::OperationBoolean::And,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::BooleanOperation { right: gpu2.clone(), boolean: pixors_engine::operation::OperationBoolean::And };
+    let op_gpu = pixors_engine::operation::arithmetic::BooleanOperation {
+        right: gpu2.clone(),
+        boolean: pixors_engine::operation::OperationBoolean::And,
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1361,14 +1383,20 @@ fn relational_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RelationalOperation { right: img2.clone(), relational: pixors_engine::operation::OperationRelational::More };
+    let op = pixors_engine::operation::arithmetic::RelationalOperation {
+        right: img2.clone(),
+        relational: pixors_engine::operation::OperationRelational::More,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::RelationalOperation { right: gpu2.clone(), relational: pixors_engine::operation::OperationRelational::More };
+    let op_gpu = pixors_engine::operation::arithmetic::RelationalOperation {
+        right: gpu2.clone(),
+        relational: pixors_engine::operation::OperationRelational::More,
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1387,14 +1415,28 @@ fn composite2_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::composite::Composite2Operation { overlay: img2.clone(), mode: pixors_engine::operation::composite::BlendMode::Over, x: Some(0), y: Some(0), compositing_space: None, premultiplied: None };
+    let op = pixors_engine::operation::composite::Composite2Operation {
+        overlay: img2.clone(),
+        mode: pixors_engine::operation::composite::BlendMode::Over,
+        x: Some(0),
+        y: Some(0),
+        compositing_space: None,
+        premultiplied: None,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::composite::Composite2Operation { overlay: gpu2.clone(), mode: pixors_engine::operation::composite::BlendMode::Over, x: Some(0), y: Some(0), compositing_space: None, premultiplied: None };
+    let op_gpu = pixors_engine::operation::composite::Composite2Operation {
+        overlay: gpu2.clone(),
+        mode: pixors_engine::operation::composite::BlendMode::Over,
+        x: Some(0),
+        y: Some(0),
+        compositing_space: None,
+        premultiplied: None,
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1412,7 +1454,9 @@ fn round_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RoundOperation { round: pixors_engine::operation::OperationRound::Floor };
+    let op = pixors_engine::operation::arithmetic::RoundOperation {
+        round: pixors_engine::operation::OperationRound::Floor,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1435,7 +1479,10 @@ fn boolean_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::BooleanConstOperation { constants: vec![128.0], boolean: pixors_engine::operation::OperationBoolean::And };
+    let op = pixors_engine::operation::arithmetic::BooleanConstOperation {
+        constants: vec![128.0],
+        boolean: pixors_engine::operation::OperationBoolean::And,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1448,7 +1495,10 @@ fn boolean_const_matches_vips() {
 
     let rms = common::rms_u8(&cpu_bytes, &poc_u8);
     println!("boolean_const GPU vs vips RMS = {rms:.4} (0..255)");
-    assert!(rms < 5.0, "GPU boolean_const diverges from vips: RMS {rms:.4}");
+    assert!(
+        rms < 5.0,
+        "GPU boolean_const diverges from vips: RMS {rms:.4}"
+    );
 }
 
 #[test]
@@ -1458,7 +1508,10 @@ fn relational_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RelationalConstOperation { constants: vec![128.0], relational: pixors_engine::operation::OperationRelational::More };
+    let op = pixors_engine::operation::arithmetic::RelationalConstOperation {
+        constants: vec![128.0],
+        relational: pixors_engine::operation::OperationRelational::More,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1471,7 +1524,10 @@ fn relational_const_matches_vips() {
 
     let rms = common::rms_u8(&cpu_bytes, &poc_u8);
     println!("relational_const GPU vs vips RMS = {rms:.4} (0..255)");
-    assert!(rms < 5.0, "GPU relational_const diverges from vips: RMS {rms:.4}");
+    assert!(
+        rms < 5.0,
+        "GPU relational_const diverges from vips: RMS {rms:.4}"
+    );
 }
 
 #[test]
@@ -1481,7 +1537,9 @@ fn remainder_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RemainderConstOperation { constants: vec![128.0] };
+    let op = pixors_engine::operation::arithmetic::RemainderConstOperation {
+        constants: vec![128.0],
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1494,7 +1552,10 @@ fn remainder_const_matches_vips() {
 
     let rms = common::rms_u8(&cpu_bytes, &poc_u8);
     println!("remainder_const GPU vs vips RMS = {rms:.4} (0..255)");
-    assert!(rms < 5.0, "GPU remainder_const diverges from vips: RMS {rms:.4}");
+    assert!(
+        rms < 5.0,
+        "GPU remainder_const diverges from vips: RMS {rms:.4}"
+    );
 }
 
 #[test]
@@ -1504,7 +1565,10 @@ fn bandbool_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::bands::BandboolOperation { boolean: pixors_engine::operation::OperationBoolean::And, bands: 4 };
+    let op = pixors_engine::operation::bands::BandboolOperation {
+        boolean: pixors_engine::operation::OperationBoolean::And,
+        bands: 4,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1597,14 +1661,20 @@ fn morph_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::MorphOperation { mask: mask.clone(), morph: pixors_engine::operation::OperationMorphology::Erode };
+    let op = pixors_engine::operation::convolution::MorphOperation {
+        mask: mask.clone(),
+        morph: pixors_engine::operation::OperationMorphology::Erode,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::MorphOperation { mask: mask_gpu.clone(), morph: pixors_engine::operation::OperationMorphology::Erode };
+    let op_gpu = pixors_engine::operation::convolution::MorphOperation {
+        mask: mask_gpu.clone(),
+        morph: pixors_engine::operation::OperationMorphology::Erode,
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1623,14 +1693,22 @@ fn conva_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::ConvaOperation { mask: mask.clone(), layers: None, cluster: None };
+    let op = pixors_engine::operation::convolution::ConvaOperation {
+        mask: mask.clone(),
+        layers: None,
+        cluster: None,
+    };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConvaOperation { mask: mask_gpu.clone(), layers: None, cluster: None };
+    let op_gpu = pixors_engine::operation::convolution::ConvaOperation {
+        mask: mask_gpu.clone(),
+        layers: None,
+        cluster: None,
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1656,7 +1734,9 @@ fn convf_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConvfOperation { mask: mask_gpu.clone() };
+    let op_gpu = pixors_engine::operation::convolution::ConvfOperation {
+        mask: mask_gpu.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);
@@ -1682,7 +1762,9 @@ fn convi_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConviOperation { mask: mask_gpu.clone() };
+    let op_gpu = pixors_engine::operation::convolution::ConviOperation {
+        mask: mask_gpu.clone(),
+    };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
     let poc_bytes = common::poc_materialize(&gpu_out);

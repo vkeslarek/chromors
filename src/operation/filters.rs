@@ -1,6 +1,7 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
 use crate::geometry::Rect;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ impl GaussianBlurOperation {
 }
 
 impl VipsOperation for GaussianBlurOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"gaussblur\0"
     }
@@ -49,7 +50,7 @@ pub struct SharpenOperation {
 }
 
 impl VipsOperation for SharpenOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"sharpen\0"
     }
@@ -82,7 +83,7 @@ pub struct CannyOperation {
 }
 
 impl VipsOperation for CannyOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"canny\0"
     }
@@ -102,7 +103,7 @@ pub struct MedianOperation {
 }
 
 impl VipsOperation for MedianOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"rank\0"
     }
@@ -119,7 +120,7 @@ pub struct HoughLineOperation {
     pub height: Option<i32>,
 }
 impl VipsOperation for HoughLineOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hough_line\0"
     }
@@ -140,7 +141,7 @@ pub struct HoughCircleOperation {
     pub max_radius: Option<i32>,
 }
 impl VipsOperation for HoughCircleOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hough_circle\0"
     }
@@ -165,39 +166,63 @@ struct BlurHPassOp {
     radius: i32,
 }
 
+impl TypedOperation for BlurHPassOp {
+    type Output = ImageType;
+}
+
 impl GpuOperation for BlurHPassOp {
-    fn emit(&self, _: NodeId, _: &mut Graph, _: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(&self, _: &[NodeId], _: &mut Graph, _: Arc<dyn GpuOperation>) -> NodeId {
         panic!("BlurHPassOp is not emitted directly")
     }
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        // Scale the halo by 1/lod_scale so we don't over-fetch source pixels.
-        let scaled_radius = (self.radius as f64 / lod.scale_factor()).ceil() as i32;
-        let bounds = Rect::new(0, 0, w as i32, h as i32);
-        vec![(
-            0,
-            Rect::new(
-                output_rect.x - scaled_radius,
-                output_rect.y,
-                output_rect.width + 2 * scaled_radius,
-                output_rect.height,
-            )
-            .clamp(bounds),
-        )]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let scaled_radius = (self.radius as f64 / lod.scale_factor()).ceil() as i32;
+                vec![(
+                    0,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: Rect::new(
+                            rect.x - scaled_radius,
+                            rect.y,
+                            rect.width + 2 * scaled_radius,
+                            rect.height,
+                        ),
+                        lod: *lod,
+                    },
+                )]
+            }
+            _ => vec![(0, wu.clone())],
+        }
     }
-    /// sigma is param index 0 — must be divided by lod.scale_factor() at dispatch.
-    fn lod_scale_param_indices(&self) -> &'static [usize] {
-        &[0]
+    fn scale_params_for_lod(
+        &self,
+        params: &[crate::backend::gpu::param::Param],
+        lod: crate::backend::gpu::Lod,
+    ) -> Vec<crate::backend::gpu::param::Param> {
+        let scale = lod.scale_factor() as f32;
+        let mut out = params.to_vec();
+        if let Some(crate::backend::gpu::param::Param::F32(v)) = out.first_mut() {
+            *v /= scale;
+        }
+        out
     }
 }
 
+impl TypedOperation for GaussianBlurOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for GaussianBlurOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         let h_pass: Arc<dyn GpuOperation> = Arc::new(BlurHPassOp {
             radius: self.radius(),
         });
@@ -219,28 +244,39 @@ impl GpuOperation for GaussianBlurOperation {
         )
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let scaled_radius = (self.radius() as f64 / lod.scale_factor()).ceil() as i32;
-        let bounds = Rect::new(0, 0, w as i32, h as i32);
-        vec![(
-            0,
-            Rect::new(
-                output_rect.x,
-                output_rect.y - scaled_radius,
-                output_rect.width,
-                output_rect.height + 2 * scaled_radius,
-            )
-            .clamp(bounds),
-        )]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let scaled_radius = (self.radius() as f64 / lod.scale_factor()).ceil() as i32;
+                vec![(
+                    0,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: Rect::new(
+                            rect.x,
+                            rect.y - scaled_radius,
+                            rect.width,
+                            rect.height + 2 * scaled_radius,
+                        ),
+                        lod: *lod,
+                    },
+                )]
+            }
+            _ => vec![(0, wu.clone())],
+        }
     }
-    /// sigma is param index 0 (V-pass node).
-    fn lod_scale_param_indices(&self) -> &'static [usize] {
-        &[0]
+    fn scale_params_for_lod(
+        &self,
+        params: &[crate::backend::gpu::param::Param],
+        lod: crate::backend::gpu::Lod,
+    ) -> Vec<crate::backend::gpu::param::Param> {
+        let scale = lod.scale_factor() as f32;
+        let mut out = params.to_vec();
+        if let Some(crate::backend::gpu::param::Param::F32(v)) = out.first_mut() {
+            *v /= scale;
+        }
+        out
     }
 }

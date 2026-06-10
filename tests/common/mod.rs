@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex, Once};
 use bytemuck;
 use pixors_engine::backend::gpu::{GpuBackend, Rect, context::GpuContext};
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image as GenImage;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D as GenImage;
+use pixors_engine::data::image::Image2D;
 
 static INIT: Once = Once::new();
 
@@ -20,19 +20,19 @@ pub fn init() {
     INIT.call_once(pixors_engine::init);
 }
 
-pub fn rgb() -> Image<VipsBackend> {
+pub fn rgb() -> Image2D<VipsBackend> {
     init();
-    Image::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap()
+    Image2D::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap()
 }
 
-pub fn gray() -> Image<VipsBackend> {
+pub fn gray() -> Image2D<VipsBackend> {
     init();
-    Image::<VipsBackend>::open("tests/fixtures/gray.jpg").unwrap()
+    Image2D::<VipsBackend>::open("tests/fixtures/gray.jpg").unwrap()
 }
 
-pub fn rgba() -> Image<VipsBackend> {
+pub fn rgba() -> Image2D<VipsBackend> {
     init();
-    Image::<VipsBackend>::open("tests/fixtures/rgba.png").unwrap()
+    Image2D::<VipsBackend>::open("tests/fixtures/rgba.png").unwrap()
 }
 
 pub fn gpu_ctx() -> Arc<GpuContext> {
@@ -40,7 +40,7 @@ pub fn gpu_ctx() -> Arc<GpuContext> {
 }
 
 /// Upload a vips image to the POC GpuBackend.
-pub fn vips_to_gpu(img: &Image<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImage<GpuBackend> {
+pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImage<GpuBackend> {
     let src = pixors_engine::backend::gpu::source::GpuSource::new_vips(img.clone(), ctx.clone());
     GenImage::<GpuBackend>::new_from_source(&src).unwrap()
 }
@@ -55,14 +55,14 @@ pub fn poc_materialize(img: &GenImage<GpuBackend>) -> Vec<u8> {
 }
 
 /// Read vips bytes as f32 in [0, 1] range.
-pub fn vips_to_f32(img: &Image<VipsBackend>) -> Vec<f32> {
+pub fn vips_to_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     let (w, h) = (img.width(), img.height());
     let target = pixors_engine::target::ImageTarget::new(img.clone());
     let mat = target.pull(Rect::new(0, 0, w as i32, h as i32), 0).unwrap();
     mat.buffer.iter().map(|b| *b as f32 / 255.0).collect()
 }
 
-pub fn vips_materialize(img: &Image<VipsBackend>) -> Vec<u8> {
+pub fn vips_materialize(img: &Image2D<VipsBackend>) -> Vec<u8> {
     let (w, h) = (img.width(), img.height());
     let target = pixors_engine::target::ImageTarget::new(img.clone());
     let mat = target.pull(Rect::new(0, 0, w as i32, h as i32), 0).unwrap();
@@ -119,7 +119,7 @@ pub fn rms_f32(a: &[u8], b: &[u8]) -> f64 {
 
 /// Convert any Vips materialized image bytes to normalized f32 [0, 1].
 /// Handles u8, u16, and f32 formats.
-pub fn vips_materialize_f32(img: &Image<VipsBackend>) -> Vec<f32> {
+pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     let (w, h) = (img.width(), img.height());
     let bands = img.bands() as usize;
     let target = pixors_engine::target::ImageTarget::new(img.clone());

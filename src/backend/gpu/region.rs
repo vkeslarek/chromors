@@ -1,14 +1,14 @@
-//! GPU region — a pending or materialised tile from an `Image<GpuBackend>`.
+//! GPU region — a pending or materialised tile from an `Image2D<GpuBackend>`.
 //!
 //! Lifecycle:
 //!   1. `image.new_region()` or `image.new_region_at_mip(mip)`
 //!   2. `region.prepare(rect)` — rect is in MIP space
 //!   3. `region.materialize()` → compile + dispatch the fused graph
-//!   4. Read bytes from the returned [`GraphValue`]
+//!   4. Read bytes from the returned [`MaterializedValue`]
 
 use std::sync::Arc;
 
-use super::value::GraphValue;
+use super::value::MaterializedValue;
 use crate::geometry::Rect;
 
 // ── GpuRegion ────────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ impl GpuRegion {
     }
 
     /// Compile the fused DAG and dispatch it on the GPU.
-    pub fn materialize(&self) -> Result<Arc<GraphValue>, crate::error::Error> {
+    pub fn materialize(&self) -> Result<Arc<MaterializedValue>, crate::error::Error> {
         let _sw = crate::utils::Stopwatch::new("gpu.materialize");
         let rect = self
             .rect
@@ -65,7 +65,7 @@ impl GpuRegion {
     pub fn materialize_batch(
         &self,
         rects: &[Rect],
-    ) -> Result<Vec<Arc<GraphValue>>, crate::error::Error> {
+    ) -> Result<Vec<Arc<MaterializedValue>>, crate::error::Error> {
         super::materialize::execute_batch(self, rects)
     }
 }

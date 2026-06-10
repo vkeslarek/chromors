@@ -1,8 +1,8 @@
+use crate::backend::gpu::datatype::HistogramType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_unary;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use crate::backend::gpu::param::Param;
-use crate::backend::gpu::value::ValueKind;
 use crate::backend::gpu::work_unit::WorkUnit;
 use std::sync::Arc;
 
@@ -55,8 +55,8 @@ impl Runner for Bounds {
 
 /// A pair of single-band result images (e.g. `profile`/`project` → columns, rows).
 pub struct ImagePair {
-    pub columns: crate::data::image::Image<crate::backend::vips::VipsBackend>,
-    pub rows: crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub columns: crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
+    pub rows: crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
 }
 impl Runner for ImagePair {
     fn run(mut op: VipsGObject) -> Result<Self, Error> {
@@ -72,7 +72,7 @@ impl Runner for ImagePair {
 
 /// Output of `labelregions`: the label mask plus the region count.
 pub struct Labels {
-    pub mask: crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub mask: crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub segments: i32,
 }
 impl Runner for Labels {
@@ -89,8 +89,8 @@ impl Runner for Labels {
 
 /// Output of `fill_nearest`: filled image plus the distance map.
 pub struct Filled {
-    pub value: crate::data::image::Image<crate::backend::vips::VipsBackend>,
-    pub distance: crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub value: crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
+    pub distance: crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
 }
 impl Runner for Filled {
     fn run(mut op: VipsGObject) -> Result<Self, Error> {
@@ -270,7 +270,7 @@ pub struct HistogramFindOperation {
     pub band: Option<i32>,
 }
 impl VipsOperation for HistogramFindOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_find\0"
     }
@@ -286,7 +286,7 @@ pub struct HistogramEqualizeOperation {
     pub band: Option<i32>,
 }
 impl VipsOperation for HistogramEqualizeOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_equal\0"
     }
@@ -300,7 +300,7 @@ impl VipsOperation for HistogramEqualizeOperation {
 
 pub struct HistogramCumulativeOperation;
 impl VipsOperation for HistogramCumulativeOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_cum\0"
     }
@@ -311,7 +311,7 @@ impl VipsOperation for HistogramCumulativeOperation {
 
 pub struct HistogramNormalizeOperation;
 impl VipsOperation for HistogramNormalizeOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_norm\0"
     }
@@ -322,7 +322,7 @@ impl VipsOperation for HistogramNormalizeOperation {
 
 pub struct HistogramPlotOperation;
 impl VipsOperation for HistogramPlotOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_plot\0"
     }
@@ -332,11 +332,11 @@ impl VipsOperation for HistogramPlotOperation {
 }
 
 pub struct HistFindIndexedOperation<'a> {
-    pub index: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub index: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub combine: Option<CombineMode>,
 }
 impl VipsOperation for HistFindIndexedOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_find_indexed\0"
     }
@@ -353,7 +353,7 @@ pub struct HistFindNdimOperation {
     pub bins: Option<i32>,
 }
 impl VipsOperation for HistFindNdimOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_find_ndim\0"
     }
@@ -371,7 +371,7 @@ pub struct HistLocalOperation {
     pub max_slope: Option<i32>,
 }
 impl VipsOperation for HistLocalOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_local\0"
     }
@@ -386,10 +386,10 @@ impl VipsOperation for HistLocalOperation {
 }
 
 pub struct HistMatchOperation<'a> {
-    pub reference: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub reference: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
 }
 impl VipsOperation for HistMatchOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"hist_match\0"
     }
@@ -408,7 +408,7 @@ pub struct StdifOperation {
     pub mean_weight: Option<f64>,
 }
 impl VipsOperation for StdifOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"stdif\0"
     }
@@ -440,7 +440,7 @@ pub struct MeasureOperation {
     pub height: Option<i32>,
 }
 impl VipsOperation for MeasureOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"measure\0"
     }
@@ -465,7 +465,7 @@ impl VipsOperation for MeasureOperation {
 
 pub struct StatsOperation;
 impl VipsOperation for StatsOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"stats\0"
     }
@@ -587,8 +587,18 @@ pub struct HistogramOp {
     pub channel: u32,
 }
 
+impl TypedOperation for HistogramOp {
+    type Output = HistogramType;
+}
+
 impl GpuOperation for HistogramOp {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_unary(
             graph,
             input,
@@ -596,12 +606,8 @@ impl GpuOperation for HistogramOp {
             "ops.histogram",
             "histogram_kernel",
             vec![Param::U32(self.channel)],
-            ValueKind::Histogram { bins: self.bins },
+            Arc::new(HistogramType { bins: self.bins }),
         )
-    }
-
-    fn output_kind(&self, _input_w: u32, _input_h: u32) -> ValueKind {
-        ValueKind::Histogram { bins: self.bins }
     }
 
     fn output_dims(&self, _input_w: u32, _input_h: u32) -> Option<(u32, u32)> {
@@ -626,15 +632,25 @@ impl GpuOperation for HistogramOp {
 /// 2-D Cb/Cr density grid computed entirely on GPU.
 ///
 /// Stores results in a flat `grid_size × grid_size` atomic-uint buffer
-/// (`ValueKind::Histogram { bins: grid_size² }`).  Apply to a *display*
+/// (`HistogramType { bins: grid_size² }`).  Apply to a *display*
 /// image (sRGB Rgba8) for standard BT.601 Cb/Cr positions.
 #[derive(Clone, Debug)]
 pub struct VectorscopeOp {
     pub grid_size: u32,
 }
 
+impl TypedOperation for VectorscopeOp {
+    type Output = HistogramType;
+}
+
 impl GpuOperation for VectorscopeOp {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_unary(
             graph,
             input,
@@ -642,14 +658,10 @@ impl GpuOperation for VectorscopeOp {
             "ops.vectorscope",
             "vectorscope_kernel",
             vec![Param::U32(self.grid_size)],
-            ValueKind::Histogram {
+            Arc::new(HistogramType {
                 bins: self.grid_size * self.grid_size,
-            },
+            }),
         )
-    }
-
-    fn output_kind(&self, _input_w: u32, _input_h: u32) -> ValueKind {
-        ValueKind::Histogram { bins: self.grid_size * self.grid_size }
     }
 
     fn output_dims(&self, _input_w: u32, _input_h: u32) -> Option<(u32, u32)> {

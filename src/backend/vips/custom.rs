@@ -28,7 +28,7 @@ use std::slice;
 use super::FromVipsBandFormat;
 use crate::backend::vips::VipsBackend;
 use crate::backend::vips::vips_error;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::libvips_ffi as ffi;
 
@@ -164,7 +164,7 @@ unsafe extern "C" fn generate_tramp(
 }
 
 /// A custom **reduction** over an image: scan it region by region and produce
-/// an arbitrary Rust value — not an `Image` or any other vips object.
+/// an arbitrary Rust value — not an `Image2D` or any other vips object.
 ///
 /// This is how vips' own `avg`/`min`/`stats` work. vips runs regions across its
 /// threadpool, so each thread folds into its own [`Acc`](VipsCustomSink::Acc);
@@ -230,7 +230,7 @@ unsafe extern "C" fn sink_stop<S: VipsCustomSink>(
     0
 }
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     /// Run a custom [`VipsCustomSink`] reduction — scan the image region by
     /// region and return an arbitrary Rust value. Lazy/threaded, no download.
     pub fn sink<S: VipsCustomSink>(&self, sink: S) -> Result<S::Output, Error> {
@@ -306,7 +306,7 @@ impl Image<VipsBackend> {
                 Some(drop_holder),
             );
 
-            Ok(Image::from_vips_ptr(out))
+            Ok(Image2D::from_vips_ptr(out))
         }
     }
 }

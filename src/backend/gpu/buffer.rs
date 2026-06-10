@@ -1,7 +1,7 @@
 //! GPU buffer — a tracked, ref-counted, evictable VRAM allocation.
 //!
 //! [`GpuBuffer`] is payload-agnostic: it carries no pixel format, dimensions,
-//! or color space. Image-specific concerns live on [`ImageBuffer`].
+//! or color space. Image2D-specific concerns live on [`ImageBuffer`].
 
 use std::sync::Arc;
 

@@ -2,13 +2,13 @@
 
 use crate::common::rgb;
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::*;
 
 #[test]
 fn freq_masks() {
     crate::common::init();
-    let ideal = Image::<VipsBackend>::generate(&MaskIdeal {
+    let ideal = Image2D::<VipsBackend>::generate(&MaskIdeal {
         width: 64,
         height: 64,
         frequency_cutoff: 0.5,
@@ -19,7 +19,7 @@ fn freq_masks() {
     })
     .unwrap();
     assert_eq!(ideal.width(), 64);
-    let bw = Image::<VipsBackend>::generate(&MaskButterworth {
+    let bw = Image2D::<VipsBackend>::generate(&MaskButterworth {
         width: 32,
         height: 32,
         order: 2.0,
@@ -37,7 +37,7 @@ fn freq_masks() {
 #[test]
 fn array_join_and_switch() {
     let a = rgb();
-    let joined = Image::<VipsBackend>::array_join(
+    let joined = Image2D::<VipsBackend>::array_join(
         &[&a, &a],
         &ArrayJoinParams {
             across: Some(2),
@@ -59,16 +59,16 @@ fn array_join_and_switch() {
             constants: vec![128.0],
         })
         .unwrap();
-    let sw = Image::<VipsBackend>::switch(&[&mask]).unwrap();
+    let sw = Image2D::<VipsBackend>::switch(&[&mask]).unwrap();
     assert_eq!(sw.width(), 200);
 }
 
 #[test]
 fn sum_and_bandrank() {
     let a = rgb();
-    let summed = Image::<VipsBackend>::sum(&[&a, &a]).unwrap();
+    let summed = Image2D::<VipsBackend>::sum(&[&a, &a]).unwrap();
     assert_eq!(summed.width(), 200);
-    let ranked = Image::<VipsBackend>::band_rank(&[&a, &a, &a], 1).unwrap();
+    let ranked = Image2D::<VipsBackend>::band_rank(&[&a, &a, &a], 1).unwrap();
     assert_eq!(ranked.width(), 200);
 }
 
@@ -83,9 +83,12 @@ fn composite_stack() {
             gap: None,
         })
         .unwrap();
-    let out =
-        Image::<VipsBackend>::composite(&[&a, &b], &[BlendMode::Over], &CompositeParams::default())
-            .unwrap();
+    let out = Image2D::<VipsBackend>::composite(
+        &[&a, &b],
+        &[BlendMode::Over],
+        &CompositeParams::default(),
+    )
+    .unwrap();
     assert_eq!(out.width(), 200);
 }
 

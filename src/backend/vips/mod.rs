@@ -72,7 +72,7 @@ pub trait FromVipsInterpretation: Sized {
 use super::{
     Backend, OpenBuffer, OpenFile, Operation as SuperOperation, SourceInput, TargetOutput,
 };
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 
 /// Plain marker struct for the libvips backend.
 pub struct VipsBackend;
@@ -134,10 +134,10 @@ impl SourceInput for VipsBackend {
     }
 }
 
-impl TargetOutput<Image<VipsBackend>> for VipsBackend {
+impl TargetOutput<Image2D<VipsBackend>> for VipsBackend {
     type Target = Target;
 
-    fn write_to_target(image: &Image<VipsBackend>, target: &Target) -> Result<(), Error> {
+    fn write_to_target(image: &Image2D<VipsBackend>, target: &Target) -> Result<(), Error> {
         unsafe {
             let empty = c"";
             if ffi::vips_image_write_to_target(image.vips_ptr(), empty.as_ptr(), target.ptr, null())
@@ -174,11 +174,11 @@ impl OpenBuffer for VipsBackend {
     }
 }
 
-// ── Image<VipsBackend>::execute ──────────────────────────────────────────────
+// ── Image2D<VipsBackend>::execute ──────────────────────────────────────────────
 
-impl Image<VipsBackend> {
+impl Image2D<VipsBackend> {
     /// Execute an operation against this image.
-    pub fn execute<O: crate::backend::Operation<Image<VipsBackend>>>(
+    pub fn execute<O: crate::backend::Operation<Image2D<VipsBackend>>>(
         &self,
         op: &O,
     ) -> Result<O::Output, Error> {
@@ -196,8 +196,8 @@ impl ImageTargetCapability for VipsBackend {
         rect: Rect,
         _lod: u32,
     ) -> Result<MaterializedImage<Self>, Error> {
-        // Need a temporary Image around the handle to use Region::new
-        let img = Image::<VipsBackend>::from_handle(handle.clone());
+        // Need a temporary Image2D around the handle to use Region::new
+        let img = Image2D::<VipsBackend>::from_handle(handle.clone());
         let img_w = img.width();
         let img_h = img.height();
         let clamped = Rect::new(
@@ -240,16 +240,16 @@ impl HistogramTargetCapability for VipsBackend {
     type HistogramHandle = VipsHandle;
 
     fn create_histogram(handle: &Self::Handle) -> Result<Self::HistogramHandle, Error> {
-        let img = Image::<VipsBackend>::from_handle(handle.clone());
+        let img = Image2D::<VipsBackend>::from_handle(handle.clone());
         let op = crate::operation::HistogramFindOperation { band: None };
-        let hist_img = SuperOperation::<Image<VipsBackend>>::execute(&op, &img)?;
+        let hist_img = SuperOperation::<Image2D<VipsBackend>>::execute(&op, &img)?;
         Ok(hist_img.handle)
     }
 
     fn pull_histogram(
         handle: &Self::HistogramHandle,
     ) -> Result<MaterializedHistogram<Self>, Error> {
-        let img = Image::<VipsBackend>::from_handle(handle.clone());
+        let img = Image2D::<VipsBackend>::from_handle(handle.clone());
         let bins = img.width() as u32;
         let rect = crate::geometry::Rect::new(0, 0, img.width(), img.height());
         let materialized = Self::pull_image(&img.handle, rect, 0)?;
@@ -270,7 +270,7 @@ use crate::pixel::{AlphaPolicy, PixelMeta};
 
 impl ColorConversionCapability for VipsBackend {
     fn pixel_meta(handle: &VipsHandle) -> PixelMeta {
-        let img = Image::<VipsBackend>::from_handle(handle.clone());
+        let img = Image2D::<VipsBackend>::from_handle(handle.clone());
         let format = img.pixel_format();
         let alpha = if img.has_alpha() {
             AlphaPolicy::Straight
@@ -286,7 +286,7 @@ impl ColorConversionCapability for VipsBackend {
     }
 
     fn convert(handle: &VipsHandle, target: PixelMeta) -> Result<VipsHandle, Error> {
-        let img = Image::<VipsBackend>::from_handle(handle.clone());
+        let img = Image2D::<VipsBackend>::from_handle(handle.clone());
         let current = VipsBackend::pixel_meta(handle);
         vips_convert_impl(&img, current, target).map(|r| r.handle)
     }
@@ -298,10 +298,10 @@ impl ColorConversionCapability for VipsBackend {
 /// and `vips_recomb` with our Bradford-adapted RGB matrix for non-native spaces
 /// (ACES AP0/AP1, ProPhoto, Wide, DCI-P3, etc.).
 fn vips_convert_impl(
-    img: &Image<VipsBackend>,
+    img: &Image2D<VipsBackend>,
     current: PixelMeta,
     target: PixelMeta,
-) -> Result<Image<VipsBackend>, Error> {
+) -> Result<Image2D<VipsBackend>, Error> {
     use crate::operation::misc::CastOperation;
 
     let mut out = img.clone();
@@ -384,10 +384,10 @@ fn vips_knows_both(src: ColorSpace, dst: ColorSpace) -> bool {
 
 /// Apply a full color space conversion using a Bradford-adapted RGB→RGB matrix.
 fn matrix_convert(
-    img: Image<VipsBackend>,
+    img: Image2D<VipsBackend>,
     src: ColorSpace,
     dst: ColorSpace,
-) -> Result<Image<VipsBackend>, Error> {
+) -> Result<Image2D<VipsBackend>, Error> {
     use crate::backend::vips::IntoVipsInterpretation;
     use crate::color::matrix::rgb_to_rgb_transform;
     use crate::operation::misc::CastOperation;
@@ -458,9 +458,9 @@ fn matrix_convert(
 /// unchanged — the matrix is extended to 4×4 with an identity row/column
 /// for the alpha channel.
 fn apply_recomb(
-    img: Image<VipsBackend>,
+    img: Image2D<VipsBackend>,
     matrix: &crate::color::matrix::Matrix3x3,
-) -> Result<Image<VipsBackend>, Error> {
+) -> Result<Image2D<VipsBackend>, Error> {
     use crate::libvips_ffi as ffi;
 
     let bands = img.bands();
@@ -520,5 +520,5 @@ fn apply_recomb(
     if out_ptr.is_null() {
         return Err(Error::NullPtr);
     }
-    Ok(Image::<VipsBackend>::from_vips_ptr(out_ptr))
+    Ok(Image2D::<VipsBackend>::from_vips_ptr(out_ptr))
 }

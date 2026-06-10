@@ -1,4 +1,4 @@
-//! Image mosaicing / stitching operations (`VipsMosaicing`).
+//! Image2D mosaicing / stitching operations (`VipsMosaicing`).
 //!
 //! The reference image is `self`; the secondary image is passed as `sec`.
 //! Operations that auto-detect alignment expose only the joined `out` image;
@@ -12,7 +12,7 @@ use crate::libvips_ffi as ffi;
 
 /// Join two images at a single tie-point (`mosaic`), searching for the best fit.
 pub struct MosaicOperation<'a> {
-    pub secondary: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub secondary: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub direction: Direction,
     pub x_reference: i32,
     pub y_reference: i32,
@@ -24,7 +24,7 @@ pub struct MosaicOperation<'a> {
     pub search_band: Option<i32>,
 }
 impl VipsOperation for MosaicOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"mosaic\0"
     }
@@ -53,7 +53,7 @@ impl VipsOperation for MosaicOperation<'_> {
 
 /// Join two images at two tie-points (`mosaic1`), correcting scale and rotation.
 pub struct Mosaic1Operation<'a> {
-    pub secondary: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub secondary: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub direction: Direction,
     pub x_reference_1: i32,
     pub y_reference_1: i32,
@@ -70,7 +70,7 @@ pub struct Mosaic1Operation<'a> {
     pub max_blend: Option<i32>,
 }
 impl VipsOperation for Mosaic1Operation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"mosaic1\0"
     }
@@ -106,7 +106,7 @@ impl VipsOperation for Mosaic1Operation<'_> {
 
 /// First-order geometric match of two images at two tie-points (`match`).
 pub struct MatchOperation<'a> {
-    pub secondary: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub secondary: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub x_reference_1: i32,
     pub y_reference_1: i32,
     pub x_secondary_1: i32,
@@ -121,7 +121,7 @@ pub struct MatchOperation<'a> {
     pub interpolate: Option<&'a crate::backend::vips::Interpolate>,
 }
 impl VipsOperation for MatchOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"match\0"
     }
@@ -153,14 +153,14 @@ impl VipsOperation for MatchOperation<'_> {
 
 /// Directly merge two pre-aligned images at a fixed displacement (`merge`).
 pub struct MergeOperation<'a> {
-    pub secondary: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub secondary: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub direction: Direction,
     pub dx: i32,
     pub dy: i32,
     pub max_blend: Option<i32>,
 }
 impl VipsOperation for MergeOperation<'_> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"merge\0"
     }
@@ -182,7 +182,7 @@ pub struct GlobalBalanceOperation {
     pub integer_output: Option<bool>,
 }
 impl VipsOperation for GlobalBalanceOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"globalbalance\0"
     }

@@ -5,9 +5,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::color::space::ColorSpace;
 use crate::geometry::Rect;
-use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use super::context::GpuContext;
 use super::graph::{Graph, NodeId};
@@ -15,7 +13,7 @@ use super::graph::{Graph, NodeId};
 // ── Lod ──────────────────────────────────────────────────────────────────────
 
 /// Level-of-detail level. `Lod(0)` = full resolution, `Lod(n)` = `1/2^n`.
-/// Carried on `GpuRegion`, not on `Image` — the image handle is LOD-agnostic.
+/// Carried on `GpuRegion`, not on `Image2D` — the image handle is LOD-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Lod(pub u32);
 
@@ -39,7 +37,7 @@ impl Lod {
 
 /// A typed reference into a shared graph, tied to a specific root node.
 ///
-/// All `Image<GpuBackend>` and typed data handles (`Histogram<GpuBackend>`, …)
+/// All `Image2D<GpuBackend>` and typed data handles (`Histogram<GpuBackend>`, …)
 /// are thin wrappers around this handle.
 ///
 /// The materialized-tile cache lives on [`GpuContext::cache`] — shared across
@@ -62,8 +60,14 @@ impl GraphNodeHandle {
         let rect = Rect::new(0, 0, 1, 1);
         let (plan, ir) = {
             let g = self.graph.lock().unwrap();
-            let plan = g.materialize(&[(self.root_id, rect)], lod);
-            let (ir, _) = plan.emit_ir_with_layout(&g, self.ctx.wg_dim);
+            let plan = g.materialize(
+                &[(
+                    self.root_id,
+                    crate::backend::gpu::WorkUnit::Region { rect, lod },
+                )],
+                lod,
+            );
+            let (ir, _) = plan.emit_ir_with_layout(&g, self.ctx.wg_dim, lod);
             (plan, ir)
         };
         let (shader_dir, out_dir) = crate::backend::gpu::compile::shader_paths();
@@ -79,43 +83,3 @@ impl GraphNodeHandle {
         }
     }
 }
-
-// ── GpuImageHandle ────────────────────────────────────────────────────────────
-
-/// Image handle for the JIT-fused GPU backend.
-///
-/// Thin newtype over [`GraphNodeHandle`] plus full-resolution dimensions and
-/// pixel metadata. LOD level is specified at tile-pull time via
-/// `GpuRegion::new_at_mip()`.
-#[derive(Clone)]
-pub struct GpuImageHandle {
-    pub node: GraphNodeHandle,
-    /// Full-resolution width (LOD-independent).
-    pub width: u32,
-    /// Full-resolution height (LOD-independent).
-    pub height: u32,
-    pub format: PixelFormat,
-    pub color_space: ColorSpace,
-}
-
-impl GpuImageHandle {
-    /// Construct the `PixelMeta` for this handle's pixel format and color space.
-    ///
-    /// Alpha policy is always `Straight` at the handle boundary — premultiplication
-    /// is handled inside the GPU working-space pipeline.
-    #[inline]
-    pub fn pixel_meta(&self) -> PixelMeta {
-        PixelMeta {
-            format: self.format,
-            color_space: self.color_space,
-            alpha_policy: AlphaPolicy::Straight,
-        }
-    }
-}
-
-// ── Safety ────────────────────────────────────────────────────────────────────
-
-// SAFETY: GpuImageHandle only holds Arc<Mutex<…>> fields plus Copy/Clone pixel
-// metadata — all cross-thread sharing is guarded by the Mutex.
-unsafe impl Send for GpuImageHandle {}
-unsafe impl Sync for GpuImageHandle {}

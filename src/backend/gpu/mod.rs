@@ -6,10 +6,11 @@
 
 pub mod arena;
 pub mod buffer;
+pub mod builder;
 pub mod cache;
 pub mod compile;
 pub mod context;
-pub mod data;
+pub mod datatype;
 pub mod emit;
 pub mod graph;
 pub mod handle;
@@ -24,6 +25,7 @@ pub mod slang;
 // pub mod slang_ffi;
 pub mod source;
 pub mod target;
+pub mod typed;
 pub mod value;
 pub mod work_unit;
 
@@ -32,18 +34,20 @@ pub use buffer::{GpuBuffer, ImageBuffer};
 pub use compile::{Compiled, CompiledShader, DispatchPass};
 pub use context::GpuContext;
 pub use context::RegionCache;
+pub use datatype::{
+    DataType, Executable, FeaturesType, Fft1dType, Fft2dType, HistogramType, ImageType, Mask1dType,
+    Mask2dType, PointListType, ScalarType, Sourceable, Targetable, TypedData,
+};
 pub use graph::NodeEval;
 pub use graph::{Graph, GraphNode, KernelSpec, NodeId, SourceNode};
-pub use handle::{GpuImageHandle, GraphNodeHandle, Lod};
-pub use data::{
-    Fft1dData, Fft2dData, GpuData, HistogramData, ImageData, Mask1dData, Mask2dData,
+pub use handle::{GraphNodeHandle, Lod};
+pub use op::{
+    DispatchGrid, GpuOperation, InputEncoder, OutputCodec, OutputDecoder, TypedOperation,
 };
-pub use op::{DispatchGrid, GpuOperation, InputEncoder, OutputDecoder, OutputCodec};
-pub use work_unit::{AnyWorkUnit, Atomic, Range, Region, WorkUnit};
 pub use source::{AnyGpuSource, GpuSource};
-pub use target::GpuTarget;
-pub use value::GraphValue;
-pub use value::ValueKind;
+pub use typed::HistogramBuffer;
+pub use value::{MaterializedValue, Storage};
+pub use work_unit::{AnyWorkUnit, Atomic, Range, Region, WorkUnit};
 
 use std::sync::Arc;
 
@@ -54,6 +58,6 @@ use crate::backend::Backend;
 pub struct GpuBackend;
 
 impl Backend for GpuBackend {
-    type Handle = GpuImageHandle;
+    type Handle = GraphNodeHandle;
     type Buffer = Arc<crate::backend::gpu::buffer::GpuBuffer>;
 }

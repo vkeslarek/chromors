@@ -67,7 +67,7 @@ impl VipsOperation for DrawLine {
 }
 
 pub struct DrawImage<'a> {
-    pub sub: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub sub: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub x: i32,
     pub y: i32,
 }
@@ -104,7 +104,7 @@ impl VipsOperation for DrawFlood {
 
 pub struct DrawMask<'a> {
     pub ink: Vec<f64>,
-    pub mask: &'a crate::data::image::Image<crate::backend::vips::VipsBackend>,
+    pub mask: &'a crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     pub x: i32,
     pub y: i32,
 }

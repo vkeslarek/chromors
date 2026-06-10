@@ -2,13 +2,16 @@ pub mod gpu;
 pub mod raw;
 pub mod vips;
 
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 
 /// Marker trait for image processing backends.
 ///
 /// Implement this on a plain unit struct to introduce a new backend.
-/// The `Handle` associated type is the backend-specific image container.
+/// `Handle` is the backend-specific resource handle behind `Image2D<B>` — not
+/// necessarily image-shaped data itself (e.g. `GpuBackend::Handle` wraps a
+/// graph-node reference). Other typed wrappers (`Histogram<B>`, …) carry
+/// their own associated handle types (e.g. `HistogramTargetCapability::HistogramHandle`).
 pub trait Backend: Sized + Send + Sync + 'static {
     type Handle: Send + Sync;
     type Buffer: Send + Sync;
@@ -16,14 +19,14 @@ pub trait Backend: Sized + Send + Sync + 'static {
 
 /// Backend capability: open an image from a filesystem path.
 ///
-/// Enables `Image::<B>::open`.
+/// Enables `Image2D::<B>::open`.
 pub trait OpenFile: Backend {
     fn open_file(path: &str) -> Result<Self::Handle, Error>;
 }
 
 /// Backend capability: decode an encoded byte buffer (JPEG, PNG, …).
 ///
-/// Enables `Image::<B>::from_buffer`.
+/// Enables `Image2D::<B>::from_buffer`.
 pub trait OpenBuffer: Backend {
     fn open_buffer(data: &[u8]) -> Result<Self::Handle, Error>;
 }
@@ -39,7 +42,7 @@ pub trait Operation<Input> {
 
 /// Backend capability: open an image from a stream source.
 ///
-/// Enables `Image::<B>::new_from_source`.
+/// Enables `Image2D::<B>::new_from_source`.
 pub trait SourceInput: Backend {
     type Source: Send + Sync;
     fn open_source(source: &Self::Source) -> Result<Self::Handle, Error>;
@@ -47,7 +50,7 @@ pub trait SourceInput: Backend {
 
 /// Backend capability: write an image to a stream target.
 ///
-/// Enables `Image::<B>::write_to_target`.
+/// Enables `Image2D::<B>::write_to_target`.
 pub trait TargetOutput<Input>: Backend {
     type Target: Send + Sync;
     fn write_to_target(input: &Input, target: &Self::Target) -> Result<(), Error>;
@@ -78,7 +81,7 @@ pub trait HistogramTargetCapability: Backend {
     ) -> Result<crate::target::MaterializedHistogram<Self>, Error>;
 }
 
-impl<H: Backend> Image<H>
+impl<H: Backend> Image2D<H>
 where
     H: HistogramTargetCapability,
 {
@@ -90,12 +93,12 @@ where
 
 /// Backend capability: query and convert pixel metadata (format + color space + alpha policy).
 ///
-/// Implementing this on a backend enables the generic `Image<B>::pixel_meta()` and
-/// `Image<B>::convert()` methods, making color conversion a first-class part of the
+/// Implementing this on a backend enables the generic `Image2D<B>::pixel_meta()` and
+/// `Image2D<B>::convert()` methods, making color conversion a first-class part of the
 /// core image API rather than an operation.
 ///
 /// Both VipsBackend and GpuBackend implement this.  RawBackend does not (pixel data
-/// requires `materialize()` first; use `Image<RawBackend>::meta()` for static metadata).
+/// requires `materialize()` first; use `Image2D<RawBackend>::meta()` for static metadata).
 pub trait ColorConversionCapability: Backend {
     /// Returns the pixel metadata (format, color space, alpha policy) for this image.
     fn pixel_meta(handle: &Self::Handle) -> crate::pixel::PixelMeta;
@@ -109,7 +112,7 @@ pub trait ColorConversionCapability: Backend {
     ) -> Result<Self::Handle, Error>;
 }
 
-impl<B: Backend + ColorConversionCapability> Image<B> {
+impl<B: Backend + ColorConversionCapability> Image2D<B> {
     /// Returns the current pixel metadata: format, color space, and alpha policy.
     pub fn pixel_meta(&self) -> crate::pixel::PixelMeta {
         B::pixel_meta(&self.handle)
@@ -119,6 +122,6 @@ impl<B: Backend + ColorConversionCapability> Image<B> {
     ///
     /// Returns a new image; `self` is unchanged.
     pub fn convert(&self, target: crate::pixel::PixelMeta) -> Result<Self, Error> {
-        Ok(Image::from_handle(B::convert(&self.handle, target)?))
+        Ok(Image2D::from_handle(B::convert(&self.handle, target)?))
     }
 }

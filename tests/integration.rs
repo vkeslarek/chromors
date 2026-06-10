@@ -1,14 +1,14 @@
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::*;
 
 fn init() {
     std::sync::Once::new().call_once(pixors_engine::init);
 }
 
-fn sample() -> Image<VipsBackend> {
+fn sample() -> Image2D<VipsBackend> {
     init();
-    Image::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap()
+    Image2D::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap()
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn save_buffer() {
 #[test]
 fn round_trip_buffer() {
     let png = sample().write_to_buffer(".png").unwrap();
-    let decoded = Image::<VipsBackend>::from_buffer(&png).unwrap();
+    let decoded = Image2D::<VipsBackend>::from_buffer(&png).unwrap();
     assert_eq!(decoded.width(), 200);
 }
 
@@ -522,7 +522,7 @@ fn ifthenelse() {
 #[test]
 fn convolution_variants() {
     let img = sample();
-    let mask = Image::<VipsBackend>::generate(&GaussMat {
+    let mask = Image2D::<VipsBackend>::generate(&GaussMat {
         sigma: 1.0,
         minimum_amplitude: 0.2,
     })
@@ -581,7 +581,7 @@ fn correlation() {
 
 #[test]
 fn freq_masks() {
-    let ideal = Image::<VipsBackend>::generate(&MaskIdeal {
+    let ideal = Image2D::<VipsBackend>::generate(&MaskIdeal {
         width: 64,
         height: 64,
         frequency_cutoff: 0.5,
@@ -592,7 +592,7 @@ fn freq_masks() {
     })
     .unwrap();
     assert_eq!(ideal.width(), 64);
-    let bw = Image::<VipsBackend>::generate(&MaskButterworth {
+    let bw = Image2D::<VipsBackend>::generate(&MaskButterworth {
         width: 32,
         height: 32,
         order: 2.0,
@@ -650,7 +650,7 @@ fn labelregions_and_fill() {
 
 #[test]
 fn hist_ismonotonic_on_identity() {
-    let lut = Image::<VipsBackend>::generate(&Identity).unwrap();
+    let lut = Image2D::<VipsBackend>::generate(&Identity).unwrap();
     let m = lut.execute(&HistIsmonotonicOperation).unwrap();
     assert!(m.0);
 }
@@ -665,7 +665,7 @@ fn rad_roundtrip() {
 #[test]
 fn array_join_and_switch() {
     let a = sample();
-    let joined = Image::<VipsBackend>::array_join(
+    let joined = Image2D::<VipsBackend>::array_join(
         &[&a, &a],
         &ArrayJoinParams {
             across: Some(2),
@@ -687,7 +687,7 @@ fn array_join_and_switch() {
             constants: vec![128.0],
         })
         .unwrap();
-    let sw = Image::<VipsBackend>::switch(&[&mask]).unwrap();
+    let sw = Image2D::<VipsBackend>::switch(&[&mask]).unwrap();
     assert_eq!(sw.width(), 200);
 }
 
@@ -736,9 +736,9 @@ fn hough_line() {
 #[test]
 fn sum_and_bandrank() {
     let a = sample();
-    let summed = Image::<VipsBackend>::sum(&[&a, &a]).unwrap();
+    let summed = Image2D::<VipsBackend>::sum(&[&a, &a]).unwrap();
     assert_eq!(summed.width(), 200);
-    let ranked = Image::<VipsBackend>::band_rank(&[&a, &a, &a], 1).unwrap();
+    let ranked = Image2D::<VipsBackend>::band_rank(&[&a, &a, &a], 1).unwrap();
     assert_eq!(ranked.width(), 200);
 }
 
@@ -753,22 +753,29 @@ fn composite_stack() {
             gap: None,
         })
         .unwrap();
-    let out =
-        Image::<VipsBackend>::composite(&[&a, &b], &[BlendMode::Over], &CompositeParams::default())
-            .unwrap();
+    let out = Image2D::<VipsBackend>::composite(
+        &[&a, &b],
+        &[BlendMode::Over],
+        &CompositeParams::default(),
+    )
+    .unwrap();
     assert_eq!(out.width(), 200);
 }
 
 #[test]
 fn thumbnail_loaders() {
     init();
-    let t =
-        Image::<VipsBackend>::thumbnail("tests/fixtures/rgb.jpg", 64, &ThumbnailParams::default())
-            .unwrap();
+    let t = Image2D::<VipsBackend>::thumbnail(
+        "tests/fixtures/rgb.jpg",
+        64,
+        &ThumbnailParams::default(),
+    )
+    .unwrap();
     assert!(t.width() <= 64);
 
     let buf = sample().write_to_buffer(".png").unwrap();
-    let tb = Image::<VipsBackend>::thumbnail_buffer(&buf, 32, &ThumbnailParams::default()).unwrap();
+    let tb =
+        Image2D::<VipsBackend>::thumbnail_buffer(&buf, 32, &ThumbnailParams::default()).unwrap();
     assert!(tb.width() <= 32);
 }
 
@@ -792,7 +799,7 @@ fn from_memory_roundtrip() {
     init();
     // 2x2 RGB, 3 bytes/px = 12 bytes.
     let buf = vec![10u8, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
-    let img = Image::<VipsBackend>::from_memory(&buf, 2, 2, 3, PixelFormat::Rgb8).unwrap();
+    let img = Image2D::<VipsBackend>::from_memory(&buf, 2, 2, 3, PixelFormat::Rgb8).unwrap();
     assert_eq!(img.width(), 2);
     assert_eq!(img.bands(), 3);
 }
@@ -801,14 +808,14 @@ fn from_memory_roundtrip() {
 fn from_memory_rejects_short_buffer() {
     init();
     let buf = vec![0u8; 5]; // need 12
-    assert!(Image::<VipsBackend>::from_memory(&buf, 2, 2, 3, PixelFormat::Rgb8).is_err());
+    assert!(Image2D::<VipsBackend>::from_memory(&buf, 2, 2, 3, PixelFormat::Rgb8).is_err());
 }
 
 #[test]
 fn from_memory_rejects_bad_dims() {
     init();
     let buf = vec![0u8; 12];
-    assert!(Image::<VipsBackend>::from_memory(&buf, 0, 2, 3, PixelFormat::Rgb8).is_err());
+    assert!(Image2D::<VipsBackend>::from_memory(&buf, 0, 2, 3, PixelFormat::Rgb8).is_err());
 }
 
 #[test]
@@ -821,7 +828,7 @@ fn source_memory_outlives_buffer() {
         Source::new_from_memory(&owned).unwrap()
         // `owned` drops here; the source holds a vips-owned copy.
     };
-    let img = Image::<VipsBackend>::new_from_source(&source).unwrap();
+    let img = Image2D::<VipsBackend>::new_from_source(&source).unwrap();
     assert_eq!(img.width(), 200);
 }
 

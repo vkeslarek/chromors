@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use super::OperationBoolean;
-use crate::backend::gpu::graph::{Graph, NodeId, GraphNode, NodeEval, KernelSpec};
-use crate::backend::gpu::value::ValueKind;
 use crate::backend::Backend;
-use crate::geometry::Rect;
-use crate::backend::gpu::op::GpuOperation;
-use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::datatype::ImageType;
+use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeEval, NodeId};
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
+use crate::backend::gpu::op::{emit_image, working_image_type};
 use crate::backend::gpu::param::Param;
 use crate::backend::vips::IntoVipsEnum;
 use crate::backend::vips::gobject::VipsGObject;
@@ -19,7 +18,7 @@ pub struct BandboolOperation {
     pub bands: u32,
 }
 impl VipsOperation for BandboolOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"bandbool\0"
     }
@@ -28,8 +27,18 @@ impl VipsOperation for BandboolOperation {
         op.set_int("boolean", self.boolean.into_vips());
     }
 }
+impl TypedOperation for BandboolOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for BandboolOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -46,7 +55,7 @@ pub struct BandfoldOperation {
     pub factor: u32,
 }
 impl VipsOperation for BandfoldOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"bandfold\0"
     }
@@ -56,25 +65,36 @@ impl VipsOperation for BandfoldOperation {
     }
 }
 impl GpuOperation for BandfoldOperation {
-    fn output_spec(&self, input_w: u32, input_h: u32) -> crate::backend::gpu::op::OutputSpec {
-        crate::backend::gpu::op::OutputSpec::Image {
-            width: input_w,
-            height: input_h * self.factor,
+    fn output_dims(&self, input_w: u32, input_h: u32) -> Option<(u32, u32)> {
+        Some((input_w, input_h * self.factor))
+    }
+    fn input_demands(
+        &self,
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let f = self.factor as i32;
+                let y = rect.y / f;
+                let h = ((rect.y + rect.height + f - 1) / f) - y;
+                vec![(
+                    0,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: crate::geometry::Rect::new(rect.x, y, rect.width, h),
+                        lod: *lod,
+                    },
+                )]
+            }
+            _ => vec![(0, wu.clone())],
         }
     }
-    fn inverse_map(
+    fn emit(
         &self,
-        output_rect: crate::geometry::Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::handle::Lod,
-    ) -> Vec<(usize, crate::geometry::Rect)> {
-        let f = self.factor as i32;
-        let y = output_rect.y / f;
-        let h = ((output_rect.y + output_rect.height + f - 1) / f) - y;
-        vec![(0, crate::geometry::Rect::new(output_rect.x, y, output_rect.width, h))]
-    }
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -91,7 +111,7 @@ pub struct BandunfoldOperation {
     pub factor: u32,
 }
 impl VipsOperation for BandunfoldOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"bandunfold\0"
     }
@@ -101,23 +121,39 @@ impl VipsOperation for BandunfoldOperation {
     }
 }
 impl GpuOperation for BandunfoldOperation {
-    fn output_spec(&self, input_w: u32, input_h: u32) -> crate::backend::gpu::op::OutputSpec {
-        crate::backend::gpu::op::OutputSpec::Image {
-            width: input_w,
-            height: input_h / self.factor,
+    fn output_dims(&self, input_w: u32, input_h: u32) -> Option<(u32, u32)> {
+        Some((input_w, input_h / self.factor))
+    }
+    fn input_demands(
+        &self,
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let f = self.factor as i32;
+                vec![(
+                    0,
+                    crate::backend::gpu::work_unit::WorkUnit::Region {
+                        rect: crate::geometry::Rect::new(
+                            rect.x,
+                            rect.y * f,
+                            rect.width,
+                            rect.height * f,
+                        ),
+                        lod: *lod,
+                    },
+                )]
+            }
+            _ => vec![(0, wu.clone())],
         }
     }
-    fn inverse_map(
+    fn emit(
         &self,
-        output_rect: crate::geometry::Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::handle::Lod,
-    ) -> Vec<(usize, crate::geometry::Rect)> {
-        let f = self.factor as i32;
-        vec![(0, crate::geometry::Rect::new(output_rect.x, output_rect.y * f, output_rect.width, output_rect.height * f))]
-    }
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -134,7 +170,7 @@ pub struct BandmeanOperation {
     pub bands: u32,
 }
 impl VipsOperation for BandmeanOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"bandmean\0"
     }
@@ -142,8 +178,18 @@ impl VipsOperation for BandmeanOperation {
         o.set_image("in", i);
     }
 }
+impl TypedOperation for BandmeanOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for BandmeanOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -169,8 +215,18 @@ pub struct ExtractBandGpuOp {
     pub band: u32,
 }
 
+impl TypedOperation for ExtractBandGpuOp {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ExtractBandGpuOp {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -195,8 +251,18 @@ pub struct ScaleBandGpuOp {
     pub factor: f32,
 }
 
+impl TypedOperation for ScaleBandGpuOp {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ScaleBandGpuOp {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -218,8 +284,18 @@ pub struct AddToBandGpuOp {
     pub offset: f32,
 }
 
+impl TypedOperation for AddToBandGpuOp {
+    type Output = ImageType;
+}
+
 impl GpuOperation for AddToBandGpuOp {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,
@@ -237,7 +313,7 @@ pub struct ExtractBandOperation {
     pub count: Option<i32>,
 }
 impl VipsOperation for ExtractBandOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"extract_band\0"
     }
@@ -250,8 +326,18 @@ impl VipsOperation for ExtractBandOperation {
     }
 }
 
+impl TypedOperation for ExtractBandOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ExtractBandOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         let count = self.count.unwrap_or(1).max(1) as u32;
         if count == 1 {
             emit_image(
@@ -273,12 +359,6 @@ impl GpuOperation for ExtractBandOperation {
             )
         }
     }
-    fn output_spec(&self, w: u32, h: u32) -> crate::backend::gpu::op::OutputSpec {
-        crate::backend::gpu::op::OutputSpec::Image {
-            width: w,
-            height: h,
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -286,7 +366,7 @@ impl GpuOperation for ExtractBandOperation {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct BandjoinOperation<B: Backend> {
-    pub images: Vec<crate::data::image::Image<B>>,
+    pub images: Vec<crate::data::image::Image2D<B>>,
 }
 
 impl<B: Backend> std::fmt::Debug for BandjoinOperation<B> {
@@ -309,15 +389,14 @@ where
 }
 
 // Vips path — vips_bandjoin takes an array of images directly.
-impl crate::backend::Operation<
-    crate::data::image::Image<crate::backend::vips::VipsBackend>,
-> for BandjoinOperation<crate::backend::vips::VipsBackend>
+impl crate::backend::Operation<crate::data::image::Image2D<crate::backend::vips::VipsBackend>>
+    for BandjoinOperation<crate::backend::vips::VipsBackend>
 {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
 
     fn execute(
         &self,
-        image: &crate::data::image::Image<crate::backend::vips::VipsBackend>,
+        image: &crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
     ) -> Result<Self::Output, crate::error::Error> {
         let n = self.images.len() + 1;
         let mut ptrs: Vec<*mut ffi::VipsImage> = vec![image.vips_ptr()];
@@ -326,7 +405,12 @@ impl crate::backend::Operation<
         }
         let mut out: *mut ffi::VipsImage = std::ptr::null_mut();
         let ret = unsafe {
-            ffi::vips_bandjoin(ptrs.as_mut_ptr(), &mut out, n as i32, std::ptr::null::<std::ffi::c_void>())
+            ffi::vips_bandjoin(
+                ptrs.as_mut_ptr(),
+                &mut out,
+                n as i32,
+                std::ptr::null::<std::ffi::c_void>(),
+            )
         };
         if ret != 0 {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
@@ -336,21 +420,28 @@ impl crate::backend::Operation<
                 "vips_bandjoin returned null".into(),
             ));
         }
-        Ok(crate::data::image::Image::from_vips_ptr(out))
+        Ok(crate::data::image::Image2D::from_vips_ptr(out))
     }
 }
 
 // GPU path.
+impl TypedOperation for BandjoinOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for BandjoinOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         use crate::backend::gpu::buffer::ImageBuffer;
         use crate::backend::gpu::source::GpuSource;
 
         let total = self.images.len() + 1;
-        assert!(
-            total <= 5,
-            "BandjoinOperation: max 5 inputs (got {total})"
-        );
+        assert!(total <= 5, "BandjoinOperation: max 5 inputs (got {total})");
 
         let mut input_ids: Vec<NodeId> = vec![input];
         let mut ch_params: Vec<Param> = vec![Param::U32(0u32)];
@@ -372,7 +463,7 @@ impl GpuOperation for BandjoinOperation<crate::backend::gpu::GpuBackend> {
                     height: mat.buffer_rect.height as u32,
                     meta: mat.meta,
                 });
-                let source = GpuSource::new_buffer(img_buf, img.handle.node.ctx.clone());
+                let source = GpuSource::new_buffer(img_buf, img.handle.ctx.clone());
                 graph.add_source(std::sync::Arc::new(source))
             };
             input_ids.push(id);
@@ -397,19 +488,14 @@ impl GpuOperation for BandjoinOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: ch_params,
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        _w: u32,
-        _h: u32,
-        _lod: crate::backend::gpu::handle::Lod,
-    ) -> Vec<(usize, Rect)> {
-        (0..=self.images.len())
-            .map(|i| (i, output_rect))
-            .collect()
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        (0..=self.images.len()).map(|i| (i, wu.clone())).collect()
     }
 }

@@ -90,7 +90,7 @@ pub enum Metadata {
     CameraOwnerName(String),
     CameraFirmware(String),
 
-    // ── Image ────────────────────────────────────────────────────────────
+    // ── Image2D ────────────────────────────────────────────────────────────
     ImageWidth(u32),
     ImageHeight(u32),
     PixelXDimension(u32),
@@ -890,8 +890,8 @@ impl Metadata {
             Metadata::Dpi { .. } => "DPI",
             Metadata::ResolutionUnit(_) => "Resolution Unit",
             Metadata::Orientation(_) => "Orientation",
-            Metadata::ImageNumber(_) => "Image #",
-            Metadata::ImageUniqueId(_) => "Image UID",
+            Metadata::ImageNumber(_) => "Image2D #",
+            Metadata::ImageUniqueId(_) => "Image2D UID",
             Metadata::ExifVersion(_) => "EXIF Version",
             Metadata::ColorSpaceTag(_) => "Color Space",
             Metadata::PageName(_) => "Page Name",
@@ -903,9 +903,9 @@ impl Metadata {
             Metadata::MakerNote(_) => "Maker Note",
             Metadata::RelatedSoundFile(_) => "Related Audio",
             Metadata::RAWDevelopingSoftware(_) => "RAW Developer",
-            Metadata::ImageEditingSoftware(_) => "Image S/W",
+            Metadata::ImageEditingSoftware(_) => "Image2D S/W",
             Metadata::MetadataEditingSoftware(_) => "Meta S/W",
-            Metadata::ImageHistory(_) => "Image History",
+            Metadata::ImageHistory(_) => "Image2D History",
             Metadata::CompositeImage(_) => "Composite",
             Metadata::CompositeImageCount(_) => "Composite Count",
             Metadata::DistortionCorrection(_) => "Distortion Corr.",

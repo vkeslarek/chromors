@@ -1,12 +1,12 @@
 //! RAW decode operations.
 //!
-//! Each operation implements `Operation<Image<RawBackend>>` via the blanket impl
+//! Each operation implements `Operation<Image2D<RawBackend>>` via the blanket impl
 //! on `RawOperation`.  Operations are lazy: calling `execute()` returns a new
-//! `Image<RawBackend>` with updated decode parameters but does NOT run the
-//! demosaic pipeline.  Call `Image::materialize()` to decode pixel data.
+//! `Image2D<RawBackend>` with updated decode parameters but does NOT run the
+//! demosaic pipeline.  Call `Image2D::materialize()` to decode pixel data.
 //!
 //! Future GPU path: when a GPU demosaic kernel is available, these operations
-//! will also implement `Operation<Image<GpuBackend>>` using the same `IntoRawEnum`
+//! will also implement `Operation<Image2D<GpuBackend>>` using the same `IntoRawEnum`
 //! mapping.
 
 use crate::backend::raw::{
@@ -19,7 +19,7 @@ use crate::backend::raw::{
 /// decode pipeline.
 ///
 /// Analogous to `VipsOperation` for the VipsBackend — a blanket
-/// `impl<Op: RawOperation> Operation<Image<RawBackend>> for Op` in
+/// `impl<Op: RawOperation> Operation<Image2D<RawBackend>> for Op` in
 /// `backend::raw::mod` bridges this into the unified `Operation` framework.
 pub trait RawOperation {
     fn apply_to_params(&self, params: &mut RawDecodeParams);

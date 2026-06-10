@@ -35,7 +35,7 @@ impl ExportConfig {
     }
 }
 
-impl crate::data::image::Image<crate::backend::vips::VipsBackend> {
+impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
     pub fn save_with_config(
         &self,
         filename: &str,

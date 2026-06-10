@@ -177,7 +177,7 @@ unsafe impl Sync for RawPixels {}
 
 // ── RawFrame — public result of a materialize() call ──────────────────────────
 
-/// The decoded pixel buffer returned by `Image::<RawBackend>::materialize()`.
+/// The decoded pixel buffer returned by `Image2D::<RawBackend>::materialize()`.
 ///
 /// Cheaply shared via `Arc`.  Holds:
 /// - The raw pixel bytes (auto-freed on last drop via libraw).

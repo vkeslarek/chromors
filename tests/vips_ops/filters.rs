@@ -2,7 +2,7 @@
 
 use crate::common::rgb;
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::*;
 
 #[test]
@@ -53,7 +53,7 @@ fn median() {
 #[test]
 fn convolution_variants() {
     let img = rgb();
-    let mask = Image::<VipsBackend>::generate(&GaussMat {
+    let mask = Image2D::<VipsBackend>::generate(&GaussMat {
         sigma: 1.0,
         minimum_amplitude: 0.2,
     })

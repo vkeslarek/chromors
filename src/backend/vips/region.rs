@@ -1,5 +1,5 @@
 use crate::backend::vips::VipsBackend;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::libvips_ffi as ffi;
 
@@ -30,7 +30,7 @@ impl Drop for Region {
 }
 
 impl Region {
-    pub(crate) fn new(image: &Image<VipsBackend>) -> Result<Region, Error> {
+    pub(crate) fn new(image: &Image2D<VipsBackend>) -> Result<Region, Error> {
         let ptr = unsafe { ffi::vips_region_new(image.vips_ptr()) };
         if ptr.is_null() {
             return Err(Error::Vips(crate::backend::vips::vips_error()));

@@ -14,9 +14,7 @@ pub mod utils;
 pub mod vector;
 
 pub use backend::gpu::Rect;
-pub use backend::gpu::{
-    GpuBackend, GpuContext, GpuOperation, GpuSource, GpuTarget, Lod, OutputSpec,
-};
+pub use backend::gpu::{GpuBackend, GpuContext, GpuOperation, GpuSource, Lod};
 pub use backend::vips::data::{ArrayJoinParams, CompositeParams, ThumbnailParams};
 pub use backend::vips::{
     Interpolate, InterpolationMethod, Region, Sbuf, Source, Target, VipsBackend,

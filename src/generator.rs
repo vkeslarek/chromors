@@ -13,7 +13,7 @@ pub struct Black {
     pub height: i32,
 }
 impl GenerateOperation for Black {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"black\0"
     }
@@ -28,7 +28,7 @@ pub struct Grey {
     pub height: i32,
 }
 impl GenerateOperation for Grey {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"grey\0"
     }
@@ -43,7 +43,7 @@ pub struct Xyz {
     pub height: i32,
 }
 impl GenerateOperation for Xyz {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"xyz\0"
     }
@@ -58,7 +58,7 @@ pub struct GaussMat {
     pub minimum_amplitude: f64,
 }
 impl GenerateOperation for GaussMat {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"gaussmat\0"
     }
@@ -73,7 +73,7 @@ pub struct LogMat {
     pub minimum_amplitude: f64,
 }
 impl GenerateOperation for LogMat {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"logmat\0"
     }
@@ -90,7 +90,7 @@ pub struct Text {
     pub rgba: Option<bool>,
 }
 impl GenerateOperation for Text {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"text\0"
     }
@@ -113,7 +113,7 @@ pub struct GaussNoise {
     pub height: i32,
 }
 impl GenerateOperation for GaussNoise {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"gaussnoise\0"
     }
@@ -128,7 +128,7 @@ pub struct Eye {
     pub height: i32,
 }
 impl GenerateOperation for Eye {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"eye\0"
     }
@@ -143,7 +143,7 @@ pub struct Sines {
     pub height: i32,
 }
 impl GenerateOperation for Sines {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"sines\0"
     }
@@ -158,7 +158,7 @@ pub struct Zone {
     pub height: i32,
 }
 impl GenerateOperation for Zone {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"zone\0"
     }
@@ -174,7 +174,7 @@ pub struct Sdf {
     pub shape: SdfShape,
 }
 impl GenerateOperation for Sdf {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"sdf\0"
     }
@@ -187,7 +187,7 @@ impl GenerateOperation for Sdf {
 
 pub struct Identity;
 impl GenerateOperation for Identity {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"identity\0"
     }
@@ -196,7 +196,7 @@ impl GenerateOperation for Identity {
 
 pub struct Tonelut;
 impl GenerateOperation for Tonelut {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"tonelut\0"
     }
@@ -209,7 +209,7 @@ pub struct FractSurf {
     pub fractal_dimension: f64,
 }
 impl GenerateOperation for FractSurf {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"fractsurf\0"
     }
@@ -225,7 +225,7 @@ pub struct Worley {
     pub height: i32,
 }
 impl GenerateOperation for Worley {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"worley\0"
     }
@@ -240,7 +240,7 @@ pub struct Perlin {
     pub height: i32,
 }
 impl GenerateOperation for Perlin {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"perlin\0"
     }
@@ -260,7 +260,7 @@ pub struct MaskIdeal {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskIdeal {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_ideal\0"
     }
@@ -295,7 +295,7 @@ pub struct MaskIdealBand {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskIdealBand {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_ideal_band\0"
     }
@@ -331,7 +331,7 @@ pub struct MaskIdealRing {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskIdealRing {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_ideal_ring\0"
     }
@@ -367,7 +367,7 @@ pub struct MaskButterworth {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskButterworth {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_butterworth\0"
     }
@@ -406,7 +406,7 @@ pub struct MaskButterworthBand {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskButterworthBand {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_butterworth_band\0"
     }
@@ -446,7 +446,7 @@ pub struct MaskButterworthRing {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskButterworthRing {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_butterworth_ring\0"
     }
@@ -483,7 +483,7 @@ pub struct MaskGaussian {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskGaussian {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_gaussian\0"
     }
@@ -520,7 +520,7 @@ pub struct MaskGaussianBand {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskGaussianBand {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_gaussian_band\0"
     }
@@ -558,7 +558,7 @@ pub struct MaskGaussianRing {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskGaussianRing {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_gaussian_ring\0"
     }
@@ -593,7 +593,7 @@ pub struct MaskFractal {
     pub optical: Option<bool>,
 }
 impl GenerateOperation for MaskFractal {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn op_name() -> &'static [u8] {
         b"mask_fractal\0"
     }

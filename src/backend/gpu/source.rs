@@ -1,14 +1,14 @@
 //! GPU source — provides input pixels to the fused graph.
 //!
 //! Variants:
-//! * `Image`     — already in VRAM (e.g. output of a previous pipeline).
+//! * `Image2D`     — already in VRAM (e.g. output of a previous pipeline).
 //! * `VipsImage` — decoded on CPU via libvips; uploaded on demand.
 
 use std::sync::Arc;
 
 use crate::backend::vips::VipsBackend;
 use crate::color::space::ColorSpace;
-use crate::data::image::Image;
+use crate::data::image::Image2D;
 use crate::pixel::PixelFormat;
 use enum_dispatch::enum_dispatch;
 
@@ -93,7 +93,7 @@ impl AnyGpuSource for ImageBufferSource {
         let src_sub = self.buffer.copy_region(src_rect, ctx)?;
 
         let src_image =
-            crate::data::image::Image::<crate::backend::gpu::GpuBackend>::new_from_source(
+            crate::data::image::Image2D::<crate::backend::gpu::GpuBackend>::new_from_source(
                 &GpuSource::new_buffer(src_sub, ctx.clone()),
             )?;
         let shrink = crate::operation::geometry::ShrinkOperation {
@@ -124,7 +124,7 @@ impl AnyGpuSource for ImageBufferSource {
 
 #[derive(Clone)]
 pub struct VipsImageSource {
-    pub image: Image<VipsBackend>,
+    pub image: Image2D<VipsBackend>,
     pub ctx: Arc<GpuContext>,
 }
 
@@ -202,7 +202,7 @@ fn gpu_safe_format(fmt: PixelFormat) -> PixelFormat {
     PixelFormat::Rgba8
 }
 
-fn gpu_safe(img: Image<VipsBackend>) -> Result<Image<VipsBackend>, Error> {
+fn gpu_safe(img: Image2D<VipsBackend>) -> Result<Image2D<VipsBackend>, Error> {
     let fmt = img.pixel_format();
     let safe = gpu_safe_format(fmt);
     if safe == fmt {
@@ -221,7 +221,7 @@ fn gpu_safe(img: Image<VipsBackend>) -> Result<Image<VipsBackend>, Error> {
 #[enum_dispatch(AnyGpuSource)]
 #[derive(Clone)]
 pub enum GpuSource {
-    Image(ImageBufferSource),
+    Image2D(ImageBufferSource),
     VipsImage(VipsImageSource),
 }
 
@@ -229,7 +229,7 @@ impl GpuSource {
     /// Create a buffer source whose full-resolution rect is `(0, 0, w, h)`.
     pub fn new_buffer(buffer: Arc<ImageBuffer>, ctx: Arc<GpuContext>) -> Self {
         let image_rect = buffer.full_rect();
-        GpuSource::Image(ImageBufferSource {
+        GpuSource::Image2D(ImageBufferSource {
             buffer,
             ctx,
             image_rect,
@@ -243,7 +243,7 @@ impl GpuSource {
         ctx: Arc<GpuContext>,
         image_rect: Rect,
     ) -> Self {
-        GpuSource::Image(ImageBufferSource {
+        GpuSource::Image2D(ImageBufferSource {
             buffer,
             ctx,
             image_rect,
@@ -252,7 +252,7 @@ impl GpuSource {
 
     /// Create a vips image source. Kept as `new_vips` for backward compatibility;
     /// will be renamed to `new_vips_image` in a future release.
-    pub fn new_vips(image: Image<VipsBackend>, ctx: Arc<GpuContext>) -> Self {
+    pub fn new_vips(image: Image2D<VipsBackend>, ctx: Arc<GpuContext>) -> Self {
         GpuSource::VipsImage(VipsImageSource { image, ctx })
     }
 }
@@ -265,12 +265,11 @@ impl GpuSource {
 /// never hashed — only identity.
 pub fn source_identity(source: &GpuSource) -> u64 {
     match source {
-        GpuSource::Image(ibs) => Arc::as_ptr(&ibs.buffer) as *const () as usize as u64,
+        GpuSource::Image2D(ibs) => Arc::as_ptr(&ibs.buffer) as *const () as usize as u64,
         GpuSource::VipsImage(vis) => vis.image.vips_ptr() as usize as u64,
     }
 }
 
-use super::GpuImageHandle;
 use super::graph::Graph;
 use super::handle::GraphNodeHandle;
 use crate::backend::SourceInput;
@@ -281,25 +280,19 @@ use super::GpuBackend;
 impl SourceInput for GpuBackend {
     type Source = GpuSource;
 
-    fn open_source(source: &GpuSource) -> Result<GpuImageHandle, crate::Error> {
+    fn open_source(source: &GpuSource) -> Result<GraphNodeHandle, crate::Error> {
         let ctx = match source {
-            GpuSource::Image(b) => b.ctx.clone(),
+            GpuSource::Image2D(b) => b.ctx.clone(),
             GpuSource::VipsImage(v) => v.ctx.clone(),
         };
 
         let mut graph = Graph::new();
         let source_id = graph.add_source(Arc::new(source.clone()));
 
-        Ok(GpuImageHandle {
-            node: GraphNodeHandle {
-                graph: Arc::new(Mutex::new(graph)),
-                root_id: source_id,
-                ctx,
-            },
-            width: source.width(),
-            height: source.height(),
-            format: source.format(),
-            color_space: source.color_space(),
+        Ok(GraphNodeHandle {
+            graph: Arc::new(Mutex::new(graph)),
+            root_id: source_id,
+            ctx,
         })
     }
 }

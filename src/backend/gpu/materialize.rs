@@ -18,11 +18,13 @@ use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use super::Lod;
 use super::buffer::{GpuBuffer, ImageBuffer};
+use super::datatype::DataType;
 use super::graph::{Graph, NodeId, RegionKey};
+use super::op::working_image_type;
 use super::region::GpuRegion;
 use super::source::AnyGpuSource;
-use super::value::GraphValue;
-use super::value::ValueKind;
+use super::value::{MaterializedValue, Storage};
+use super::work_unit::{WorkUnit, WorkUnitKind};
 
 // ── ERROR HANDLING ────────────────────────────────────────────────────────────
 
@@ -126,7 +128,11 @@ pub struct MaterializePlan {
 
 impl Graph {
     /// Build a materialization plan for the given `(node_id, WorkUnit)` targets.
-    pub fn materialize(&self, targets_info: &[(NodeId, super::work_unit::WorkUnit)], lod: Lod) -> MaterializePlan {
+    pub fn materialize(
+        &self,
+        targets_info: &[(NodeId, super::work_unit::WorkUnit)],
+        lod: Lod,
+    ) -> MaterializePlan {
         let node_rects = self.walk_inverse(targets_info, lod);
         let sources = self.filter_reachable_sources(&node_rects);
         let source_fetches = self.build_source_fetches(&sources, &node_rects, lod);
@@ -217,12 +223,18 @@ impl Graph {
         targets_info
             .iter()
             .map(|(node_id, _)| {
-                let rect = node_rects.get(node_id).copied().unwrap_or(Rect::new(0, 0, 0, 0));
-                BufferTarget { node_id: *node_id, rect, buffer: None }
+                let rect = node_rects
+                    .get(node_id)
+                    .copied()
+                    .unwrap_or(Rect::new(0, 0, 0, 0));
+                BufferTarget {
+                    node_id: *node_id,
+                    rect,
+                    buffer: None,
+                }
             })
             .collect()
     }
-
 }
 
 // ── TYPESTATE PIPELINE STRUCTS ────────────────────────────────────────────────
@@ -235,7 +247,7 @@ struct PlannedJob {
     sources_snapshot: Vec<(NodeId, Arc<super::source::GpuSource>)>,
     ir: super::emit::EmittedIr,
     layout: super::emit::LayoutPlan,
-    value_kind: ValueKind,
+    datatype: Arc<dyn DataType>,
     source_fetch_rects: HashMap<NodeId, Rect>,
     target_meta: Option<PixelMeta>,
 }
@@ -245,7 +257,7 @@ struct CompiledJob {
     rect: Rect,
     key: RegionKey,
     sources_snapshot: Vec<(NodeId, Arc<super::source::GpuSource>)>,
-    value_kind: ValueKind,
+    datatype: Arc<dyn DataType>,
     compiled: super::compile::DispatchPass,
     fetched_buffers: Vec<Arc<ImageBuffer>>,
     params_bytes: Vec<u8>,
@@ -256,7 +268,7 @@ struct SubmittedJob {
     i: usize,
     rect: Rect,
     key: RegionKey,
-    value_kind: ValueKind,
+    datatype: Arc<dyn DataType>,
     out_bufs: Vec<wgpu::Buffer>,
     target_meta: Option<PixelMeta>,
 }
@@ -272,7 +284,7 @@ impl<'a> MaterializePipeline<'a> {
         Self { region, rects }
     }
 
-    pub fn execute(self) -> Result<Vec<Arc<GraphValue>>, MaterializeError> {
+    pub fn execute(self) -> Result<Vec<Arc<MaterializedValue>>, MaterializeError> {
         if self.rects.is_empty() {
             return Ok(Vec::new());
         }
@@ -320,7 +332,7 @@ impl<'a> MaterializePipeline<'a> {
 // ── PIPELINE STATE CACHED ──
 struct CachedBatch<'a> {
     region: &'a GpuRegion,
-    results: Vec<Option<Arc<GraphValue>>>,
+    results: Vec<Option<Arc<MaterializedValue>>>,
     uncached: Vec<(usize, Rect, RegionKey)>,
 }
 
@@ -334,7 +346,7 @@ impl<'a> CachedBatch<'a> {
         self.uncached.is_empty()
     }
 
-    fn collect_results(self) -> Result<Vec<Arc<GraphValue>>, MaterializeError> {
+    fn collect_results(self) -> Result<Vec<Arc<MaterializedValue>>, MaterializeError> {
         Ok(self.results.into_iter().flatten().collect())
     }
 
@@ -347,8 +359,18 @@ impl<'a> CachedBatch<'a> {
             .map_err(|_| MaterializeError::LockPoisoned)?;
 
         for &(i, rect, key) in &self.uncached {
-            let plan = graph.materialize(&[(self.region.node_id, super::work_unit::WorkUnit::Region { rect, lod: self.region.lod })], self.region.lod);
-            let (ir, layout) = plan.emit_ir_with_layout(&graph, self.region.ctx.wg_dim, self.region.lod);
+            let plan = graph.materialize(
+                &[(
+                    self.region.node_id,
+                    super::work_unit::WorkUnit::Region {
+                        rect,
+                        lod: self.region.lod,
+                    },
+                )],
+                self.region.lod,
+            );
+            let (ir, layout) =
+                plan.emit_ir_with_layout(&graph, self.region.ctx.wg_dim, self.region.lod);
 
             let limit = self.region.ctx.max_storage_buffers as usize;
             let g0 = ir.source_count + 1;
@@ -383,32 +405,37 @@ impl<'a> CachedBatch<'a> {
             }
 
             let topo = graph.topo_order();
-            let value_kind = graph
+            let datatype = graph
                 .get_node(self.region.node_id)
-                .map(|n| n.output.clone())
-                .unwrap_or(ValueKind::Image);
+                .map(|n| n.datatype.clone())
+                .unwrap_or_else(working_image_type);
 
-            let target_meta = {
-                use super::op::OutputDecoder;
-                match graph
-                    .get_node(self.region.node_id)
-                    .map(|n| n.op.output_decoder())
-                    .unwrap_or(OutputDecoder::WorkingEncodeRegion { codec: None })
+            let target_meta =
                 {
-                    OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => {
-                        Some(PixelMeta::new(c.format, c.color_space, AlphaPolicy::Straight))
+                    use super::op::OutputDecoder;
+                    match graph
+                        .get_node(self.region.node_id)
+                        .map(|n| n.op.output_decoder())
+                        .unwrap_or(OutputDecoder::WorkingEncodeRegion { codec: None })
+                    {
+                        OutputDecoder::WorkingEncodeRegion { codec: Some(c) } => Some(
+                            PixelMeta::new(c.format, c.color_space, AlphaPolicy::Straight),
+                        ),
+                        OutputDecoder::WorkingEncodeRegion { codec: None } => {
+                            let src_cs = graph
+                                .sources
+                                .first()
+                                .map(|s| s.source.color_space())
+                                .unwrap_or(ColorSpace::SRGB);
+                            Some(PixelMeta::new(
+                                PixelFormat::RgbaF32,
+                                src_cs,
+                                AlphaPolicy::Straight,
+                            ))
+                        }
+                        _ => None,
                     }
-                    OutputDecoder::WorkingEncodeRegion { codec: None } => {
-                        let src_cs = graph
-                            .sources
-                            .first()
-                            .map(|s| s.source.color_space())
-                            .unwrap_or(ColorSpace::SRGB);
-                        Some(PixelMeta::new(PixelFormat::RgbaF32, src_cs, AlphaPolicy::Straight))
-                    }
-                    _ => None,
-                }
-            };
+                };
 
             let sources_snapshot: Vec<_> = topo
                 .iter()
@@ -429,7 +456,7 @@ impl<'a> CachedBatch<'a> {
                 sources_snapshot,
                 ir,
                 layout,
-                value_kind,
+                datatype,
                 source_fetch_rects,
                 target_meta,
             });
@@ -446,7 +473,7 @@ impl<'a> CachedBatch<'a> {
 // ── CUT EXECUTION ──
 struct CutBatch<'a> {
     region: &'a GpuRegion,
-    results: Vec<Option<Arc<GraphValue>>>,
+    results: Vec<Option<Arc<MaterializedValue>>>,
     uncached: Vec<(usize, Rect, RegionKey)>,
     cut_i: usize,
     cut_rect: Rect,
@@ -454,7 +481,7 @@ struct CutBatch<'a> {
 }
 
 impl<'a> CutBatch<'a> {
-    fn execute_cuts(mut self) -> Result<Vec<Arc<GraphValue>>, MaterializeError> {
+    fn execute_cuts(mut self) -> Result<Vec<Arc<MaterializedValue>>, MaterializeError> {
         if self.uncached.len() == 1 {
             let mat = StagingCutter::execute(self.region, self.cut_rect, self.cuts)?;
             self.results[self.cut_i] = Some(mat);
@@ -496,7 +523,7 @@ impl StagingCutter {
         region: &GpuRegion,
         rect: Rect,
         cuts: super::pass::StagingCuts,
-    ) -> Result<Arc<GraphValue>, MaterializeError> {
+    ) -> Result<Arc<MaterializedValue>, MaterializeError> {
         let results: Result<Vec<_>, MaterializeError> = cuts
             .staging
             .par_iter()
@@ -525,8 +552,8 @@ impl StagingCutter {
             .iter()
             .zip(results?.into_iter().map(|(_, m)| m))
         {
-            match &*mat {
-                GraphValue::Image { buffer, .. } => {
+            match &mat.storage {
+                Storage::Vram(buffer) => {
                     // The staging buffer was captured at region.lod, so its
                     // image_rect in full-resolution coords is cut_rect * lod_scale.
                     let image_rect = crate::geometry::Rect::new(
@@ -535,16 +562,35 @@ impl StagingCutter {
                         cut_rect.width * lod_scale,
                         cut_rect.height * lod_scale,
                     );
+                    let mat_rect = mat.region().map(|r| r.rect).unwrap_or(*cut_rect);
+                    let meta = mat
+                        .datatype
+                        .as_any()
+                        .downcast_ref::<super::datatype::ImageType>()
+                        .map(|it| PixelMeta::new(it.format, it.color_space, AlphaPolicy::Straight))
+                        .unwrap_or_else(|| {
+                            PixelMeta::new(
+                                PixelFormat::RgbaF32,
+                                ColorSpace::ACES_CG,
+                                AlphaPolicy::Straight,
+                            )
+                        });
+                    let img_buf = ImageBuffer::from_raw(
+                        buffer.buffer.clone(),
+                        mat_rect.width as u32,
+                        mat_rect.height as u32,
+                        meta,
+                    );
                     overrides.insert(
                         *cut_id,
                         super::source::GpuSource::new_buffer_positioned(
-                            buffer.clone(),
+                            img_buf,
                             region.ctx.clone(),
                             image_rect,
                         ),
                     );
                 }
-                GraphValue::Raw { .. } => {
+                Storage::Host(_) => {
                     return Err(MaterializeError::InvalidCutOutput);
                 }
             }
@@ -587,7 +633,7 @@ impl StagingCutter {
 // ── PIPELINE STATE PLANNED ──
 struct PlannedBatch<'a> {
     region: &'a GpuRegion,
-    results: Vec<Option<Arc<GraphValue>>>,
+    results: Vec<Option<Arc<MaterializedValue>>>,
     jobs: Vec<PlannedJob>,
 }
 
@@ -634,21 +680,61 @@ impl<'a> PlannedBatch<'a> {
 
                                     if let Ok(mut cache) = self.region.cache.lock()
                                         && let Some(cached) = cache.get(&src_key)
-                                        && let GraphValue::Image { buffer, .. } = &*cached
+                                        && let Storage::Vram(buffer) = &cached.storage
                                     {
-                                        return Ok(buffer.clone());
+                                        let meta = PixelMeta::new(
+                                            s.format(),
+                                            s.color_space(),
+                                            AlphaPolicy::Straight,
+                                        );
+                                        return Ok(ImageBuffer::from_raw(
+                                            buffer.buffer.clone(),
+                                            fetch_rect.width as u32,
+                                            fetch_rect.height as u32,
+                                            meta,
+                                        ));
                                     }
 
-                                    let buf = s.fetch_region(
+                                    let image_type = super::datatype::ImageType {
+                                        color_space: s.color_space(),
+                                        format: s.format(),
+                                    };
+                                    let storage = super::datatype::Sourceable::fetch_region(
+                                        &image_type,
+                                        s,
                                         fetch_rect,
                                         self.region.lod,
                                         &self.region.ctx,
                                     )?;
+                                    let Storage::Vram(gpu_buf) = storage else {
+                                        return Err(crate::error::Error::Gpu(
+                                            "source fetch_region returned Host storage".into(),
+                                        ));
+                                    };
+                                    let meta = PixelMeta::new(
+                                        image_type.format,
+                                        image_type.color_space,
+                                        AlphaPolicy::Straight,
+                                    );
+                                    let buf = ImageBuffer::from_raw(
+                                        gpu_buf.buffer.clone(),
+                                        fetch_rect.width as u32,
+                                        fetch_rect.height as u32,
+                                        meta,
+                                    );
 
                                     if let Ok(mut cache) = self.region.cache.lock() {
+                                        let datatype: Arc<dyn DataType> = Arc::new(image_type);
                                         cache.insert(
                                             src_key,
-                                            Arc::new(GraphValue::image(buf.clone(), fetch_rect)),
+                                            Arc::new(MaterializedValue::vram(
+                                                gpu_buf,
+                                                datatype,
+                                                WorkUnit::Region {
+                                                    rect: fetch_rect,
+                                                    lod: self.region.lod,
+                                                },
+                                            )),
                                         );
                                     }
 
@@ -676,7 +762,7 @@ impl<'a> PlannedBatch<'a> {
                     rect: job.rect,
                     key: job.key,
                     sources_snapshot: job.sources_snapshot,
-                    value_kind: job.value_kind,
+                    datatype: job.datatype,
                     compiled: compiled_res?,
                     fetched_buffers: fetched_res?,
                     params_bytes,
@@ -696,7 +782,7 @@ impl<'a> PlannedBatch<'a> {
 // ── PIPELINE STATE COMPILED ──
 struct CompiledBatch<'a> {
     region: &'a GpuRegion,
-    results: Vec<Option<Arc<GraphValue>>>,
+    results: Vec<Option<Arc<MaterializedValue>>>,
     compiled_jobs: Vec<CompiledJob>,
 }
 
@@ -718,7 +804,18 @@ impl<'a> CompiledBatch<'a> {
                 && !job.sources_snapshot.is_empty()
                 && let Some(buf) = job.fetched_buffers.first()
             {
-                let out = Arc::new(GraphValue::image(buf.clone(), job.rect));
+                let datatype: Arc<dyn DataType> = Arc::new(super::datatype::ImageType {
+                    color_space: buf.color_space(),
+                    format: buf.format(),
+                });
+                let out = Arc::new(MaterializedValue::vram(
+                    buf.buffer.clone(),
+                    datatype,
+                    WorkUnit::Region {
+                        rect: job.rect,
+                        lod: self.region.lod,
+                    },
+                ));
                 self.results[job.i] = Some(out.clone());
 
                 self.region
@@ -751,7 +848,7 @@ impl<'a> CompiledBatch<'a> {
                 i: job.i,
                 rect: job.rect,
                 key: job.key,
-                value_kind: job.value_kind,
+                datatype: job.datatype,
                 out_bufs,
                 target_meta: job.target_meta,
             });
@@ -779,70 +876,90 @@ impl<'a> CompiledBatch<'a> {
 // ── PIPELINE STATE SUBMITTED ──
 struct SubmittedBatch<'a> {
     region: &'a GpuRegion,
-    results: Vec<Option<Arc<GraphValue>>>,
+    results: Vec<Option<Arc<MaterializedValue>>>,
     pending_outputs: Vec<SubmittedJob>,
 }
 
 impl<'a> SubmittedBatch<'a> {
-    fn readback(mut self) -> Result<Vec<Arc<GraphValue>>, MaterializeError> {
+    fn readback(mut self) -> Result<Vec<Arc<MaterializedValue>>, MaterializeError> {
         for mut job in self.pending_outputs {
             let buf = job
                 .out_bufs
                 .pop()
                 .expect("Encode should have produced at least one buffer");
 
-            let out = match &job.value_kind {
-                ValueKind::Image => {
-                    let meta = job.target_meta.expect("target_meta required for Image output");
-                    let img_buf = ImageBuffer::from_raw(
-                        Arc::new(buf),
-                        job.rect.width as u32,
-                        job.rect.height as u32,
-                        meta,
-                    );
-                    Arc::new(GraphValue::image(img_buf, job.rect))
-                }
-                _ => {
-                    let size = buf.size();
-                    let staging = self
-                        .region
-                        .ctx
-                        .device
-                        .create_buffer(&wgpu::BufferDescriptor {
-                            label: Some("staging"),
-                            size,
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                            mapped_at_creation: false,
-                        });
-
-                    let mut enc =
-                        self.region.ctx.device.create_command_encoder(
-                            &wgpu::CommandEncoderDescriptor { label: None },
-                        );
-                    enc.copy_buffer_to_buffer(&buf, 0, &staging, 0, size);
-                    self.region.ctx.queue.submit(Some(enc.finish()));
-
-                    let slice = staging.slice(..);
-                    let (tx, rx) = std::sync::mpsc::channel();
-
-                    slice.map_async(wgpu::MapMode::Read, move |res| {
-                        let _ = tx.send(res);
+            let out = if job.datatype.needs_fused_temp() {
+                let meta = job
+                    .target_meta
+                    .expect("target_meta required for Image2D output");
+                let byte_len = job.rect.width as u64
+                    * job.rect.height as u64
+                    * meta.format.bytes_per_pixel() as u64;
+                let gpu_buf = GpuBuffer::from_raw(Arc::new(buf), byte_len);
+                let datatype: Arc<dyn DataType> = Arc::new(super::datatype::ImageType {
+                    color_space: meta.color_space,
+                    format: meta.format,
+                });
+                Arc::new(MaterializedValue::vram(
+                    gpu_buf,
+                    datatype,
+                    WorkUnit::Region {
+                        rect: job.rect,
+                        lod: self.region.lod,
+                    },
+                ))
+            } else {
+                let size = buf.size();
+                let staging = self
+                    .region
+                    .ctx
+                    .device
+                    .create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("staging"),
+                        size,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
                     });
-                    let _ = self
-                        .region
-                        .ctx
-                        .device
-                        .poll(wgpu::PollType::wait_indefinitely());
 
-                    rx.recv()
-                        .map_err(|_| MaterializeError::Encode("Readback channel failed".into()))?
-                        .map_err(|e| MaterializeError::Encode(e.to_string()))?;
+                let mut enc = self
+                    .region
+                    .ctx
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                enc.copy_buffer_to_buffer(&buf, 0, &staging, 0, size);
+                self.region.ctx.queue.submit(Some(enc.finish()));
 
-                    let bytes = slice.get_mapped_range().to_vec();
-                    staging.unmap();
+                let slice = staging.slice(..);
+                let (tx, rx) = std::sync::mpsc::channel();
 
-                    Arc::new(GraphValue::raw(bytes, job.value_kind, job.rect))
-                }
+                slice.map_async(wgpu::MapMode::Read, move |res| {
+                    let _ = tx.send(res);
+                });
+                let _ = self
+                    .region
+                    .ctx
+                    .device
+                    .poll(wgpu::PollType::wait_indefinitely());
+
+                rx.recv()
+                    .map_err(|_| MaterializeError::Encode("Readback channel failed".into()))?
+                    .map_err(|e| MaterializeError::Encode(e.to_string()))?;
+
+                let bytes = slice.get_mapped_range().to_vec();
+                staging.unmap();
+
+                let extent = match job.datatype.work_unit_kind() {
+                    WorkUnitKind::Region => WorkUnit::Region {
+                        rect: job.rect,
+                        lod: self.region.lod,
+                    },
+                    WorkUnitKind::Range => WorkUnit::Range {
+                        start: job.rect.x as u32,
+                        end: (job.rect.x + job.rect.width) as u32,
+                    },
+                    WorkUnitKind::Atomic => WorkUnit::Atomic,
+                };
+                Arc::new(MaterializedValue::host(bytes, job.datatype.clone(), extent))
             };
 
             self.region
@@ -863,7 +980,7 @@ impl<'a> SubmittedBatch<'a> {
 pub fn execute_batch(
     region: &GpuRegion,
     rects: &[Rect],
-) -> Result<Vec<Arc<GraphValue>>, crate::error::Error> {
+) -> Result<Vec<Arc<MaterializedValue>>, crate::error::Error> {
     MaterializePipeline::new(region, rects)
         .execute()
         .map_err(Into::into)

@@ -2,7 +2,7 @@
 
 use crate::common::rgb;
 use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
+use pixors_engine::data::image::Image2D;
 use pixors_engine::*;
 
 #[test]
@@ -29,7 +29,7 @@ fn labelregions_and_fill() {
 #[test]
 fn hist_ismonotonic_on_identity() {
     crate::common::init();
-    let lut = Image::<VipsBackend>::generate(&Identity).unwrap();
+    let lut = Image2D::<VipsBackend>::generate(&Identity).unwrap();
     let m = lut.execute(&HistIsmonotonicOperation).unwrap();
     assert!(m.0);
 }

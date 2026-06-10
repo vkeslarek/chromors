@@ -4,67 +4,21 @@ use crate::backend::vips::gobject::VipsGObject;
 use crate::backend::vips::operation::VipsOperation;
 use crate::libvips_ffi as ffi;
 
-use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeEval, NodeId};
-use crate::backend::gpu::op::GpuOperation;
-use crate::backend::gpu::param::Param;
-use crate::backend::gpu::value::ValueKind;
 use crate::backend::Backend;
+use crate::backend::gpu::datatype::ImageType;
+use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeEval, NodeId};
+use crate::backend::gpu::op::working_image_type;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation, splice_sibling};
+use crate::backend::gpu::param::Param;
 use crate::geometry::Rect;
 use std::sync::Arc;
-
-/// Inject a GPU image as a source node into the graph, returning its node id.
-fn inject_gpu_source(
-    image: &crate::data::image::Image<crate::backend::gpu::GpuBackend>,
-    graph: &mut Graph,
-) -> NodeId {
-    if graph.get_node(image.root_id()).is_some() || graph.get_source(image.root_id()).is_some() {
-        return image.root_id();
-    }
-    let (w, h) = (image.width(), image.height());
-    let target = crate::target::ImageTarget::new(image.clone());
-    let mat = target
-        .pull(crate::geometry::Rect::new(0, 0, w as i32, h as i32), 0)
-        .expect("inject_gpu_source: failed to pull image");
-    let img_buf = Arc::new(crate::backend::gpu::buffer::ImageBuffer {
-        buffer: mat.buffer.clone(),
-        width: mat.buffer_rect.width as u32,
-        height: mat.buffer_rect.height as u32,
-        meta: mat.meta,
-    });
-    let source = crate::backend::gpu::source::GpuSource::new_buffer(
-        img_buf,
-        image.handle.node.ctx.clone(),
-    );
-    graph.add_source(Arc::new(source))
-}
-
-/// Halo (half mask size) struct for inverse_map.
-struct MaskHalo {
-    hw: i32,
-    hh: i32,
-}
-
-impl MaskHalo {
-    fn from_dims(mask_w: u32, mask_h: u32) -> Self {
-        Self {
-            hw: (mask_w as i32) / 2,
-            hh: (mask_h as i32) / 2,
-        }
-    }
-
-    fn expand(&self, rect: Rect, w: u32, h: u32) -> Rect {
-        let bounds = Rect::new(0, 0, w as i32, h as i32);
-        let halo = self.hw.max(self.hh);
-        rect.expand(halo, bounds)
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ConvolutionOperation
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConvolutionOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
     pub precision: Option<i32>,
     pub layers: Option<i32>,
     pub cluster: Option<i32>,
@@ -93,7 +47,7 @@ where
 }
 
 impl VipsOperation for ConvolutionOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"conv\0"
     }
@@ -112,9 +66,19 @@ impl VipsOperation for ConvolutionOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -126,20 +90,44 @@ impl GpuOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -148,7 +136,7 @@ impl GpuOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct CompassOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for CompassOperation<B> {
@@ -169,7 +157,7 @@ where
 }
 
 impl VipsOperation for CompassOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"compass\0"
     }
@@ -184,7 +172,7 @@ impl VipsOperation for CompassOperation<crate::backend::vips::VipsBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct MorphOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
     pub morph: OperationMorphology,
 }
 
@@ -209,7 +197,7 @@ where
 }
 
 impl VipsOperation for MorphOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"morph\0"
     }
@@ -220,9 +208,19 @@ impl VipsOperation for MorphOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for MorphOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for MorphOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -232,22 +230,50 @@ impl GpuOperation for MorphOperation<crate::backend::gpu::GpuBackend> {
                 module: "ops.convolution",
                 function: "morph_kernel",
             }),
-            params: vec![Param::U32(self.morph as u32), Param::U32(mw), Param::U32(mh)],
+            params: vec![
+                Param::U32(self.morph as u32),
+                Param::U32(mw),
+                Param::U32(mh),
+            ],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -270,7 +296,7 @@ impl IntoVipsEnum for Precision {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConvaOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
     pub layers: Option<i32>,
     pub cluster: Option<i32>,
 }
@@ -297,7 +323,7 @@ where
 }
 
 impl VipsOperation for ConvaOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"conva\0"
     }
@@ -313,9 +339,19 @@ impl VipsOperation for ConvaOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -327,20 +363,44 @@ impl GpuOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -349,7 +409,7 @@ impl GpuOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConvfOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for ConvfOperation<B> {
@@ -370,7 +430,7 @@ where
 }
 
 impl VipsOperation for ConvfOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"convf\0"
     }
@@ -380,9 +440,19 @@ impl VipsOperation for ConvfOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -394,20 +464,44 @@ impl GpuOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -416,7 +510,7 @@ impl GpuOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConviOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for ConviOperation<B> {
@@ -437,7 +531,7 @@ where
 }
 
 impl VipsOperation for ConviOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"convi\0"
     }
@@ -447,9 +541,19 @@ impl VipsOperation for ConviOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -461,20 +565,44 @@ impl GpuOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -483,7 +611,7 @@ impl GpuOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConvsepOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
     pub precision: Option<Precision>,
     pub layers: Option<i32>,
     pub cluster: Option<i32>,
@@ -512,7 +640,7 @@ where
 }
 
 impl VipsOperation for ConvsepOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"convsep\0"
     }
@@ -531,9 +659,19 @@ impl VipsOperation for ConvsepOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -545,20 +683,44 @@ impl GpuOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -567,7 +729,7 @@ impl GpuOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct ConvasepOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
     pub layers: Option<i32>,
 }
 
@@ -592,7 +754,7 @@ where
 }
 
 impl VipsOperation for ConvasepOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"convasep\0"
     }
@@ -605,9 +767,19 @@ impl VipsOperation for ConvasepOperation<crate::backend::vips::VipsBackend> {
     }
 }
 
+impl TypedOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
+    type Output = ImageType;
+}
+
 impl GpuOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-        let mask_id = inject_gpu_source(&self.mask, graph);
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
+        let mask_id = splice_sibling(graph, &self.mask);
         let mw = self.mask.width();
         let mh = self.mask.height();
         graph.add_node(GraphNode {
@@ -619,20 +791,44 @@ impl GpuOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
             }),
             params: vec![Param::U32(mw), Param::U32(mh)],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: working_image_type(),
         })
     }
 
-    fn inverse_map(
+    fn input_demands(
         &self,
-        output_rect: Rect,
-        w: u32,
-        h: u32,
-        _lod: crate::backend::gpu::Lod,
-    ) -> Vec<(usize, Rect)> {
-        let halo = MaskHalo::from_dims(self.mask.width(), self.mask.height());
-        let expanded = halo.expand(output_rect, w, h);
-        vec![(0, expanded), (1, Rect::new(0, 0, self.mask.width() as i32, self.mask.height() as i32))]
+        wu: &crate::backend::gpu::work_unit::WorkUnit,
+    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
+        match wu {
+            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
+                let mw = self.mask.width();
+                let mh = self.mask.height();
+                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
+                let expanded = Rect::new(
+                    rect.x - halo,
+                    rect.y - halo,
+                    rect.width + 2 * halo,
+                    rect.height + 2 * halo,
+                );
+                vec![
+                    (
+                        0,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: expanded,
+                            lod: *lod,
+                        },
+                    ),
+                    (
+                        1,
+                        crate::backend::gpu::work_unit::WorkUnit::Region {
+                            rect: Rect::new(0, 0, mw as i32, mh as i32),
+                            lod: *lod,
+                        },
+                    ),
+                ]
+            }
+            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        }
     }
 }
 
@@ -641,7 +837,7 @@ impl GpuOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct FastcorOperation<B: Backend> {
-    pub reference: crate::data::image::Image<B>,
+    pub reference: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for FastcorOperation<B> {
@@ -662,7 +858,7 @@ where
 }
 
 impl VipsOperation for FastcorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"fastcor\0"
     }
@@ -677,7 +873,7 @@ impl VipsOperation for FastcorOperation<crate::backend::vips::VipsBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct SpcorOperation<B: Backend> {
-    pub reference: crate::data::image::Image<B>,
+    pub reference: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for SpcorOperation<B> {
@@ -698,7 +894,7 @@ where
 }
 
 impl VipsOperation for SpcorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"spcor\0"
     }
@@ -713,7 +909,7 @@ impl VipsOperation for SpcorOperation<crate::backend::vips::VipsBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct PhasecorOperation<B: Backend> {
-    pub second: crate::data::image::Image<B>,
+    pub second: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for PhasecorOperation<B> {
@@ -734,7 +930,7 @@ where
 }
 
 impl VipsOperation for PhasecorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"phasecor\0"
     }
@@ -749,7 +945,7 @@ impl VipsOperation for PhasecorOperation<crate::backend::vips::VipsBackend> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub struct FreqmultOperation<B: Backend> {
-    pub mask: crate::data::image::Image<B>,
+    pub mask: crate::data::image::Image2D<B>,
 }
 
 impl<B: Backend> std::fmt::Debug for FreqmultOperation<B> {
@@ -770,7 +966,7 @@ where
 }
 
 impl VipsOperation for FreqmultOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"freqmult\0"
     }

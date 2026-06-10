@@ -4,10 +4,11 @@ use crate::backend::ColorConversionCapability;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use super::datatype::{DataType, ImageType};
 use super::graph::NodeEval;
 use super::graph::{Graph, GraphNode, KernelSpec, NodeId};
-use super::value::ValueKind;
 use crate::color::space::ColorSpace;
+use crate::pixel::AlphaPolicy;
 use crate::pixel::PixelFormat;
 
 // ── OutputCodec ───────────────────────────────────────────────────────────────
@@ -82,12 +83,8 @@ pub enum OutputDecoder {
 /// A logical operation in the fused GPU graph.
 pub trait GpuOperation: Send + Sync + Debug {
     /// Emit this operation into the graph and return the output node id.
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId;
-
-    /// The [`ValueKind`] this operation produces.  Default: `ValueKind::Image`.
-    fn output_kind(&self, _input_w: u32, _input_h: u32) -> ValueKind {
-        ValueKind::Image
-    }
+    fn emit(&self, inputs: &[NodeId], graph: &mut Graph, self_arc: Arc<dyn GpuOperation>)
+    -> NodeId;
 
     /// Output pixel dimensions.  Default: identity (`Some((input_w, input_h))`).
     /// Return `None` for ops with no spatial output (histograms, reductions).
@@ -140,6 +137,17 @@ pub trait GpuOperation: Send + Sync + Debug {
     }
 }
 
+/// Statically declares the [`DataType`] an operation's emitted node produces.
+///
+/// Kept separate from [`GpuOperation`] (which stays object-safe and is stored
+/// as `Arc<dyn GpuOperation>` on every [`GraphNode`]) — `Output` varies per
+/// concrete op (`ImageType` for most, `HistogramType` for reductions), so it
+/// can only be used in generic position. [`super::datatype::Executable::execute`]
+/// is the generic entry point that ties `O::Output` to the returned typed handle.
+pub trait TypedOperation: GpuOperation {
+    type Output: DataType;
+}
+
 // ── DispatchGrid ──────────────────────────────────────────────────────────────
 
 /// Declares which node's demanded rect sizes a kernel's thread grid.
@@ -153,6 +161,17 @@ pub enum DispatchGrid {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Working-space image datatype shared by ordinary fused image ops — ACEScg
+/// linear float4. The final output color space/format is decided later by
+/// the layout pass (`output_decoder()` codec override / plan default), not
+/// by this tag.
+pub fn working_image_type() -> Arc<dyn DataType> {
+    Arc::new(ImageType {
+        color_space: ColorSpace::ACES_CG,
+        format: PixelFormat::RgbaF32,
+    })
+}
 
 pub fn emit_image(
     graph: &mut Graph,
@@ -168,8 +187,32 @@ pub fn emit_image(
         eval: NodeEval::Kernel(KernelSpec { module, function }),
         params,
         op,
-        output: ValueKind::Image,
+        datatype: working_image_type(),
     })
+}
+
+/// Splice another image's subgraph into `graph`, returning the node id
+/// (within `graph`) corresponding to `other`'s root.
+///
+/// Used by multi-input ops (composite, join, insert) to fuse a sibling
+/// image's graph lazily instead of eagerly pulling it to host bytes and
+/// re-injecting it as a baked source.
+///
+/// If `other` shares the same underlying graph as `graph` (e.g. compositing
+/// an image onto itself), `other.root_id()` is already a valid id in `graph`
+/// and no merge is needed — detected via `try_lock`, since re-locking the
+/// same `Mutex` from the same thread would deadlock.
+pub fn splice_sibling(
+    graph: &mut Graph,
+    other: &crate::data::image::Image2D<super::GpuBackend>,
+) -> NodeId {
+    match other.handle.graph.try_lock() {
+        Ok(other_graph) => {
+            let remap = graph.merge_from(&other_graph);
+            remap[&other.root_id()]
+        }
+        Err(_) => other.root_id(),
+    }
 }
 
 pub fn emit_unary(
@@ -179,7 +222,7 @@ pub fn emit_unary(
     module: &'static str,
     function: &'static str,
     params: Vec<Param>,
-    output: ValueKind,
+    datatype: Arc<dyn DataType>,
 ) -> NodeId {
     graph.add_node(GraphNode {
         id: NodeId(0),
@@ -187,26 +230,42 @@ pub fn emit_unary(
         eval: NodeEval::Kernel(KernelSpec { module, function }),
         params,
         op,
-        output,
+        datatype,
     })
 }
 
 use super::GpuBackend;
-use super::GpuImageHandle;
-use crate::data::image::Image;
+use super::GraphNodeHandle;
+use crate::data::image::Image2D;
 
 // ── ColorConversionCapability ─────────────────────────────────────────────────
 
 use crate::pixel::PixelMeta;
 
 impl ColorConversionCapability for GpuBackend {
-    fn pixel_meta(handle: &GpuImageHandle) -> PixelMeta {
-        handle.pixel_meta()
+    /// Construct the `PixelMeta` (format + color space) `handle`'s root
+    /// node will produce on pull, derived from the graph (see
+    /// [`Graph::resolve_image_type`]). Alpha policy is always `Straight` at
+    /// the handle boundary — premultiplication is handled inside the GPU
+    /// working-space pipeline. Panics if the root node has no image output.
+    fn pixel_meta(handle: &GraphNodeHandle) -> PixelMeta {
+        let g = handle.graph.lock().unwrap();
+        let it = g
+            .resolve_image_type(handle.root_id)
+            .expect("GpuBackend::pixel_meta: root node has no image output");
+        PixelMeta {
+            format: it.format,
+            color_space: it.color_space,
+            alpha_policy: AlphaPolicy::Straight,
+        }
     }
 
-    fn convert(handle: &GpuImageHandle, target: PixelMeta) -> Result<GpuImageHandle, crate::Error> {
+    fn convert(
+        handle: &GraphNodeHandle,
+        target: PixelMeta,
+    ) -> Result<GraphNodeHandle, crate::Error> {
         let _sw = crate::utils::Stopwatch::new("gpu.convert");
-        let img = Image::<GpuBackend>::from_handle(handle.clone());
+        let img = Image2D::<GpuBackend>::from_handle(handle.clone());
         // Emit a passthrough kernel with the target codec so the materialiser
         // applies the correct color-space decode on output.
         let converted = img.execute(&GpuColorConvertOperation { dst: target })?;
@@ -215,14 +274,24 @@ impl ColorConversionCapability for GpuBackend {
 }
 
 /// Internal GPU color-conversion node.  Not exposed as a public Operation —
-/// use `Image<GpuBackend>::convert(meta)` instead.
+/// use `Image2D<GpuBackend>::convert(meta)` instead.
 #[derive(Debug, Clone)]
 pub(crate) struct GpuColorConvertOperation {
     pub dst: PixelMeta,
 }
 
+impl TypedOperation for GpuColorConvertOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for GpuColorConvertOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         graph.add_node(GraphNode {
             id: NodeId(0),
             inputs: vec![input],
@@ -232,7 +301,10 @@ impl GpuOperation for GpuColorConvertOperation {
             }),
             params: vec![],
             op: self_arc,
-            output: ValueKind::Image,
+            datatype: Arc::new(ImageType {
+                color_space: self.dst.color_space,
+                format: self.dst.format,
+            }),
         })
     }
 

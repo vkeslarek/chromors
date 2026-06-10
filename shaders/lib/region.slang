@@ -71,3 +71,72 @@ struct RWRegion : IRegion {
         }
     }
 }
+
+// ── Non-image buffer wrappers ─────────────────────────────────────────────────
+
+struct ComplexRegion {
+    StructuredBuffer<float2> buf;
+    BufferRegion view;
+
+    float2 read(uint idx) {
+        return buf[view.x + idx];
+    }
+
+    float2 read2d(uint2 idx) {
+        if (idx.x >= view.width || idx.y >= view.height) { return float2(0); }
+        return buf[region_index(view, idx.x, idx.y)];
+    }
+}
+
+struct RWComplexRegion {
+    RWStructuredBuffer<float2> buf;
+    BufferRegion view;
+
+    float2 read2d(uint2 idx) {
+        if (idx.x >= view.width || idx.y >= view.height) { return float2(0); }
+        return buf[region_index(view, idx.x, idx.y)];
+    }
+
+    void write(uint idx, float2 value) {
+        buf[view.x + idx] = value;
+    }
+
+    void write2d(uint2 idx, float2 value) {
+        if (idx.x < view.width && idx.y < view.height) {
+            buf[region_index(view, idx.x, idx.y)] = value;
+        }
+    }
+}
+
+struct MaskRegion {
+    StructuredBuffer<float> buf;
+    BufferRegion view;
+
+    float read(uint idx) {
+        return buf[view.x + idx];
+    }
+
+    float read2d(uint2 idx) {
+        if (idx.x >= view.width || idx.y >= view.height) { return 0.0f; }
+        return buf[region_index(view, idx.x, idx.y)];
+    }
+}
+
+struct RWMaskRegion {
+    RWStructuredBuffer<float> buf;
+    BufferRegion view;
+
+    float read(uint idx) {
+        return buf[view.x + idx];
+    }
+
+    void write(uint idx, float value) {
+        buf[view.x + idx] = value;
+    }
+
+    void write2d(uint2 idx, float value) {
+        if (idx.x < view.width && idx.y < view.height) {
+            buf[region_index(view, idx.x, idx.y)] = value;
+        }
+    }
+}

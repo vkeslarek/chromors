@@ -6,7 +6,7 @@
 use crate::common::rgb;
 use pixors_engine::*;
 
-// ── Invert (VipsCustomOperation → Image<VipsBackend>) ────────────────────────────────────
+// ── Invert (VipsCustomOperation → Image2D<VipsBackend>) ────────────────────────────────────
 
 #[test]
 fn invert_matches_vips() {
@@ -81,7 +81,7 @@ fn custom_ops_via_execute() {
     let img = rgb();
     let (w, h) = (img.width(), img.height());
 
-    // Image<VipsBackend>-output custom op through the same execute() as vips ops.
+    // Image2D<VipsBackend>-output custom op through the same execute() as vips ops.
     let inv = img.execute(&Custom(Invert)).unwrap();
     let inv_bytes = crate::common::vips_materialize(&inv);
     let ref_out = img.execute(&InvertOperation).unwrap();

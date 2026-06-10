@@ -1,6 +1,7 @@
+use crate::backend::gpu::datatype::ImageType;
 use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::GpuOperation;
 use crate::backend::gpu::op::emit_image;
+use crate::backend::gpu::op::{GpuOperation, TypedOperation};
 use std::sync::Arc;
 
 use crate::backend::vips::gobject::VipsGObject;
@@ -9,7 +10,7 @@ use crate::libvips_ffi as ffi;
 
 pub struct SobelOperation;
 impl VipsOperation for SobelOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"sobel\0"
     }
@@ -21,7 +22,7 @@ impl VipsOperation for SobelOperation {
 #[derive(Clone, Debug)]
 pub struct InvertOperation;
 impl VipsOperation for InvertOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"invert\0"
     }
@@ -32,7 +33,7 @@ impl VipsOperation for InvertOperation {
 
 pub struct SignOperation;
 impl VipsOperation for SignOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"sign\0"
     }
@@ -43,7 +44,7 @@ impl VipsOperation for SignOperation {
 
 pub struct AbsOperation;
 impl VipsOperation for AbsOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"abs\0"
     }
@@ -54,7 +55,7 @@ impl VipsOperation for AbsOperation {
 
 pub struct PrewittOperation;
 impl VipsOperation for PrewittOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"prewitt\0"
     }
@@ -65,7 +66,7 @@ impl VipsOperation for PrewittOperation {
 
 pub struct ScharrOperation;
 impl VipsOperation for ScharrOperation {
-    type Output = crate::data::image::Image<crate::backend::vips::VipsBackend>;
+    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
     fn name() -> &'static [u8] {
         b"scharr\0"
     }
@@ -74,8 +75,18 @@ impl VipsOperation for ScharrOperation {
     }
 }
 
+impl TypedOperation for InvertOperation {
+    type Output = ImageType;
+}
+
 impl GpuOperation for InvertOperation {
-    fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+    fn emit(
+        &self,
+        inputs: &[NodeId],
+        graph: &mut Graph,
+        self_arc: Arc<dyn GpuOperation>,
+    ) -> NodeId {
+        let input = inputs[0];
         emit_image(
             graph,
             input,

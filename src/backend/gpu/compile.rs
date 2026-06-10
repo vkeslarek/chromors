@@ -3,9 +3,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use super::context::GpuContext;
+use super::datatype::DataType;
 use super::emit::EmittedIr;
 use super::materialize::MaterializePlan;
-use super::value::ValueKind;
+use super::op::working_image_type;
 use crate::pixel::PixelFormat;
 
 // ── CompiledShader — cacheable artifact ──────────────────────────────────────
@@ -40,7 +41,7 @@ pub struct DispatchPass {
     pub out_bufs: Vec<wgpu::Buffer>,
     pub params_gpu: wgpu::Buffer,
     pub target_rects: Vec<(u32, u32)>,
-    pub target_output_kinds: Vec<ValueKind>,
+    pub target_output_kinds: Vec<Arc<dyn DataType>>,
     pub temp_buffer_sizes: Vec<u64>,
 }
 
@@ -346,9 +347,11 @@ impl DispatchPass {
             .iter()
             .enumerate()
             .map(|(i, &(tw, th))| {
-                let kind = ir.target_output_kinds.get(i).unwrap_or(&ValueKind::Image);
                 let fmt = ir.dst_format.unwrap_or(PixelFormat::RgbaF32);
-                let sz = kind.output_byte_size(tw, th, fmt);
+                let sz = match ir.target_output_kinds.get(i) {
+                    Some(dt) => dt.byte_size(tw, th, fmt),
+                    None => working_image_type().byte_size(tw, th, fmt),
+                };
                 ctx.arena.allocate(
                     &ctx.device,
                     sz,
