@@ -21,21 +21,34 @@ src/
 ├── lib.rs              # init(), re-exports, ffi include!
 ├── error.rs            # Error enum
 ├── backend/
-│   ├── mod.rs          # Backend, Operation, SourceInput, TargetOutput, ImageTargetCapability, HistogramTargetCapability
+│   ├── mod.rs          # Backend, Operation, SourceInput, TargetOutput, ImageTargetCapability, ColorConversionCapability
 │   ├── gpu/
-│   │   ├── mod.rs      # GpuBackend, GpuHandle, GraphNodeHandle, Lod, RegionCache
-│   │   ├── value.rs    # ValueKind, NodeEval, GraphValue (aka MaterializedBuffer)
-│   │   ├── graph.rs    # Graph, GraphNode, SourceNode, KernelSpec, NodeId
-│   │   ├── op.rs       # GpuOperation trait, OutputSpec
-│   │   ├── ops.rs      # emit_image(), emit_unary() helpers
+│   │   ├── mod.rs      # GpuBackend, GraphNodeHandle, Lod, RegionCache, re-exports
+│   │   ├── datatype/   # DataType, TypedData, Sourceable, Targetable, Executable
+│   │   │   ├── mod.rs      # the cross-cutting traits (see "The datatype model")
+│   │   │   ├── image.rs    # ImageType
+│   │   │   ├── histogram.rs# HistogramType
+│   │   │   ├── mask.rs     # Mask1dType, Mask2dType
+│   │   │   ├── fft.rs      # Fft1dType, Fft2dType
+│   │   │   └── reduction.rs# ScalarType, PointListType, FeaturesType
+│   │   ├── typed/      # host-facing typed wrappers around GraphNodeHandle
+│   │   │   ├── image.rs     # Image2D<GpuBackend> inherent impls
+│   │   │   └── histogram.rs # Histogram<GpuBackend> inherent impls
+│   │   ├── value.rs    # MaterializedValue, Storage, WriteMode
+│   │   ├── work_unit.rs# Region, Range, Atomic, AnyWorkUnit, WorkUnitKind, WorkUnit
+│   │   ├── graph.rs    # Graph, GraphNode, SourceNode, KernelSpec, NodeId, NodeEval, content_hash
+│   │   ├── op.rs       # GpuOperation/TypedOperation traits, InputEncoder/OutputDecoder/DispatchGrid, emit_image/emit_unary/splice_sibling
+│   │   ├── builder.rs  # GraphBuilder::build — standalone multi-input node construction
+│   │   ├── request.rs  # GpuRequest<D: TypedData> — typed materialization request
+│   │   ├── cache.rs    # TieredCache (VRAM→RAM→Disk, content-hash keyed, CLOCK eviction)
 │   │   ├── emit.rs     # JIT Slang emitter, LayoutPlan, alloc_temps, emit_slang
 │   │   ├── compile.rs  # Compiled (SPIR-V + wgpu pipelines)
-│   │   ├── materialize.rs # 7-step materialization pipeline, execute_batch
+│   │   ├── materialize.rs # materialization pipeline, execute_batch
 │   │   ├── region.rs   # GpuRegion (prepare/materialize/materialize_batch)
-│   │   ├── buffer.rs   # GpuBuffer (VRAM storage, upload/alloc/read_to_cpu)
-│   │   ├── context.rs  # GpuContext (wgpu device + queue + pipeline cache)
-│   │   ├── source.rs   # GpuSource (Buffer | Vips), fetch_region
-│   │   ├── pass.rs     # bfs_find_cuts (device buffer-limit enforcement)
+│   │   ├── buffer.rs   # GpuBuffer (payload-agnostic VRAM), ImageBuffer (image-shaped wrapper)
+│   │   ├── context.rs  # GpuContext (wgpu device + queue + pipeline cache + RegionCache)
+│   │   ├── source.rs   # GpuSource (Image2D | VipsImage via enum_dispatch), AnyGpuSource, fetch_region
+│   │   ├── pass.rs     # CutFinder (device storage-buffer-limit enforcement)
 │   │   ├── param.rs    # Param enum, GpuPixelEncoding
 │   │   └── arena.rs    # buffer pool
 │   └── vips/
@@ -51,15 +64,15 @@ src/
 │   ├── primaries.rs    # RgbPrimaries + chromaticities
 │   └── transfer.rs     # TransferFn (SRGB, PQ, HLG, …) + decode/encode
 ├── data/
-│   ├── image.rs        # Image<B: Backend> — phantom-typed handle
+│   ├── image.rs        # Image2D<B: Backend> — phantom-typed handle
 │   └── histogram.rs    # Histogram<B> handle, HistogramResult
 ├── target.rs           # ImageTarget, HistogramTarget, MaterializedImage, MaterializedHistogram
 ├── operation/
 │   ├── composite.rs    # Composite2Operation (vips) + multi-input GPU composite
 │   ├── filters.rs      # GaussianBlurOperation (vips + GPU reference impl)
 │   ├── stats.rs        # HistogramOp (GPU non-image output reference impl)
-│   ├── misc.rs         # ColorConvertOp (dst_meta override reference impl)
-│   └── …               # arithmetic, bands, geometry, icc, opacity, edge, …
+│   ├── arithmetic.rs   # AddOperation etc. (multi-input GPU reference impl via splice_sibling)
+│   └── …               # bands, geometry, icc, opacity, edge, …
 └── pixel/
     ├── format.rs       # PixelFormat (38 variants)
     └── meta.rs         # PixelMeta { format, color_space, alpha_policy }
@@ -67,29 +80,62 @@ src/
 
 ## Key design rules
 
-### The typed value model
+### The datatype model
 
-Every graph edge carries a `ValueKind` — the shape tag that describes what a node produces:
+Every `GraphNode` carries `datatype: Arc<dyn DataType>` — the open vocabulary that
+describes what a node produces. There is no closed enum to edit when adding a
+new datatype; write a struct in `backend/gpu/datatype/<name>.rs` and implement
+the traits below.
 
 ```rust
-pub enum ValueKind {
-    Image,                       // 2-D pixel buffer (any PixelFormat)
-    Histogram { bins: u32 },    // uint atomic accumulator
-    PointList { capacity: u32 },// (x,y) append list
-    Scalar,                      // single f32
-    Features { channels: u32 }, // multi-channel feature map
+pub trait DataType: Send + Sync + Debug + 'static {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn needs_fused_temp(&self) -> bool { false }            // only ImageType -> true
+    fn write_mode(&self) -> WriteMode { WriteMode::Positional } // HistogramType -> AtomicAccumulate{count}
+    fn byte_size(&self, w: u32, h: u32, image_format: PixelFormat) -> u64;
+    fn work_unit_kind(&self) -> WorkUnitKind;               // Region | Range | Atomic
+}
+
+pub trait TypedData: DataType + Sized {
+    type Value: Clone + Send + Sync;
+    type WorkUnit: AnyWorkUnit;
+    fn finish(&self, value: &MaterializedValue, lod: Lod, wu: &Self::WorkUnit, ctx: &GpuContext)
+        -> Result<Self::Value, Error>;
 }
 ```
 
-At materialize time `ValueKind` drives buffer allocation size (`compile.rs`) and whether the node gets a float4 temp buffer (`alloc_temps` — only `Image` nodes do). Non-image nodes write directly to their target.
+Concrete datatypes (`backend/gpu/datatype/*.rs`): `ImageType { color_space, format }`
+(the only one with `needs_fused_temp() == true` and `work_unit_kind() == Region`),
+`HistogramType { bins }` (`work_unit_kind() == Atomic`, `write_mode() ==
+AtomicAccumulate{count: bins}`), `Mask1dType`/`Mask2dType`, `Fft1dType`/`Fft2dType`,
+`ScalarType`/`PointListType`/`FeaturesType`.
 
-The runtime payload is `GraphValue` (re-exported as `MaterializedBuffer`):
+Capability traits layer on top of `DataType`:
+
+- `Sourceable: DataType` — can be a graph leaf (`fetch_region` from a `GpuSource`).
+  Today only `ImageType` implements it.
+- `Targetable: TypedData + Clone` — blanket-impl'd for every `TypedData`; `pull(&self,
+  node, lod, wu)` wraps `GpuRequest::new(...).materialize()`.
+- `Executable: DataType + Sized` — blanket-impl'd; `execute::<O>(op, node)` calls
+  `GraphBuilder::build(op, &[node])`.
+
+`WorkUnitKind` (`work_unit.rs`) is the *shape* of a datatype's natural division —
+`Region` (2-D rect + `Lod`), `Range` (1-D `[start, end)`), or `Atomic` (indivisible).
+The typed structs `Region`/`Range`/`Atomic` implement `AnyWorkUnit` to convert to/from
+the erased `WorkUnit` enum used wherever the graph crosses heterogeneous node boundaries.
+
+### MaterializedValue — runtime payload
+
 ```rust
-pub enum GraphValue {
-    Image { buffer: Arc<GpuBuffer>, buffer_rect: Rect, source_rect: Rect },
-    Raw   { bytes: Vec<u8>, kind: ValueKind, source_rect: Rect },
+pub struct MaterializedValue {
+    pub storage: Storage,            // Vram(Arc<GpuBuffer>) | Host(Vec<u8>)
+    pub datatype: Arc<dyn DataType>,
+    pub extent: WorkUnit,
 }
 ```
+
+No embedded `kind` re-validation — the typed `GpuRequest<D>` already knows `D`, so
+`TypedData::finish` decodes `storage` directly via `self`.
 
 ### The node evaluation model
 
@@ -105,9 +151,10 @@ Breaking the old "every node == one kernel" coupling into an enum makes it possi
 
 ### Backends are generic, models are concrete
 
-- `Image<B: Backend>` = phantom-typed handle, only holds `B::Handle`
-- `Image<VipsBackend>` has vips-specific methods; `Image<GpuBackend>` has GPU-specific methods
-- Capability traits gate which methods compile: `OpenFile`, `OpenBuffer`, `SourceInput`, `TargetOutput`, `ImageTargetCapability`, `HistogramTargetCapability`
+- `Image2D<B: Backend>` = phantom-typed handle, only holds `B::Handle`
+- `Image2D<VipsBackend>` has vips-specific methods; `Image2D<GpuBackend>` has GPU-specific methods (`width`/`height`/`format`/`color_space`/`graph`/`root_id`/`fork`/`execute`, see `backend/gpu/typed/image.rs`)
+- For `GpuBackend`, `B::Handle = GraphNodeHandle` — a neutral `{ graph, root_id, ctx }` triple with no image-specific fields. Image metadata is derived on demand from the root node's `Arc<dyn DataType>` (downcast to `ImageType`)
+- Capability traits gate which methods compile: `OpenFile`, `OpenBuffer`, `SourceInput`, `TargetOutput`, `ImageTargetCapability`, `HistogramTargetCapability`, `ColorConversionCapability`. `HistogramTargetCapability::pull_histogram` is a thin wrapper over `Targetable::pull` (`HistogramType::pull`) — new non-image datatypes follow this same wrap pattern only if they need a `data/<name>.rs` handle exposed off `Image2D`
 - `Operation<Input> { type Output; }` — typed output, not hardcoded to Image. The Vips path already returns `f64`, `Bounds`, `Histogram`, etc. via this mechanism
 
 ### Vips is the reference
@@ -125,7 +172,7 @@ Every GPU operation MUST produce the same result as the equivalent vips operatio
 2. **Implement VipsOperation** (CPU reference):
    ```rust
    impl VipsOperation for MyOperation {
-       type Output = crate::Image;
+       type Output = crate::Image2D<VipsBackend>;
        fn name() -> &'static [u8] { b"my_op_name\0" }
        fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
            op.set_image("in", image);
@@ -136,13 +183,23 @@ Every GPU operation MUST produce the same result as the equivalent vips operatio
 
 3. **Implement GpuOperation** (GPU graph builder):
    ```rust
+   impl TypedOperation for MyOperation {
+       type Output = ImageType;
+   }
+
    impl GpuOperation for MyOperation {
-       fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-           emit_image(graph, input, self_arc, "ops.my_module", "my_kernel",
+       fn emit(&self, inputs: &[NodeId], graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+           emit_image(graph, inputs[0], self_arc, "ops.my_module", "my_kernel",
                vec![Param::F32(self.amount)])
        }
-       // If sigma is in pixel units, scale with LOD:
-       fn lod_scale_param_indices(&self) -> &'static [usize] { &[0] }
+       // If `amount` is in pixel units (e.g. blur sigma), scale it for LOD:
+       fn scale_params_for_lod(&self, params: &[Param], lod: Lod) -> Vec<Param> {
+           let mut p = params.to_vec();
+           if let Param::F32(v) = &mut p[0] {
+               *v /= lod.scale_factor() as f32;
+           }
+           p
+       }
    }
    ```
 
@@ -161,78 +218,114 @@ Every GPU operation MUST produce the same result as the equivalent vips operatio
 ## How to add a non-image output operation (e.g. histogram, scalar stat)
 
 1. Define op struct. Implement `VipsOperation` returning the typed result via `Runner`.
-2. Implement `GpuOperation::emit` using `emit_unary` with the appropriate `ValueKind`:
+2. Implement `GpuOperation::emit` using `emit_unary` with a non-image `DataType`, and override
+   `output_dims`/`input_demands`/`output_decoder`/`dispatch_grid` as needed:
    ```rust
-   fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-       emit_unary(graph, input, self_arc, "ops.histogram", "histogram_kernel",
-           vec![Param::U32(self.channel)],
-           ValueKind::Histogram { bins: self.bins })
+   impl TypedOperation for HistogramOp {
+       type Output = HistogramType;
    }
-   fn output_spec(&self, _w: u32, _h: u32) -> OutputSpec {
-       OutputSpec::Histogram { bins: self.bins }
-   }
-   fn inverse_map(&self, _rect: Rect, w: u32, h: u32, lod: Lod) -> Vec<(usize, Rect)> {
-       // Histogram needs the whole image
-       let s = lod.scale_factor();
-       vec![(0, Rect::new(0, 0, (w as f64 / s).ceil() as i32, (h as f64 / s).ceil() as i32))]
+
+   impl GpuOperation for HistogramOp {
+       fn emit(&self, inputs: &[NodeId], graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+           emit_unary(graph, inputs[0], self_arc, "ops.histogram", "histogram_kernel",
+               vec![Param::U32(self.channel)],
+               Arc::new(HistogramType { bins: self.bins }))
+       }
+       fn output_dims(&self, _w: u32, _h: u32) -> Option<(u32, u32)> {
+           None  // no spatial output
+       }
+       fn input_demands(&self, _wu: &WorkUnit) -> Vec<(usize, WorkUnit)> {
+           vec![(0, WorkUnit::Atomic)]  // histogram needs the whole input
+       }
+       fn output_decoder(&self) -> OutputDecoder {
+           OutputDecoder::HistogramOut
+       }
+       fn dispatch_grid(&self) -> DispatchGrid {
+           DispatchGrid::Input(0)  // thread grid covers the input being scanned
+       }
    }
    ```
-3. Expose a typed handle (e.g. `HistogramHandle`) with a `pull()` method that creates a `GpuRegion`, calls `materialize()`, and extracts bytes from `GraphValue::Raw`. See `HistogramOp::apply` + `HistogramHandle` in `operation/stats.rs` and the `HistogramTargetCapability` impl in `mod.rs`.
+3. Expose a typed handle (e.g. `Histogram<B>`) whose backend capability (e.g.
+   `HistogramTargetCapability::pull_histogram`) wraps `Targetable::pull` (blanket-impl'd for any
+   `TypedData`) — `GpuRequest::new(...).materialize()` drives `HistogramType::finish` to
+   decode the `MaterializedValue`. See `HistogramOp` in `operation/stats.rs`,
+   `HistogramTargetCapability for GpuBackend` in `backend/gpu/target.rs`, and `HistogramBuffer`
+   in `backend/gpu/typed/histogram.rs`.
 
-## How to add a multi-input GPU operation (e.g. composite, bandjoin)
+## How to add a multi-input GPU operation (e.g. composite, arithmetic)
 
-Build `GraphNode` directly to specify multiple inputs:
+The op struct owns its extra inputs as `Image2D<B>` fields; `emit` receives `inputs: &[NodeId]`
+(no privileged "primary" — `inputs[0]` is whichever handle the caller passed first) and splices
+sibling subgraphs with `splice_sibling`:
 ```rust
-fn emit(&self, input: NodeId, graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
-    let overlay_id = graph.add_source(Arc::new(/* GpuSource for overlay */));
-    graph.add_node(GraphNode {
-        id: NodeId(0),
-        inputs: vec![input, overlay_id],   // 0 = primary, 1 = overlay
-        eval: NodeEval::Kernel(KernelSpec { module: "ops.compose", function: "compose_kernel" }),
-        params: vec![Param::U32(self.mode as u32)],
-        op: self_arc,
-        dst_meta: None,
-        output: ValueKind::Image,
-    })
+pub struct AddOperation<B: Backend> {
+    pub right: Image2D<B>,
 }
-fn inverse_map(&self, rect: Rect, _w: u32, _h: u32, _lod: Lod) -> Vec<(usize, Rect)> {
-    vec![(0, rect), (1, rect)]  // both inputs, same rect
+
+impl TypedOperation for AddOperation<GpuBackend> {
+    type Output = ImageType;
+}
+
+impl GpuOperation for AddOperation<GpuBackend> {
+    fn emit(&self, inputs: &[NodeId], graph: &mut Graph, self_arc: Arc<dyn GpuOperation>) -> NodeId {
+        let input = inputs[0];
+        let right_id = splice_sibling(graph, &self.right);
+        graph.add_node(GraphNode {
+            id: NodeId(0),
+            inputs: vec![input, right_id],
+            eval: NodeEval::Kernel(KernelSpec { module: "ops.arithmetic", function: "add_kernel" }),
+            params: vec![],
+            op: self_arc,
+            datatype: working_image_type(),
+        })
+    }
+    fn input_demands(&self, wu: &WorkUnit) -> Vec<(usize, WorkUnit)> {
+        vec![(0, wu.clone()), (1, wu.clone())]  // both inputs, same work unit
+    }
 }
 ```
-The emitter passes both source regions to the kernel: `compose_kernel(idx, region_src_0, region_src_1, region_tmp_N, u0)`.
+`splice_sibling` merges `self.right`'s graph into the host graph via `Graph::merge_from` (or reuses
+`right.root_id()` directly if it's the same graph, e.g. compositing an image onto itself — detected
+via `try_lock`). For an op with no privileged host input at all, use `GraphBuilder::build(op,
+&[handle_a, handle_b])` instead of `Image2D::execute`.
 
 ## How to override output metadata (color space / format)
 
-Set `dst_meta: Some(PixelMeta { ... })` on the `GraphNode`. The emitter uses the last `dst_meta` in the chain to build the `dst_cs` shader constant. This is how `ColorConvertOp` (`operation/misc.rs`) works — it emits a passthrough kernel but overrides the output color space so the final `from_working()` encode converts to the target space.
+Emit a node whose `datatype` is an `ImageType { color_space, format }` carrying the *target*
+metadata, with `output_decoder()` returning `WorkingEncodeRegion { codec: Some(OutputCodec{...}) }`
+so the final `from_working()` encode converts to that space. There is no separate override field on
+`GraphNode` — the datatype IS the override. See `GpuColorConvertOperation` in `backend/gpu/op.rs`,
+used by `Image2D<GpuBackend>::convert(meta)` (via `ColorConversionCapability`).
 
 ## How to add a new typed data handle (e.g. `Features<B>`)
 
-Future work (Phase D). Pattern mirrors `Histogram<B>` in `data/histogram.rs`:
-1. Define `pub struct Features<B: Backend>(GraphNodeHandle, PhantomData<B>)`.
-2. Add `FeaturesTargetCapability` in `backend/mod.rs` with `create_features` + `pull_features`.
-3. Implement for `GpuBackend`: `pull_features` creates `GpuRegion`, materializes, extracts `GraphValue::Raw { kind: ValueKind::Features { .. }, .. }`.
-4. Add `FeaturesTarget<B>` in `target.rs`.
-5. Add `MaterializedFeatures<B>` with the decoded typed payload.
+Pattern mirrors `Histogram<B>` in `data/histogram.rs` / `backend/gpu/typed/histogram.rs`:
+1. Add `FeaturesType { channels: u32 }` in `backend/gpu/datatype/reduction.rs` implementing
+   `DataType` + `TypedData` (and `Sourceable` only if it can be a graph leaf).
+2. Define `pub struct Features<B: Backend>(B::Handle, PhantomData<B>)` in `data/features.rs`.
+3. Add inherent `pull()`/accessors in `backend/gpu/typed/features.rs` — for `GpuBackend`,
+   `Targetable::pull` (blanket-impl'd) handles materialize + `FeaturesType::finish` decode.
+4. Add `FeaturesTarget<B>` + `MaterializedFeatures<B>` in `target.rs` if a `TargetOutput` impl is needed.
 
 ## GPU optimization mechanisms
 
 ### Graph fusion (no per-op dispatch)
-All `Image`-producing nodes in a pass are fused into **one Slang shader, one `queue.submit()`**. Intermediate `float4` results live in temp buffers (`RWRegion`) with slot reuse via interval coloring (`alloc_temps`). No round-trips to CPU between ops.
+All nodes whose `datatype.needs_fused_temp()` is true (today: `ImageType`) are fused into **one Slang shader, one `queue.submit()`**. Intermediate `float4` results live in temp buffers (`RWRegion`) with slot reuse via interval coloring (`alloc_temps`). Non-image nodes (histograms, …) write directly to their target with no temp. No round-trips to CPU between ops.
 
 ### Source fetch coalescing (region merge)
 `merge_overlapping(source_rects)` in `materialize.rs` merges all source rects needed for a batch into fewer, larger rectangles before calling into Vips. One merged fetch = one libvips region prepare+fetch = one CPU→GPU upload. GPU efficiency scales with payload size, so batching pixels amortizes the transfer cost.
 
-### Device buffer-limit cuts (BFS staging)
-`bfs_find_cuts` in `pass.rs` does a BFS from the root node, counting how many storage buffer bindings each pass would require. When the count would exceed `ctx.max_storage_buffers` (device limit, commonly 8), it marks cut nodes. These are pre-materialized and injected as `BufferSource` nodes via `subgraph_with_overrides`, keeping each shader pass within hardware limits. The cut adds a GPU→staging→GPU round-trip only at the cut boundary, not for every node.
+### Device buffer-limit cuts (staging)
+`CutFinder` in `pass.rs` walks depth-first from the root node, counting how many storage buffer bindings each pass would require. When the count would exceed the device's storage-buffer limit, it marks cut nodes as `StagingCuts`. These are pre-materialized and re-injected as `ImageBufferSource` nodes, keeping each shader pass within hardware limits. The cut adds a GPU→staging→GPU round-trip only at the cut boundary, not for every node.
 
 ### Pipeline caching (no re-compile)
 `GpuContext.pipeline_cache` (keyed by Slang text hash) stores compiled `wgpu::ComputePipeline`s. The emitter uses **positional names** (not NodeId-based) so structurally identical graphs produce identical Slang text → cache hit even after the graph has grown with new operations upstream.
 
 ### LOD scaling (cheap preview without re-parameterization)
-Pixel-space params (blur sigma, etc.) listed in `lod_scale_param_indices()` are automatically divided by `lod.scale_factor()` before dispatch. The graph structure is re-used at every LOD; only param bytes change.
+Pixel-space params (blur sigma, etc.) are scaled by `GpuOperation::scale_params_for_lod(params, lod)` (default no-op) before dispatch — typically dividing by `lod.scale_factor()`. The graph structure is re-used at every LOD; only param bytes change.
 
-### Coordinate frame separation (`buffer_rect` / `source_rect`)
-A `GraphValue::Image` may be a sub-region of a larger VRAM buffer (from a merged fetch or cache hit). `buffer_coords(image_rect)` maps image-space to buffer-local. Shaders always work in buffer-local coords via the `BufferRegion { stride, x, y, width, height }` params — no wasted copies to tightly-pack sub-rects before dispatch.
+### Content-hash caching + coordinate frames
+`TieredCache` (`cache.rs`, VRAM→RAM→Disk, CLOCK eviction) keys entries on `(Graph::content_hash(root), x, y, w, h)` — a structural hash of source identity + each node's kernel/params/output decoder/datatype, independent of `NodeId`. Identical computations hit the cache across graph forks and sessions. A cached `MaterializedValue`'s VRAM storage may be a sub-region of a larger buffer (from a merged fetch or cache hit); `WorkUnit::resolve(w, h)` plus `BufferRegion { stride, x, y, width, height }` params let shaders work in buffer-local coords without repacking.
 
 ## Three Vips operation styles
 
@@ -246,10 +339,10 @@ A `GraphValue::Image` may be a sub-region of a larger VRAM buffer (from a merged
 
 | What | Where |
 |---|---|
-| New typed value kind | `backend/gpu/value.rs` — add variant to `ValueKind`, handle in `compile.rs` buffer sizing and `emit.rs` `alloc_temps` |
-| New GPU operation | `operation/<category>.rs` — implement `VipsOperation` + `GpuOperation`, add to `operation/mod.rs`, add cross-backend test |
+| New datatype | `backend/gpu/datatype/<name>.rs` — new struct implementing `DataType` (+ `TypedData`, `Sourceable` if it's a graph leaf), re-export from `datatype/mod.rs` |
+| New GPU operation | `operation/<category>.rs` — implement `VipsOperation` + `GpuOperation`/`TypedOperation`, add to `operation/mod.rs`, add cross-backend test |
 | New Slang shader | `pixors-shader/shaders/ops/<name>.slang`, trigger compile with `cargo build -p pixors-shader` |
-| New typed data handle | `data/<name>.rs` (handle struct), `backend/mod.rs` (capability trait), `target.rs` (Target + Materialized wrapper) |
+| New typed data handle | `data/<name>.rs` (handle struct), `backend/gpu/typed/<name>.rs` (inherent `pull`/accessors via `Targetable`), `target.rs` (Target + Materialized wrapper if `TargetOutput` needed) |
 | New pixel format | `pixel/format.rs` (variant + `channel_count`, `bytes_per_pixel`), `pixel/<name>.rs` (impl Pixel) |
 | New color space | `color/space.rs` (constant), `color/primaries.rs` / `color/transfer.rs` if new primaries/TF needed |
 | New Vips custom op | `operation/custom_ops.rs` — implement `VipsCustomOperation` or `VipsCustomSink` |

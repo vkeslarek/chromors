@@ -10,8 +10,8 @@ use pixors_engine::*;
 fn main() -> Result<(), Error> {
     init();
 
-    // VipsBackend is the default — `Image` is an alias for `Image<VipsBackend>`
-    let img = Image::open("input.jpg")?;
+    // VipsBackend is the CPU reference backend
+    let img = Image2D::<VipsBackend>::open("input.jpg")?;
 
     // Chain operations
     let blurred = img.execute(&GaussianBlurOperation { sigma: 3.0, minimum_amplitude: None, precision: None })?;
@@ -26,7 +26,7 @@ fn main() -> Result<(), Error> {
 
 ### Backend-generic models, backend-specific backends
 
-The core abstraction is `Image<B: Backend>`, which holds an opaque `B::Handle`. The image struct itself knows nothing about the backend — it delegates to capability traits. Backend-specific methods live on `impl Image<VipsBackend>` (e.g. `.save()`, `.thumbnail()`) or `impl Image<GpuBackend>` (e.g. `.convert()`, `.new_from_vips()`).
+The core abstraction is `Image2D<B: Backend>`, which holds an opaque `B::Handle`. The image struct itself knows nothing about the backend — it delegates to capability traits. Backend-specific methods live on `impl Image2D<VipsBackend>` (e.g. `.execute()`, `.sink()`, `.custom()`) or `impl Image2D<GpuBackend>` (e.g. `.convert()`, `.execute()`, `.fork()`, `.graph()`).
 
 New backends only need to implement `Backend` + the capability traits they support.
 
@@ -34,17 +34,18 @@ New backends only need to implement `Backend` + the capability traits they suppo
 
 | Trait | Gives you |
 |---|---|
-| `Backend` | The fundamental marker — `type Handle: Send + Sync` |
-| `OpenFile` | `Image::open(path)` — decode from filesystem |
-| `OpenBuffer` | `Image::from_buffer(bytes)` — decode from memory |
-| `SourceInput` | `Image::new_from_source(src)` — open from stream |
-| `TargetOutput` | `Image::write_to_target(tgt)` — write to stream |
-| `TileAccess` | `Image::new_region()` — tile-level pixel access |
-| `Operation<B, Op>` | `Image::execute(op)` — run a specific operation |
+| `Backend` | The fundamental marker — `type Handle: Send + Sync`, `type Buffer: Send + Sync` |
+| `OpenFile` | `Image2D::<B>::open(path)` — decode from filesystem |
+| `OpenBuffer` | `Image2D::<B>::from_buffer(bytes)` — decode from memory |
+| `SourceInput` | `Image2D::<B>::new_from_source(src)` — open from stream |
+| `TargetOutput<Image2D<B>>` | `img.write_to_target(tgt)` — write to stream |
+| `ImageTargetCapability` | `pull_image`/`pull_image_batch` — materialize tiles to host bytes |
+| `ColorConversionCapability` | `img.pixel_meta()` / `img.convert(target)` — format/color-space conversion |
+| `Operation<Image2D<B>>` | `img.execute(op)` — run a specific operation, typed `Output` |
 
 ### Operations are compile-time gated
 
-`Image::execute::<Op>(params)` only compiles if the backend implements `Operation<B> for Op`. This means you cannot accidentally call a GPU-only operation on the Vips backend, or vice versa.
+`img.execute(op)` only compiles if the backend implements `Operation<Image2D<B>> for Op`. This means you cannot accidentally call a GPU-only operation on the Vips backend, or vice versa.
 
 ### Vips is the ground truth
 
@@ -57,11 +58,11 @@ Libvips serves as the reference implementation. Every GPU operation is validated
 Wraps libvips via FFI through the GObject API. All operations go through `vips_operation_new` → set properties → `vips_cache_operation_buildp` → extract output. Full access to ~200+ libvips operations.
 
 ```rust
-let img = Image::open("photo.jpg")?;              // Image<VipsBackend>
+let img = Image2D::<VipsBackend>::open("photo.jpg")?;
 let rgb = img.convert(PixelMeta::new(              // color space conversion
     PixelFormat::RgbaF32, ColorSpace::LINEAR_SRGB, AlphaPolicy::Straight
 ))?;
-let bytes = img.write_to_buffer(".png")?;          // encode to memory
+let bytes = rgb.write_to_buffer(".png")?;          // encode to memory
 ```
 
 ### GpuBackend (GPU) — lazy, tile-based
@@ -70,22 +71,28 @@ Uses wgpu to run compute shaders (compiled from Slang via `pixors-shader`). Oper
 
 ```rust
 let ctx = Arc::new(GpuContext::new());
-let gpu_img = Image::<GpuBackend>::new_from_vips(&img, &ctx)?;
 
-// Lazy operation — creates a graph node, no GPU dispatch
-let blurred = gpu_img.execute(&GpuOp(GaussianBlurOperation {
+// Wrap a vips image as a graph source — no upload happens yet
+let source = GpuSource::new_vips(img, ctx.clone());
+let gpu_img = Image2D::<GpuBackend>::new_from_source(&source)?;
+
+// Lazy operation — appends a node to the graph, no GPU dispatch
+let blurred = gpu_img.execute(&GaussianBlurOperation {
     sigma: 3.0, minimum_amplitude: None, precision: None,
-}))?;
+})?;
 
 // Materialize a tile (this is when GPU work happens)
-let region = blurred.new_region()?;
-region.prepare(0, 0, 256, 256)?;
-let result = region.materialize()?;
-let pixels: Vec<u8> = result.buffer.read_to_cpu(&ctx)?;
-
-// Or fetch directly (materialize + download in one call)
-let bytes = region.fetch(0, 0, 256, 256)?;
+let region = GpuRegion::new(blurred.graph().clone(), ctx.cache.clone(),
+    blurred.root_id(), ctx.clone(), Lod::FULL);
+region.prepare(Rect::new(0, 0, 256, 256));
+let result = region.materialize()?;          // Arc<MaterializedValue>
+let pixels = result.read_bytes(&ctx)?;       // Vec<u8>, image working-space bytes
 ```
+
+For the typed end-to-end path (decode to a target `PixelMeta`), use
+`ImageTargetCapability::pull_image` (`Image2D::<GpuBackend>` does not expose `pull_image`
+directly today — drive it via the document/render layer, or call
+`<GpuBackend as ImageTargetCapability>::pull_image(&gpu_img.handle, rect, lod)`).
 
 GPU operations follow the same convention as vips: input → ACEScg working space → operation → output space. This ensures mathematically identical results regardless of the image's native color space.
 
@@ -234,50 +241,68 @@ for m in meta {
 
 ### Lazy computation graph
 
-`Image<GpuBackend>::execute()` does not compute — it extends a lazy graph:
+`Image2D<GpuBackend>::execute()` does not compute — it appends a node to a lazy `Graph`:
 
 ```
 Source(VipsImage) → Op(Blur) → Op(Resize) → ...
 ```
 
+Each node carries `datatype: Arc<dyn DataType>` (`ImageType`, `HistogramType`, …) — the
+open vocabulary describing what it produces. See "The datatype model" in `AGENTS.md` /
+`CLAUDE.md`.
+
 ### Materialization
 
 When `GpuRegion::materialize()` is called for a tile:
 
-1. **Trace inverse** — walk from output rect back to source through the op chain, collecting operations and determining which source pixels are needed (inverse mapping accounts for filter halos)
-2. **Fetch source** — read source pixels from vips (upload to GPU buffer) or copy from existing GPU buffer
-3. **Apply ops** — run each operation's `dispatch()` in forward order, each producing a new `GpuMaterializedRegion`
-4. **Cache** — store result in `GpuCache` for reuse
+1. **Walk demands** — starting from the requested `WorkUnit` (e.g. `Region{rect, lod}`), walk
+   the graph via each op's `input_demands()`, determining which source pixels / ranges each
+   input needs (accounts for filter halos)
+2. **Fetch source** — read source pixels from vips (upload to GPU buffer) or copy from an
+   existing GPU buffer
+3. **Fuse + dispatch** — nodes whose `datatype.needs_fused_temp()` is true are fused into one
+   Slang shader / one `queue.submit()`; non-image nodes (histograms, …) write directly to
+   their target
+4. **Cache** — store the resulting `MaterializedValue` in `TieredCache` (VRAM→RAM→Disk),
+   keyed by `(Graph::content_hash(root), x, y, w, h)`
 
 For batch tile access, `materialize_batch()` merges overlapping source rects to minimize vips fetches.
 
 ### Buffer path (upload → kernel → download)
 
-**Upload:** `GpuImageBuffer::upload()` creates a wgpu buffer with `create_buffer_init` (STORAGE | COPY_SRC | COPY_DST).
+**Upload:** `ImageBuffer::upload()` / `ImageBuffer::alloc()` create a wgpu buffer via
+`GpuBuffer` (STORAGE | COPY_SRC | COPY_DST).
 
-**Kernel dispatch:** `GpuContext::dispatch_kernel()` binds input/output buffers to group 0, params (std430) to group 1, and dispatches workgroups (8×8). Pipelines are lazily compiled and cached by `(spirv_ptr, entry_name, buffer_count)`.
+**Kernel dispatch:** `dispatch_kernel()` binds input/output buffers to group 0, params (std430)
+to group 1, and dispatches workgroups (8×8). Pipelines are lazily compiled and cached by Slang
+text hash in `GpuContext.pipeline_cache`.
 
-**Download:** `read_to_cpu()` stages through a MAP_READ buffer, copies the GPU result, maps asynchronously, and reads back.
+**Download:** `GpuBuffer::read_to_cpu()` stages through a MAP_READ buffer, copies the GPU
+result, maps asynchronously, and reads back. `MaterializedValue::read_bytes(ctx)` wraps this
+for `Storage::Vram`, or returns the bytes directly for `Storage::Host`.
 
 ### Coordinate frames
 
-`GpuMaterializedRegion` tracks two rects:
-- `buffer_rect` — where valid data sits inside the VRAM buffer
-- `source_rect` — what image-space region the data represents
-
-This allows kernels to address sub-rects within larger buffers via `BufferRegion` parameters (stride, x, y, width, height).
+A `MaterializedValue` carries `extent: WorkUnit` — for `Region { rect, lod }` this is the
+image-space rect the data represents, which may be a sub-region of a larger VRAM buffer (from
+a merged fetch or cache hit). Shaders address sub-rects within larger buffers via
+`BufferRegion { stride, x, y, width, height }` params — no wasted copies to tightly-pack
+sub-rects before dispatch.
 
 ## Adding a new backend
 
 1. Define a marker struct and implement `Backend`:
 ```rust
 struct MyBackend;
-impl Backend for MyBackend { type Handle = MyHandle; }
+impl Backend for MyBackend {
+    type Handle = MyHandle;
+    type Buffer = MyBuffer;
+}
 ```
 
-2. Implement capability traits as needed (`OpenFile`, `OpenBuffer`, `SourceInput`, `TargetOutput`, `TileAccess`).
+2. Implement capability traits as needed (`OpenFile`, `OpenBuffer`, `SourceInput`, `TargetOutput<Image2D<MyBackend>>`, `ImageTargetCapability`, `ColorConversionCapability`).
 
-3. For operations, implement `Operation<MyBackend>` for each op struct. For GPU-like backends, implement `GpuOperation` and use `GpuOp<T>` as the bridge.
+3. For operations, implement `Operation<Image2D<MyBackend>>` for each op struct. The GPU graph model (`GpuOperation`/`TypedOperation`, lazy `Graph`, `DataType`) is specific to `GpuBackend` — a new GPU-like backend would need its own equivalent execution model, not a shared `GpuOperation` bridge.
 
 4. For backend-specific enum mappings, create an `IntoMyEnum` trait (mirroring `IntoVipsEnum`).
 
