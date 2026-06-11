@@ -185,3 +185,40 @@ impl Lower<GpuBackend> for Gamma<GpuBackend> {
         cx.output(self.output_spec().output());
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccImport<B>: crate::operation::Lower<B>,
+{
+    pub fn icc_import(&self, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>) -> Self {
+        self.push(IccImport { input: self.as_input(), embedded, input_profile, intent })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccExport<B>: crate::operation::Lower<B>,
+{
+    pub fn icc_export(&self, output_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
+        self.push(IccExport { input: self.as_input(), output_profile, intent, depth })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccTransform<B>: crate::operation::Lower<B>,
+{
+    pub fn icc_transform(&self, output_profile: String, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
+        self.push(IccTransform { input: self.as_input(), output_profile, embedded, input_profile, intent, depth })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Gamma<B>: crate::operation::Lower<B>,
+{
+    pub fn gamma(&self, exponent: Option<f64>) -> Self {
+        self.push(Gamma { input: self.as_input(), exponent })
+    }
+}

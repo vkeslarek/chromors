@@ -84,3 +84,31 @@ impl Lower<VipsBackend> for Spectrum<VipsBackend> {
         cx.emit(out_handle);
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    ForwardFft<B>: crate::operation::Lower<B>,
+{
+    pub fn forward_fft(&self) -> Self {
+        self.push(ForwardFft { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    InverseFft<B>: crate::operation::Lower<B>,
+{
+    pub fn inverse_fft(&self) -> Self {
+        self.push(InverseFft { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Spectrum<B>: crate::operation::Lower<B>,
+{
+    pub fn spectrum(&self) -> Self {
+        self.push(Spectrum { input: self.as_input() })
+    }
+}

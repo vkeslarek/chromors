@@ -10,13 +10,13 @@ use std::hash::Hasher;
 use std::sync::Arc;
 
 use crate::backend::Backend;
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, RegionParams, View};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{VipsBackend, VipsBand, VipsBuilder};
 use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
-use crate::operation::{Lower, Invert, Blur};
+use crate::operation::{Blur, Invert, Lower};
 use crate::pixel::format::PixelFormat;
 use crate::work_unit::{Region, Shape, WorkUnit};
 
@@ -35,7 +35,12 @@ pub struct ImageKind {
 
 impl ImageKind {
     pub fn new(format: PixelFormat, color_space: ColorSpace, width: i32, height: i32) -> Self {
-        Self { format, color_space, width, height }
+        Self {
+            format,
+            color_space,
+            width,
+            height,
+        }
     }
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
@@ -73,7 +78,11 @@ impl GpuView for ImageKind {
     /// Decode wrapper: kernels read the image through a `CodecRegion` that
     /// unpacks the pixel format to working `float4` on `read`.
     fn input(&self) -> View {
-        View::new("uint", format!("CodecRegion<{}, {}>", self.codec(), self.layout()), "{ {buf}, {region} }")
+        View::new(
+            "uint",
+            format!("CodecRegion<{}, {}>", self.codec(), self.layout()),
+            "{ {buf}, {region} }",
+        )
     }
 
     /// The image codec sandwich: the kernel writes working `float4` to an
@@ -158,39 +167,6 @@ impl<B: Backend> Image2D<B> {
     }
 }
 
-
-
-// ── Ergonomic methods (in-crate, so plain inherent impls) ─────────────────────
-
-impl<B: Backend> Image2D<B>
-where
-    Invert<B>: Lower<B>,
-{
-    pub fn invert(&self) -> Image2D<B> {
-        self.push(Invert { input: self.as_input() })
-    }
-}
-
-impl<B: Backend> Image2D<B>
-where
-    Blur<B>: Lower<B>,
-{
-    pub fn blur(&self, sigma: f32) -> Image2D<B> {
-        self.push(Blur { input: self.as_input(), sigma })
-    }
-}
-
-impl<B: Backend> Image2D<B>
-where
-    crate::operation::Add<B>: Lower<B>,
-{
-    /// Pointwise add. If `self` and `other` share an upstream node, the result
-    /// graph is a diamond — the shared node materializes once.
-    pub fn add(&self, other: &Image2D<B>) -> Image2D<B> {
-        self.push(crate::operation::Add { left: self.as_input(), right: other.as_input() })
-    }
-}
-
 // ── File to VIPS Bridge ───────────────────────────────────────────────────────
 
 pub struct FileImageSource {
@@ -200,23 +176,35 @@ pub struct FileImageSource {
 
 impl FileImageSource {
     pub fn new(filename: &str) -> Result<Self, crate::error::Error> {
-        let c = std::ffi::CString::new(filename).map_err(|_| crate::error::Error::Vips("invalid filename".into()))?;
-        let ptr = unsafe { crate::ffi::vips_image_new_from_file(c.as_ptr(), std::ptr::null_mut::<std::ffi::c_void>()) };
+        let c = std::ffi::CString::new(filename)
+            .map_err(|_| crate::error::Error::Vips("invalid filename".into()))?;
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_file(
+                c.as_ptr(),
+                std::ptr::null_mut::<std::ffi::c_void>(),
+            )
+        };
         if ptr.is_null() {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
         }
-        
+
         let width = unsafe { crate::ffi::vips_image_get_width(ptr) };
         let height = unsafe { crate::ffi::vips_image_get_height(ptr) };
         let bands = unsafe { crate::ffi::vips_image_get_bands(ptr) };
         let format_raw = unsafe { crate::ffi::vips_image_get_format(ptr) };
-        
+
         unsafe { crate::ffi::g_object_unref(ptr as *mut std::ffi::c_void) };
-        
-        let format = <PixelFormat as crate::backend::vips::FromVipsBandFormat>::from_vips_band_format(format_raw, bands);
+
+        let format =
+            <PixelFormat as crate::backend::vips::FromVipsBandFormat>::from_vips_band_format(
+                format_raw, bands,
+            );
         let spec = Arc::new(ImageKind::new(format, ColorSpace::SRGB, width, height));
-        
-        Ok(Self { spec, filename: filename.to_string() })
+
+        Ok(Self {
+            spec,
+            filename: filename.to_string(),
+        })
     }
 }
 
@@ -227,9 +215,18 @@ impl Source<VipsBackend> for FileImageSource {
         self.spec.clone()
     }
 
-    fn fetch(&self, _ctx: &<VipsBackend as Backend>::Ctx, _wu: &Region) -> Result<Buffer<VipsBackend>, crate::error::Error> {
+    fn fetch(
+        &self,
+        _ctx: &<VipsBackend as Backend>::Ctx,
+        _wu: &Region,
+    ) -> Result<Buffer<VipsBackend>, crate::error::Error> {
         let c = std::ffi::CString::new(self.filename.as_str()).unwrap();
-        let ptr = unsafe { crate::ffi::vips_image_new_from_file(c.as_ptr(), std::ptr::null_mut::<std::ffi::c_void>()) };
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_file(
+                c.as_ptr(),
+                std::ptr::null_mut::<std::ffi::c_void>(),
+            )
+        };
         if ptr.is_null() {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
         }
@@ -241,7 +238,12 @@ impl Source<VipsBackend> for FileImageSource {
 
     fn lower(&self, cx: &mut VipsBuilder) {
         let c = std::ffi::CString::new(self.filename.as_str()).unwrap();
-        let ptr = unsafe { crate::ffi::vips_image_new_from_file(c.as_ptr(), std::ptr::null_mut::<std::ffi::c_void>()) };
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_file(
+                c.as_ptr(),
+                std::ptr::null_mut::<std::ffi::c_void>(),
+            )
+        };
         cx.emit(crate::backend::vips::VipsHandle { ptr });
     }
 
@@ -258,21 +260,24 @@ pub struct RawFileImageSource {
 }
 
 impl RawFileImageSource {
-    pub fn new(path: &str, params: crate::backend::raw::RawDecodeParams) -> Result<Self, crate::error::Error> {
+    pub fn new(
+        path: &str,
+        params: crate::backend::raw::RawDecodeParams,
+    ) -> Result<Self, crate::error::Error> {
         let handle = crate::backend::raw::handle::RawHandle::open_with(path, params)?;
-        
+
         let format = match handle.params().output_bps {
             16 => PixelFormat::Rgba16,
             _ => PixelFormat::Rgba8,
         };
-        
+
         let spec = Arc::new(ImageKind::new(
             format,
             ColorSpace::SRGB,
             handle.raw_width() as i32,
             handle.raw_height() as i32,
         ));
-        
+
         Ok(Self {
             spec,
             handle: std::sync::Mutex::new(handle),
@@ -287,7 +292,11 @@ impl Source<crate::backend::raw::RawBackend> for RawFileImageSource {
         self.spec.clone()
     }
 
-    fn fetch(&self, _ctx: &<crate::backend::raw::RawBackend as Backend>::Ctx, _wu: &Region) -> Result<Buffer<crate::backend::raw::RawBackend>, crate::error::Error> {
+    fn fetch(
+        &self,
+        _ctx: &<crate::backend::raw::RawBackend as Backend>::Ctx,
+        _wu: &Region,
+    ) -> Result<Buffer<crate::backend::raw::RawBackend>, crate::error::Error> {
         let handle = self.handle.lock().unwrap().clone();
         Ok(Buffer {
             payload: Arc::new(handle),
@@ -306,7 +315,10 @@ impl Source<crate::backend::raw::RawBackend> for RawFileImageSource {
 }
 
 impl Image2D<crate::backend::raw::RawBackend> {
-    pub fn open_raw(path: &str, params: crate::backend::raw::RawDecodeParams) -> Result<Self, crate::error::Error> {
+    pub fn open_raw(
+        path: &str,
+        params: crate::backend::raw::RawDecodeParams,
+    ) -> Result<Self, crate::error::Error> {
         let source = Arc::new(RawFileImageSource::new(path, params)?);
         let root = Arc::new(crate::node::Node::Source(source.clone()));
         Ok(crate::node::Data {
@@ -342,31 +354,44 @@ impl Source<GpuBackend> for VipsImageSource {
         self.vips_img.spec.clone()
     }
 
-    fn fetch(&self, ctx: &crate::backend::gpu::GpuContext, wu: &Region) -> Result<Buffer<GpuBackend>, crate::error::Error> {
+    fn fetch(
+        &self,
+        ctx: &crate::backend::gpu::GpuContext,
+        wu: &Region,
+    ) -> Result<Buffer<GpuBackend>, crate::error::Error> {
         use wgpu::util::DeviceExt;
-        
+
         // 1. Materialize the VIPS graph up to this node
         let vips_buffer = self.vips_img.materialize(wu.clone())?;
-        
+
         // 2. Pull the raw bytes from the materialized VipsImage
         let mut size: usize = 0;
-        let ptr = unsafe { crate::ffi::vips_image_write_to_memory(vips_buffer.payload.ptr, &mut size as *mut usize) };
+        let ptr = unsafe {
+            crate::ffi::vips_image_write_to_memory(vips_buffer.payload.ptr, &mut size as *mut usize)
+        };
         if ptr.is_null() {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
         }
         let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) };
-        
+
         // 3. Upload bytes to a WGPU buffer
-        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_vips_source"),
-            contents: slice,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        });
-        
+        let wgpu_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_vips_source"),
+                contents: slice,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
+
         unsafe { crate::ffi::g_free(ptr as *mut std::ffi::c_void) };
 
         Ok(Buffer {
-            payload: crate::backend::gpu::GpuBuffer::from_raw(std::sync::Arc::new(wgpu_buffer), size as u64),
+            payload: crate::backend::gpu::GpuBuffer::from_raw(
+                std::sync::Arc::new(wgpu_buffer),
+                size as u64,
+            ),
             spec: self.spec(),
         })
     }
@@ -376,7 +401,9 @@ impl Source<GpuBackend> for VipsImageSource {
         // Fetch + upload our own buffer here (symmetric to a vips source's
         // `emit`), so the materializer needs no `Node::Source` branch.
         let WorkUnit::Region(region) = &wu else {
-            cx.fail(crate::error::Error::InvalidWorkUnit("image source expects a Region".into()));
+            cx.fail(crate::error::Error::InvalidWorkUnit(
+                "image source expects a Region".into(),
+            ));
             return;
         };
         match self.fetch(cx.ctx().as_ref(), region) {
@@ -405,9 +432,16 @@ pub struct RamImageTarget;
 impl Target<ImageKind, VipsBackend> for RamImageTarget {
     type Out = Vec<u8>;
 
-    fn extract(&self, buf: &Buffer<VipsBackend>, _wu: &Region, _ctx: &<VipsBackend as Backend>::Ctx) -> Result<Self::Out, crate::error::Error> {
+    fn extract(
+        &self,
+        buf: &Buffer<VipsBackend>,
+        _wu: &Region,
+        _ctx: &<VipsBackend as Backend>::Ctx,
+    ) -> Result<Self::Out, crate::error::Error> {
         let mut size: usize = 0;
-        let ptr = unsafe { crate::ffi::vips_image_write_to_memory(buf.payload.ptr, &mut size as *mut usize) };
+        let ptr = unsafe {
+            crate::ffi::vips_image_write_to_memory(buf.payload.ptr, &mut size as *mut usize)
+        };
         if ptr.is_null() {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
         }
@@ -435,7 +469,11 @@ impl Source<VipsBackend> for RawImageSource {
         self.raw_img.spec.clone()
     }
 
-    fn fetch(&self, _ctx: &<VipsBackend as Backend>::Ctx, wu: &Region) -> Result<Buffer<VipsBackend>, crate::error::Error> {
+    fn fetch(
+        &self,
+        _ctx: &<VipsBackend as Backend>::Ctx,
+        wu: &Region,
+    ) -> Result<Buffer<VipsBackend>, crate::error::Error> {
         let buf = self.raw_img.materialize(wu.clone())?;
         let mut handle = (*buf.payload).clone();
         let frame = handle.materialize()?;
@@ -468,7 +506,10 @@ impl Source<VipsBackend> for RawImageSource {
     }
 
     fn lower(&self, cx: &mut VipsBuilder) {
-        let region = Region::full((self.raw_img.width() as i32, self.raw_img.height() as i32), crate::work_unit::Lod(0));
+        let region = Region::full(
+            (self.raw_img.width() as i32, self.raw_img.height() as i32),
+            crate::work_unit::Lod(0),
+        );
         let buf = self.fetch(&(), &region).unwrap();
         cx.emit((*buf.payload).clone());
     }
@@ -482,7 +523,12 @@ impl Source<VipsBackend> for RawImageSource {
 impl Target<ImageKind, GpuBackend> for RamImageTarget {
     type Out = Vec<u8>;
 
-    fn extract(&self, buf: &Buffer<GpuBackend>, _wu: &Region, ctx: &<GpuBackend as Backend>::Ctx) -> Result<Self::Out, crate::error::Error> {
+    fn extract(
+        &self,
+        buf: &Buffer<GpuBackend>,
+        _wu: &Region,
+        ctx: &<GpuBackend as Backend>::Ctx,
+    ) -> Result<Self::Out, crate::error::Error> {
         buf.payload.read_to_cpu(ctx)
     }
 }
@@ -490,7 +536,12 @@ impl Target<ImageKind, GpuBackend> for RamImageTarget {
 impl Target<ImageKind, crate::backend::raw::RawBackend> for RamImageTarget {
     type Out = Vec<u8>;
 
-    fn extract(&self, buf: &Buffer<crate::backend::raw::RawBackend>, _wu: &Region, _ctx: &()) -> Result<Self::Out, crate::error::Error> {
+    fn extract(
+        &self,
+        buf: &Buffer<crate::backend::raw::RawBackend>,
+        _wu: &Region,
+        _ctx: &(),
+    ) -> Result<Self::Out, crate::error::Error> {
         let mut handle = (*buf.payload).clone();
         let frame = handle.materialize()?;
         Ok(frame.pixel_data().to_vec())

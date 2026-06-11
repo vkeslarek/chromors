@@ -281,3 +281,49 @@ impl Lower<GpuBackend> for Bandjoin<GpuBackend> {
         cx.output(self.output_spec().output());
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Bandbool<B>: crate::operation::Lower<B>,
+{
+    pub fn bandbool(&self, boolean: OperationBoolean, bands: u32) -> Self {
+        self.push(Bandbool { input: self.as_input(), boolean, bands })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Bandfold<B>: crate::operation::Lower<B>,
+{
+    pub fn bandfold(&self, factor: u32) -> Self {
+        self.push(Bandfold { input: self.as_input(), factor })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Bandunfold<B>: crate::operation::Lower<B>,
+{
+    pub fn bandunfold(&self, factor: u32) -> Self {
+        self.push(Bandunfold { input: self.as_input(), factor })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Bandmean<B>: crate::operation::Lower<B>,
+{
+    pub fn bandmean(&self, bands: u32) -> Self {
+        self.push(Bandmean { input: self.as_input(), bands })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    ExtractBand<B>: crate::operation::Lower<B>,
+{
+    pub fn extract_band(&self, band: i32, count: Option<i32>) -> Self {
+        self.push(ExtractBand { input: self.as_input(), band, count })
+    }
+}

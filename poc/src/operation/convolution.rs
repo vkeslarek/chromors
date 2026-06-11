@@ -528,3 +528,76 @@ impl Lower<GpuBackend> for Convasep<GpuBackend> {
         cx.output(self.output_spec().output());
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convolution<B>: crate::operation::Lower<B>,
+{
+    pub fn convolution(&self, mask: &crate::data::image::Image2D<B>, precision: Option<Precision>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Convolution { input: self.as_input(), mask: mask.as_input(), precision, layers, cluster })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Compass<B>: crate::operation::Lower<B>,
+{
+    pub fn compass(&self, mask: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Compass { input: self.as_input(), mask: mask.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Morph<B>: crate::operation::Lower<B>,
+{
+    pub fn morph(&self, mask: &crate::data::image::Image2D<B>, morph: OperationMorphology) -> Self {
+        self.push(Morph { input: self.as_input(), mask: mask.as_input(), morph })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Conva<B>: crate::operation::Lower<B>,
+{
+    pub fn conva(&self, mask: &crate::data::image::Image2D<B>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Conva { input: self.as_input(), mask: mask.as_input(), layers, cluster })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convf<B>: crate::operation::Lower<B>,
+{
+    pub fn convf(&self, mask: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Convf { input: self.as_input(), mask: mask.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convi<B>: crate::operation::Lower<B>,
+{
+    pub fn convi(&self, mask: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Convi { input: self.as_input(), mask: mask.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convsep<B>: crate::operation::Lower<B>,
+{
+    pub fn convsep(&self, mask: &crate::data::image::Image2D<B>, precision: Option<Precision>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Convsep { input: self.as_input(), mask: mask.as_input(), precision, layers, cluster })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convasep<B>: crate::operation::Lower<B>,
+{
+    pub fn convasep(&self, mask: &crate::data::image::Image2D<B>, layers: Option<i32>) -> Self {
+        self.push(Convasep { input: self.as_input(), mask: mask.as_input(), layers })
+    }
+}

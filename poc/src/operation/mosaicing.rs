@@ -284,3 +284,49 @@ impl Lower<VipsBackend> for GlobalBalance<VipsBackend> {
         cx.emit(out);
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Mosaic<B>: crate::operation::Lower<B>,
+{
+    pub fn mosaic(&self, secondary: Input<ImageKind, B>, direction: Direction, x_reference: i32, y_reference: i32, x_secondary: i32, y_secondary: i32, half_window: Option<i32>, half_area: Option<i32>, max_blend: Option<i32>, search_band: Option<i32>) -> Self {
+        self.push(Mosaic { input: self.as_input(), secondary, direction, x_reference, y_reference, x_secondary, y_secondary, half_window, half_area, max_blend, search_band })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Mosaic1<B>: crate::operation::Lower<B>,
+{
+    pub fn mosaic1(&self, secondary: Input<ImageKind, B>, direction: Direction, x_reference_1: i32, y_reference_1: i32, x_secondary_1: i32, y_secondary_1: i32, x_reference_2: i32, y_reference_2: i32, x_secondary_2: i32, y_secondary_2: i32, half_window: Option<i32>, half_area: Option<i32>, search: Option<bool>, max_blend: Option<i32>) -> Self {
+        self.push(Mosaic1 { input: self.as_input(), secondary, direction, x_reference_1, y_reference_1, x_secondary_1, y_secondary_1, x_reference_2, y_reference_2, x_secondary_2, y_secondary_2, half_window, half_area, search, max_blend })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Match<B>: crate::operation::Lower<B>,
+{
+    pub fn match_op(&self, secondary: Input<ImageKind, B>, x_reference_1: i32, y_reference_1: i32, x_secondary_1: i32, y_secondary_1: i32, x_reference_2: i32, y_reference_2: i32, x_secondary_2: i32, y_secondary_2: i32, half_window: Option<i32>, half_area: Option<i32>, search: Option<bool>) -> Self {
+        self.push(Match { input: self.as_input(), secondary, x_reference_1, y_reference_1, x_secondary_1, y_secondary_1, x_reference_2, y_reference_2, x_secondary_2, y_secondary_2, half_window, half_area, search })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Merge<B>: crate::operation::Lower<B>,
+{
+    pub fn merge(&self, secondary: Input<ImageKind, B>, direction: Direction, dx: i32, dy: i32, max_blend: Option<i32>) -> Self {
+        self.push(Merge { input: self.as_input(), secondary, direction, dx, dy, max_blend })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    GlobalBalance<B>: crate::operation::Lower<B>,
+{
+    pub fn global_balance(&self, gamma: Option<f64>, integer_output: Option<bool>) -> Self {
+        self.push(GlobalBalance { input: self.as_input(), gamma, integer_output })
+    }
+}

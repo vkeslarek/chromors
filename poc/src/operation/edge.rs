@@ -149,3 +149,58 @@ impl Lower<VipsBackend> for Abs<VipsBackend> {
         cx.emit(out_handle);
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Sobel<B>: crate::operation::Lower<B>,
+{
+    pub fn sobel(&self) -> Self {
+        self.push(Sobel { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Prewitt<B>: crate::operation::Lower<B>,
+{
+    pub fn prewitt(&self) -> Self {
+        self.push(Prewitt { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Scharr<B>: crate::operation::Lower<B>,
+{
+    pub fn scharr(&self) -> Self {
+        self.push(Scharr { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Invert<B>: crate::operation::Lower<B>,
+{
+    pub fn invert(&self) -> Self {
+        self.push(Invert { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Sign<B>: crate::operation::Lower<B>,
+{
+    pub fn sign(&self) -> Self {
+        self.push(Sign { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Abs<B>: crate::operation::Lower<B>,
+{
+    pub fn abs(&self) -> Self {
+        self.push(Abs { input: self.as_input() })
+    }
+}

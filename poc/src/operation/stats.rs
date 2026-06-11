@@ -303,3 +303,94 @@ impl Lower<VipsBackend> for Stdif<VipsBackend> {
         cx.emit(out_handle);
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistogramFind<B>: crate::operation::Lower<B>,
+{
+    pub fn histogram_find(&self, band: Option<i32>) -> Self {
+        self.push(HistogramFind { input: self.as_input(), band })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistogramEqualize<B>: crate::operation::Lower<B>,
+{
+    pub fn histogram_equalize(&self, band: Option<i32>) -> Self {
+        self.push(HistogramEqualize { input: self.as_input(), band })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistogramCumulative<B>: crate::operation::Lower<B>,
+{
+    pub fn histogram_cumulative(&self) -> Self {
+        self.push(HistogramCumulative { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistogramNormalize<B>: crate::operation::Lower<B>,
+{
+    pub fn histogram_normalize(&self) -> Self {
+        self.push(HistogramNormalize { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistogramPlot<B>: crate::operation::Lower<B>,
+{
+    pub fn histogram_plot(&self) -> Self {
+        self.push(HistogramPlot { input: self.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistFindIndexed<B>: crate::operation::Lower<B>,
+{
+    pub fn hist_find_indexed(&self, index: Input<ImageKind, B>, combine: Option<CombineMode>) -> Self {
+        self.push(HistFindIndexed { input: self.as_input(), index, combine })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistFindNdim<B>: crate::operation::Lower<B>,
+{
+    pub fn hist_find_ndim(&self, bins: Option<i32>) -> Self {
+        self.push(HistFindNdim { input: self.as_input(), bins })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistLocal<B>: crate::operation::Lower<B>,
+{
+    pub fn hist_local(&self, width: i32, height: i32, max_slope: Option<i32>) -> Self {
+        self.push(HistLocal { input: self.as_input(), width, height, max_slope })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HistMatch<B>: crate::operation::Lower<B>,
+{
+    pub fn hist_match(&self, ref_image: Input<ImageKind, B>) -> Self {
+        self.push(HistMatch { input: self.as_input(), ref_image })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Stdif<B>: crate::operation::Lower<B>,
+{
+    pub fn stdif(&self, width: i32, height: i32, a: Option<f64>, m0: Option<f64>, b: Option<f64>, s0: Option<f64>) -> Self {
+        self.push(Stdif { input: self.as_input(), width, height, a, m0, b, s0 })
+    }
+}

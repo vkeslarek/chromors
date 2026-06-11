@@ -397,3 +397,49 @@ impl crate::data::image::Image2D<GpuBackend> {
         h.push(BlurV { input: h.as_input(), sigma })
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Sharpen<B>: crate::operation::Lower<B>,
+{
+    pub fn sharpen(&self, sigma: Option<f64>, flat: Option<f64>, jagged: Option<f64>, edge: Option<f64>, smooth: Option<f64>, maximum: Option<f64>) -> Self {
+        self.push(Sharpen { input: self.as_input(), sigma, flat, jagged, edge, smooth, maximum })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Canny<B>: crate::operation::Lower<B>,
+{
+    pub fn canny(&self, sigma: Option<f64>, precision: Option<i32>) -> Self {
+        self.push(Canny { input: self.as_input(), sigma, precision })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Median<B>: crate::operation::Lower<B>,
+{
+    pub fn median(&self, size: i32) -> Self {
+        self.push(Median { input: self.as_input(), size })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HoughLine<B>: crate::operation::Lower<B>,
+{
+    pub fn hough_line(&self, width: Option<i32>, height: Option<i32>) -> Self {
+        self.push(HoughLine { input: self.as_input(), width, height })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    HoughCircle<B>: crate::operation::Lower<B>,
+{
+    pub fn hough_circle(&self, scale: Option<i32>, min_radius: Option<i32>, max_radius: Option<i32>) -> Self {
+        self.push(HoughCircle { input: self.as_input(), scale, min_radius, max_radius })
+    }
+}

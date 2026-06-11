@@ -568,3 +568,112 @@ impl Lower<GpuBackend> for Brightness<GpuBackend> {
         cx.output(self.output_spec().output());
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Cast<B>: crate::operation::Lower<B>,
+{
+    pub fn cast(&self, format: PixelFormat, shift: Option<bool>) -> Self {
+        self.push(Cast { input: self.as_input(), format, shift })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Copy<B>: crate::operation::Lower<B>,
+{
+    pub fn copy(&self, width: Option<i32>, height: Option<i32>, bands: Option<i32>, format: Option<i32>, interpretation: Option<i32>, horizontal_resolution: Option<f64>, vertical_resolution: Option<f64>, offset_x: Option<i32>, offset_y: Option<i32>) -> Self {
+        self.push(Copy { input: self.as_input(), width, height, bands, format, interpretation, horizontal_resolution, vertical_resolution, offset_x, offset_y })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    TileCache<B>: crate::operation::Lower<B>,
+{
+    pub fn tile_cache(&self, tile_width: Option<i32>, tile_height: Option<i32>, maximum_tiles: Option<i32>, access: Option<Access>, threaded: Option<bool>, persistent: Option<bool>) -> Self {
+        self.push(TileCache { input: self.as_input(), tile_width, tile_height, maximum_tiles, access, threaded, persistent })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Msb<B>: crate::operation::Lower<B>,
+{
+    pub fn msb(&self, band: Option<i32>) -> Self {
+        self.push(Msb { input: self.as_input(), band })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Maplut<B>: crate::operation::Lower<B>,
+{
+    pub fn maplut(&self, lut: Input<ImageKind, B>, band: Option<i32>) -> Self {
+        self.push(Maplut { input: self.as_input(), lut, band })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Recomb<B>: crate::operation::Lower<B>,
+{
+    pub fn recomb(&self, matrix: Input<ImageKind, B>) -> Self {
+        self.push(Recomb { input: self.as_input(), matrix })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Invertlut<B>: crate::operation::Lower<B>,
+{
+    pub fn invertlut(&self, size: Option<i32>) -> Self {
+        self.push(Invertlut { input: self.as_input(), size })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Linecache<B>: crate::operation::Lower<B>,
+{
+    pub fn linecache(&self, tile_height: Option<i32>, access: Option<Access>, threaded: Option<bool>, persistent: Option<bool>) -> Self {
+        self.push(Linecache { input: self.as_input(), tile_height, access, threaded, persistent })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Case<B>: crate::operation::Lower<B>,
+{
+    pub fn case(&self, cases: Vec<Input<ImageKind, B>>) -> Self {
+        self.push(Case { input: self.as_input(), cases })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Exposure<B>: crate::operation::Lower<B>,
+{
+    pub fn exposure(&self, stops: f32, preserve: f32) -> Self {
+        self.push(Exposure { input: self.as_input(), stops, preserve })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Brightness<B>: crate::operation::Lower<B>,
+{
+    pub fn brightness(&self, value: f32) -> Self {
+        self.push(Brightness { input: self.as_input(), value })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    NoiseReduction<B>: crate::operation::Lower<B>,
+{
+    pub fn noise_reduction(&self, strength: f32) -> Self {
+        self.push(NoiseReduction { input: self.as_input(), strength })
+    }
+}

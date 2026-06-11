@@ -112,6 +112,12 @@ impl<K: Kind, B: Backend> Data<K, B> {
             _m: PhantomData,
         }
     }
+
+    /// Evaluates the subgraph up to this node and extracts the result via `target`.
+    pub fn pull<T: crate::io::Target<K, B>>(&self, target: &T, wu: K::WorkUnit) -> Result<T::Out, crate::error::Error> {
+        let buf = self.materialize(wu.clone())?;
+        target.extract(&buf, &wu, &self.ctx)
+    }
 }
 
 use std::collections::{HashMap, HashSet};

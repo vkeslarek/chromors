@@ -393,3 +393,112 @@ impl Lower<GpuBackend> for Math2<GpuBackend> {
         cx.output(self.output_spec().output()); 
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Add<B>: crate::operation::Lower<B>,
+{
+    pub fn add(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Add { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Subtract<B>: crate::operation::Lower<B>,
+{
+    pub fn subtract(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Subtract { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Multiply<B>: crate::operation::Lower<B>,
+{
+    pub fn multiply(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Multiply { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Divide<B>: crate::operation::Lower<B>,
+{
+    pub fn divide(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Divide { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    MaxPair<B>: crate::operation::Lower<B>,
+{
+    pub fn max_pair(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(MaxPair { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    MinPair<B>: crate::operation::Lower<B>,
+{
+    pub fn min_pair(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(MinPair { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Remainder<B>: crate::operation::Lower<B>,
+{
+    pub fn remainder(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Remainder { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Complexform<B>: crate::operation::Lower<B>,
+{
+    pub fn complexform(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Complexform { left: self.as_input(), right: right.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Complex2<B>: crate::operation::Lower<B>,
+{
+    pub fn complex2(&self, right: &crate::data::image::Image2D<B>, cmplx: OperationComplex2) -> Self {
+        self.push(Complex2 { left: self.as_input(), right: right.as_input(), cmplx })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Math<B>: crate::operation::Lower<B>,
+{
+    pub fn math(&self, math: OperationMath) -> Self {
+        self.push(Math { input: self.as_input(), math })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Round<B>: crate::operation::Lower<B>,
+{
+    pub fn round(&self, round: OperationRound) -> Self {
+        self.push(Round { input: self.as_input(), round })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Math2<B>: crate::operation::Lower<B>,
+{
+    pub fn math2(&self, right: &crate::data::image::Image2D<B>, math2: OperationMath2) -> Self {
+        self.push(Math2 { left: self.as_input(), right: right.as_input(), math2 })
+    }
+}

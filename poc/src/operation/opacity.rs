@@ -119,3 +119,13 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         cx.emit(crate::backend::vips::VipsHandle { ptr: out });
     }
 }
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Opacity<B>: crate::operation::Lower<B>,
+{
+    pub fn opacity(&self, amount: f32) -> Self {
+        self.push(Opacity { input: self.as_input(), amount })
+    }
+}
