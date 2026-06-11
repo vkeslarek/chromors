@@ -1,5 +1,6 @@
 pub mod gpu;
 pub mod vips;
+pub mod raw;
 
 use std::sync::Arc;
 use crate::error::Error;

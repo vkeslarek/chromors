@@ -22,19 +22,38 @@ pub mod data;
 pub mod error;
 pub mod io;
 pub mod kind;
+pub(crate) mod slang_wrapper_ffi {
+    #![allow(non_upper_case_globals)]
+    #![allow(non_camel_case_types)]
+    #![allow(non_snake_case)]
+    #![allow(warnings)]
+    #![allow(non_upper_case_globals)]
+    #![allow(non_camel_case_types)]
+    #![allow(non_snake_case)]
+    #![allow(dead_code)]
+    #![allow(clippy::all)]
+    #![allow(unnecessary_transmutes)]
+    #![allow(unsafe_op_in_unsafe_fn)]
+    include!(concat!(env!("OUT_DIR"), "/slang_wrapper_ffi.rs"));
+}
+
+pub(crate) mod libraw_ffi {
+    #![allow(warnings)]
+    #![allow(non_upper_case_globals)]
+    #![allow(non_camel_case_types)]
+    #![allow(non_snake_case)]
+    #![allow(dead_code)]
+    #![allow(clippy::all)]
+    #![allow(unnecessary_transmutes)]
+    #![allow(unsafe_op_in_unsafe_fn)]
+    include!(concat!(env!("OUT_DIR"), "/libraw_ffi.rs"));
+}
+
 pub mod node;
 pub mod operation;
 pub mod work_unit;
 pub mod color;
 pub mod pixel;
-
-#[allow(non_upper_case_globals)]
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(dead_code)]
-pub mod slang_wrapper_ffi {
-    include!(concat!(env!("OUT_DIR"), "/slang_wrapper_ffi.rs"));
-}
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]

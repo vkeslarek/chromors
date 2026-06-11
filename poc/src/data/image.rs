@@ -250,6 +250,74 @@ impl Source<VipsBackend> for FileImageSource {
     }
 }
 
+// ── File to RAW Bridge ────────────────────────────────────────────────────────
+
+pub struct RawFileImageSource {
+    spec: Arc<ImageKind>,
+    pub handle: std::sync::Mutex<crate::backend::raw::handle::RawHandle>,
+}
+
+impl RawFileImageSource {
+    pub fn new(path: &str, params: crate::backend::raw::RawDecodeParams) -> Result<Self, crate::error::Error> {
+        let handle = crate::backend::raw::handle::RawHandle::open_with(path, params)?;
+        
+        let format = match handle.params().output_bps {
+            16 => PixelFormat::Rgba16,
+            _ => PixelFormat::Rgba8,
+        };
+        
+        let spec = Arc::new(ImageKind::new(
+            format,
+            ColorSpace::SRGB,
+            handle.raw_width() as i32,
+            handle.raw_height() as i32,
+        ));
+        
+        Ok(Self {
+            spec,
+            handle: std::sync::Mutex::new(handle),
+        })
+    }
+}
+
+impl Source<crate::backend::raw::RawBackend> for RawFileImageSource {
+    type Kind = ImageKind;
+
+    fn spec(&self) -> Arc<ImageKind> {
+        self.spec.clone()
+    }
+
+    fn fetch(&self, _ctx: &<crate::backend::raw::RawBackend as Backend>::Ctx, _wu: &Region) -> Result<Buffer<crate::backend::raw::RawBackend>, crate::error::Error> {
+        let handle = self.handle.lock().unwrap().clone();
+        Ok(Buffer {
+            payload: Arc::new(handle),
+            spec: self.spec.clone(),
+        })
+    }
+
+    fn lower(&self, cx: &mut <crate::backend::raw::RawBackend as Backend>::Builder) {
+        let handle = self.handle.lock().unwrap().clone();
+        cx.emit(Arc::new(handle));
+    }
+
+    fn dyn_hash(&self, _state: &mut dyn std::hash::Hasher) {
+        // Source identity
+    }
+}
+
+impl Image2D<crate::backend::raw::RawBackend> {
+    pub fn open_raw(path: &str, params: crate::backend::raw::RawDecodeParams) -> Result<Self, crate::error::Error> {
+        let source = Arc::new(RawFileImageSource::new(path, params)?);
+        let root = Arc::new(crate::node::Node::Source(source.clone()));
+        Ok(crate::node::Data {
+            root,
+            spec: <RawFileImageSource as Source<crate::backend::raw::RawBackend>>::spec(&source),
+            ctx: Arc::new(()),
+            _m: std::marker::PhantomData,
+        })
+    }
+}
+
 // ── VIPS to GPU Bridge ────────────────────────────────────────────────────────
 
 use crate::buffer::Buffer;
@@ -350,10 +418,81 @@ impl Target<ImageKind, VipsBackend> for RamImageTarget {
     }
 }
 
+pub struct RawImageSource {
+    pub raw_img: Image2D<crate::backend::raw::RawBackend>,
+}
+
+impl RawImageSource {
+    pub fn new(raw_img: Image2D<crate::backend::raw::RawBackend>) -> Self {
+        Self { raw_img }
+    }
+}
+
+impl Source<VipsBackend> for RawImageSource {
+    type Kind = ImageKind;
+
+    fn spec(&self) -> Arc<ImageKind> {
+        self.raw_img.spec.clone()
+    }
+
+    fn fetch(&self, _ctx: &<VipsBackend as Backend>::Ctx, wu: &Region) -> Result<Buffer<VipsBackend>, crate::error::Error> {
+        let buf = self.raw_img.materialize(wu.clone())?;
+        let mut handle = (*buf.payload).clone();
+        let frame = handle.materialize()?;
+
+        let bands = frame.colors as i32;
+        let vips_format = match frame.bits {
+            16 => crate::ffi::VipsBandFormat_VIPS_FORMAT_USHORT,
+            _ => crate::ffi::VipsBandFormat_VIPS_FORMAT_UCHAR,
+        };
+
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_memory_copy(
+                frame.pixel_data().as_ptr() as *const std::ffi::c_void,
+                frame.pixel_data().len(),
+                frame.width as i32,
+                frame.height as i32,
+                bands,
+                vips_format,
+            )
+        };
+
+        if ptr.is_null() {
+            return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
+        }
+
+        Ok(Buffer {
+            payload: Arc::new(crate::backend::vips::VipsHandle { ptr }),
+            spec: self.spec(),
+        })
+    }
+
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let region = Region::full((self.raw_img.width() as i32, self.raw_img.height() as i32), crate::work_unit::Lod(0));
+        let buf = self.fetch(&(), &region).unwrap();
+        cx.emit((*buf.payload).clone());
+    }
+
+    fn dyn_hash(&self, state: &mut dyn std::hash::Hasher) {
+        let k = Arc::as_ptr(&self.raw_img.root) as *const () as usize;
+        state.write_usize(k);
+    }
+}
+
 impl Target<ImageKind, GpuBackend> for RamImageTarget {
     type Out = Vec<u8>;
 
     fn extract(&self, buf: &Buffer<GpuBackend>, _wu: &Region, ctx: &<GpuBackend as Backend>::Ctx) -> Result<Self::Out, crate::error::Error> {
         buf.payload.read_to_cpu(ctx)
+    }
+}
+
+impl Target<ImageKind, crate::backend::raw::RawBackend> for RamImageTarget {
+    type Out = Vec<u8>;
+
+    fn extract(&self, buf: &Buffer<crate::backend::raw::RawBackend>, _wu: &Region, _ctx: &()) -> Result<Self::Out, crate::error::Error> {
+        let mut handle = (*buf.payload).clone();
+        let frame = handle.materialize()?;
+        Ok(frame.pixel_data().to_vec())
     }
 }
