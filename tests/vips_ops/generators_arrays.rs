@@ -1,9 +1,9 @@
 //! vips backend — generators and array (multi-input) ops.
 
 use crate::common::rgb;
-use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image2D;
-use pixors_engine::*;
+use chromors::backend::vips::VipsBackend;
+use chromors::data::image::Image2D;
+use chromors::*;
 
 #[test]
 fn freq_masks() {

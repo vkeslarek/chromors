@@ -2,6 +2,8 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -211,5 +213,42 @@ impl Lower<VipsBackend> for Insert<VipsBackend> {
         }
         let out_handle = op.run().expect("vips insert failed");
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Composite2<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mode", "uint", self.mode.into_vips() as u32)
+            .param("x", "int", self.x.unwrap_or(0))
+            .param("y", "int", self.y.unwrap_or(0))
+        );
+        cx.kernel("composite2_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Join<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("direction", "int", self.direction.into_vips())
+            .param("shim", "int", self.shim.unwrap_or(0))
+            .param("align", "int", self.align.map(|a| a.into_vips()).unwrap_or(0))
+        );
+        cx.kernel("join_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Insert<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("x", "int", self.x)
+            .param("y", "int", self.y)
+        );
+        cx.kernel("insert_kernel");
+        cx.output(self.output_spec().output());
     }
 }

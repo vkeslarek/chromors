@@ -1,7 +1,7 @@
 //! vips backend — band manipulation, format casts, colour ops.
 
 use crate::common::rgb;
-use pixors_engine::*;
+use chromors::*;
 
 #[test]
 fn extract_band() {

@@ -2,6 +2,8 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation, OperationMorphology};
 use crate::work_unit::{Region, WorkUnit};
@@ -444,5 +446,85 @@ impl Lower<VipsBackend> for Convasep<VipsBackend> {
         }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Convolution<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Morph<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("morph", "uint", self.morph.into_vips() as u32)
+        );
+        cx.kernel("morph_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Conva<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Convf<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Convi<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Convsep<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Convasep<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", "uint", self.mask.spec.width as u32)
+            .param("mh", "uint", self.mask.spec.height as u32)
+        );
+        cx.kernel("convolution_kernel");
+        cx.output(self.output_spec().output());
     }
 }

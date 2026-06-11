@@ -113,6 +113,12 @@ impl GpuContext {
         self.cache.lock().unwrap().set_budget(budget);
     }
 
+    /// Set the buffer-arena idle-pool byte budget. Buffers held in the free
+    /// list beyond this are destroyed immediately.
+    pub fn with_arena_budget(self: &Arc<Self>, budget: u64) {
+        self.arena.set_budget(budget);
+    }
+
     /// End the current preview/interaction generation: tiles pinned to it are no
     /// longer protected from eviction. Call on commit / tool switch. (Pinning a
     /// tile to the current generation is done via the cache's `touch_pin`.)

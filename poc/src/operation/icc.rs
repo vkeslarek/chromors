@@ -2,6 +2,8 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -169,5 +171,17 @@ impl Lower<VipsBackend> for Gamma<VipsBackend> {
         }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Gamma<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("exponent", "float", self.exponent.unwrap_or(1.0) as f32)
+        );
+        cx.kernel("gamma_kernel");
+        cx.output(self.output_spec().output());
     }
 }

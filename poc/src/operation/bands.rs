@@ -2,6 +2,8 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation, OperationBoolean};
 use crate::work_unit::{Region, WorkUnit};
@@ -221,5 +223,61 @@ impl Lower<VipsBackend> for Bandjoin<VipsBackend> {
         }
         let out_handle = crate::backend::vips::VipsHandle { ptr: out };
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Bandbool<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("boolean", "uint", self.boolean.into_vips() as u32));
+        cx.kernel("bandbool_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Bandfold<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("factor", "uint", self.factor));
+        cx.kernel("bandfold_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Bandunfold<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("factor", "uint", self.factor));
+        cx.kernel("bandunfold_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Bandmean<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.kernel("bandmean_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for ExtractBand<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("band", "int", self.band));
+        cx.kernel("extract_band_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Bandjoin<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let kernel = match self.images.len() {
+            1 => "bandjoin1_kernel",
+            2 => "bandjoin2_kernel",
+            3 => "bandjoin3_kernel",
+            4 => "bandjoin4_kernel",
+            5 => "bandjoin5_kernel",
+            _ => panic!("Bandjoin: unsupported number of inputs (max 5)"),
+        };
+        cx.kernel(kernel);
+        cx.output(self.output_spec().output());
     }
 }

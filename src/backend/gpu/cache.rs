@@ -40,7 +40,7 @@ use super::context::GpuContext;
 use super::datatype::{DataType, ImageType};
 use super::graph::RegionKey;
 use super::value::{MaterializedValue, Storage};
-use super::work_unit::WorkUnit;
+use super::work_unit::{AnyWorkUnit, Region, WorkUnit};
 
 const MIB: u64 = 1024 * 1024;
 const DEFAULT_GPU_BUDGET: u64 = 256 * MIB;
@@ -526,7 +526,7 @@ impl TieredCache {
         let Storage::Vram(buffer) = &v.storage else {
             return; // VRAM tier only holds images
         };
-        let region = match v.region() {
+        let region = match Region::from_work_unit(&v.extent) {
             Some(r) => r,
             None => return, // VRAM tier only holds spatially-divisible values
         };

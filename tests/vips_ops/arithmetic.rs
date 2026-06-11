@@ -1,7 +1,7 @@
 //! vips backend — arithmetic / logic / reduction ops.
 
 use crate::common::rgb;
-use pixors_engine::*;
+use chromors::*;
 
 #[test]
 fn linear() {

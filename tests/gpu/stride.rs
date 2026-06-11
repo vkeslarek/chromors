@@ -1,15 +1,15 @@
-use pixors_engine::backend::gpu::GpuBackend;
-use pixors_engine::backend::gpu::{GpuContext, GpuSource};
-use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::color::space::ColorSpace;
-use pixors_engine::data::image::Image2D;
-use pixors_engine::geometry::Rect;
-use pixors_engine::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
+use chromors::backend::gpu::GpuBackend;
+use chromors::backend::gpu::{AnyWorkUnit, GpuContext, GpuSource, Region};
+use chromors::backend::vips::VipsBackend;
+use chromors::color::space::ColorSpace;
+use chromors::data::image::Image2D;
+use chromors::geometry::Rect;
+use chromors::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 use std::sync::Arc;
 
 #[test]
 fn vips_source_stride_subrect() {
-    pixors_engine::init();
+    chromors::init();
 
     let device = pollster::block_on(async {
         let instance = wgpu::Instance::default();
@@ -41,7 +41,7 @@ fn vips_source_stride_subrect() {
         Image2D::<GpuBackend>::new_from_source(&GpuSource::new_vips(vips_image, ctx.clone()))
             .unwrap();
 
-    use pixors_engine::operation::misc::ExposureOperation;
+    use chromors::operation::misc::ExposureOperation;
     let gpu_image = gpu_image
         .execute(&ExposureOperation {
             stops: 0.0,
@@ -50,26 +50,20 @@ fn vips_source_stride_subrect() {
         .unwrap();
 
     let rect = Rect::new(10, 10, 20, 20);
-    let region = pixors_engine::backend::gpu::region::GpuRegion::new(
-        gpu_image.handle.node.graph.clone(),
-        gpu_image.handle.node.ctx.cache.clone(),
-        gpu_image.handle.node.root_id,
+    let region = chromors::backend::gpu::region::GpuRegion::new(
+        gpu_image.handle.graph.clone(),
+        gpu_image.handle.ctx.cache.clone(),
+        gpu_image.handle.root_id,
         ctx.clone(),
-        pixors_engine::Lod::FULL,
     );
-    region.prepare(rect);
+    region.prepare(Region::new(rect, chromors::Lod::FULL));
     let mat = region.materialize().unwrap();
 
-    let buf = match &*mat {
-        pixors_engine::backend::gpu::GraphValue::Image2D { buffer, .. } => buffer,
-        _ => panic!("Expected Image2D buffer"),
-    };
-    assert_eq!(buf.width, 20);
-    assert_eq!(buf.height, 20);
+    let extent = Region::from_work_unit(&mat.extent).expect("expected a Region work unit");
+    assert_eq!(extent.rect.width, 20);
+    assert_eq!(extent.rect.height, 20);
 
-    let bytes = buf
-        .read_subrect_to_cpu(Rect::new(0, 0, 20, 20), &ctx.device, &ctx.queue)
-        .unwrap();
+    let bytes = mat.read_bytes(&ctx).unwrap();
 
     let f32_data: &[f32] = bytemuck::cast_slice(&bytes);
     let mut all_red = true;

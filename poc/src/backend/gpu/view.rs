@@ -80,15 +80,22 @@ pub struct ParamBlock {
 }
 
 impl ParamBlock {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self { fields: vec![], bytes: vec![] }
+    }
+    
+    pub fn param<T: bytemuck::Pod>(mut self, name: &str, slang_type: &'static str, value: T) -> Self {
+        self.fields.push((name.to_string(), slang_type));
+        self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
+        self
+    }
+
+    pub fn empty() -> Self {
+        Self::new()
     }
     /// A helper to emit a basic scalar parameter.
     pub fn scalar<T: bytemuck::Pod>(name: &str, slang_type: &'static str, value: T) -> Self {
-        Self {
-            fields: vec![(name.to_string(), slang_type)],
-            bytes: bytemuck::bytes_of(&value).to_vec(),
-        }
+        Self::new().param(name, slang_type, value)
     }
 }
 

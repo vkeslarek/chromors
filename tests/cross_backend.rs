@@ -1,9 +1,9 @@
 mod common;
 use common::init;
-use pixors_engine::backend::gpu::GpuBackend;
-use pixors_engine::data::image::Image2D as GenImage;
-use pixors_engine::operation::composite::BlendMode;
-use pixors_engine::{
+use chromors::backend::gpu::{Executable, GpuBackend};
+use chromors::data::image::Image2D as GenImage;
+use chromors::operation::composite::BlendMode;
+use chromors::{
     Composite2Operation, GammaOperation, GaussianBlurOperation, OpacityOperation,
     SaturationOperation, ShrinkOperation,
 };
@@ -20,7 +20,7 @@ fn blur_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let blur_op = pixors_engine::operation::filters::GaussianBlurOperation {
+    let blur_op = chromors::operation::filters::GaussianBlurOperation {
         sigma,
         minimum_amplitude: Some((-(radius as f64).powi(2) / (2.0 * sigma * sigma)).exp()),
         precision: None,
@@ -60,15 +60,15 @@ fn convert_roundtrip() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
 
-    let dst_rec2020 = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::LINEAR_REC2020,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let dst_rec2020 = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::LINEAR_REC2020,
+        chromors::pixel::AlphaPolicy::Straight,
     );
-    let dst_srgb = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::SRGB,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let dst_srgb = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::SRGB,
+        chromors::pixel::AlphaPolicy::Straight,
     );
 
     let gpu1 = gpu.convert(dst_rec2020).unwrap();
@@ -95,10 +95,10 @@ fn convert_identity_is_lossless() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
 
-    let space_meta = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::SRGB,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let space_meta = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::SRGB,
+        chromors::pixel::AlphaPolicy::Straight,
     );
     let gpu_out = gpu.convert(space_meta).unwrap();
 
@@ -143,7 +143,7 @@ fn composite_matches_vips() {
     let mut failures: Vec<String> = Vec::new();
 
     for mode in modes {
-        let cpu_op = pixors_engine::operation::composite::Composite2Operation {
+        let cpu_op = chromors::operation::composite::Composite2Operation {
             overlay: overlay.clone(),
             mode,
             x: None,
@@ -204,16 +204,16 @@ fn sandwich_acescg_roundtrip() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let aces_meta = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::ACES_CG,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let aces_meta = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::ACES_CG,
+        chromors::pixel::AlphaPolicy::Straight,
     );
     let aces_img = img.convert(aces_meta).unwrap();
 
     let sigma = 3.0_f64;
     let radius = (sigma * 3.0).ceil() as i32;
-    let cpu_op = pixors_engine::operation::filters::GaussianBlurOperation {
+    let cpu_op = chromors::operation::filters::GaussianBlurOperation {
         sigma,
         minimum_amplitude: Some((-((radius * radius) as f64) / (2.0 * sigma * sigma)).exp()),
         precision: None,
@@ -231,10 +231,10 @@ fn sandwich_acescg_roundtrip() {
     };
     let gpu_blur: GenImage<GpuBackend> = gpu.execute(&blur_op).unwrap();
 
-    let srgb_meta = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::SRGB,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let srgb_meta = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::SRGB,
+        chromors::pixel::AlphaPolicy::Straight,
     );
     let gpu_out = gpu_blur.convert(srgb_meta).unwrap();
 
@@ -259,15 +259,15 @@ fn sandwich_acescg_composite() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let aces_meta = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::ACES_CG,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let aces_meta = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::ACES_CG,
+        chromors::pixel::AlphaPolicy::Straight,
     );
     let aces_base = img.convert(aces_meta).unwrap();
     let aces_overlay = aces_base.clone();
 
-    let cpu_op = pixors_engine::operation::composite::Composite2Operation {
+    let cpu_op = chromors::operation::composite::Composite2Operation {
         overlay: img.clone(),
         mode: BlendMode::Over,
         x: None,
@@ -292,10 +292,10 @@ fn sandwich_acescg_composite() {
     };
     let gpu_comp: GenImage<GpuBackend> = gpu.execute(&comp_op).unwrap();
 
-    let srgb_meta = pixors_engine::pixel::PixelMeta::new(
-        pixors_engine::pixel::PixelFormat::Rgba8,
-        pixors_engine::color::space::ColorSpace::SRGB,
-        pixors_engine::pixel::AlphaPolicy::Straight,
+    let srgb_meta = chromors::pixel::PixelMeta::new(
+        chromors::pixel::PixelFormat::Rgba8,
+        chromors::color::space::ColorSpace::SRGB,
+        chromors::pixel::AlphaPolicy::Straight,
     );
     let gpu_out = gpu_comp.convert(srgb_meta).unwrap();
 
@@ -320,7 +320,7 @@ fn shrink_matches_vips() {
     let bands = img.bands() as usize;
 
     let cpu = img
-        .execute(&pixors_engine::operation::geometry::ShrinkOperation {
+        .execute(&chromors::operation::geometry::ShrinkOperation {
             horizontal: 2.0,
             vertical: 2.0,
             ceil: None,
@@ -359,7 +359,7 @@ fn opacity_matches_vips() {
 
     for amount in [0.25_f32, 0.5, 0.75] {
         let cpu_out = img
-            .execute(&pixors_engine::operation::opacity::OpacityOperation { amount })
+            .execute(&chromors::operation::opacity::OpacityOperation { amount })
             .unwrap();
         let cpu_bytes = common::vips_materialize(&cpu_out);
 
@@ -394,7 +394,7 @@ fn gamma_matches_vips() {
 
     for stops in [-2.0_f64, -1.0, 0.0, 1.0, 2.0] {
         let exponent = 2.0_f64.powf(stops);
-        let op = pixors_engine::operation::icc::GammaOperation {
+        let op = chromors::operation::icc::GammaOperation {
             exponent: Some(exponent),
         };
         let cpu_out = img.execute(&op).unwrap();
@@ -434,7 +434,7 @@ fn saturation_matches_vips() {
     let ctx = common::gpu_ctx();
 
     for amount in [0.0_f64, 0.5, 1.0, 1.5, 2.0] {
-        let op = pixors_engine::operation::icc::SaturationOperation { amount };
+        let op = chromors::operation::icc::SaturationOperation { amount };
         let cpu_out = img.execute(&op).unwrap();
         let cpu_bytes = common::vips_materialize(&cpu_out);
 
@@ -465,14 +465,18 @@ fn histogram_extracts_channel() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
 
-    let op = pixors_engine::operation::stats::HistogramOp {
+    let op = chromors::operation::stats::HistogramOp {
         bins: 256,
         channel: 0,
     };
-    let hist_img = op.apply(&gpu).unwrap();
-
-    // Materialize and read back the raw histogram bytes.
-    let hist = hist_img.materialize().unwrap();
+    let hist_node = chromors::backend::gpu::HistogramType::execute(&op, &gpu.handle);
+    let hist_buf = chromors::backend::gpu::Targetable::pull(
+        &chromors::backend::gpu::HistogramType { bins: 256 },
+        &hist_node,
+        &chromors::backend::gpu::Atomic,
+    )
+    .unwrap();
+    let hist = chromors::data::histogram::HistogramResult::from_bytes(hist_buf.as_bytes());
     assert_eq!(hist.bins.len(), 256, "expected 256 bins");
     let total = hist.total_pixels;
     assert!(total > 0, "histogram is empty");
@@ -496,15 +500,22 @@ fn histogram_capability_matches_gpu() {
     let gpu = common::vips_to_gpu(&img, &ctx);
 
     let vips_hist = img.histogram().unwrap();
-    let vips_mat = pixors_engine::target::HistogramTarget::new(vips_hist)
+    let vips_mat = chromors::target::HistogramTarget::new(vips_hist)
         .pull()
         .unwrap();
 
-    let op = pixors_engine::operation::stats::HistogramOp {
+    let op = chromors::operation::stats::HistogramOp {
         bins: 256,
         channel: 0,
     };
-    let gpu_hist = op.apply(&gpu).unwrap().materialize().unwrap();
+    let hist_node = chromors::backend::gpu::HistogramType::execute(&op, &gpu.handle);
+    let hist_buf = chromors::backend::gpu::Targetable::pull(
+        &chromors::backend::gpu::HistogramType { bins: 256 },
+        &hist_node,
+        &chromors::backend::gpu::Atomic,
+    )
+    .unwrap();
+    let gpu_hist = chromors::data::histogram::HistogramResult::from_bytes(hist_buf.as_bytes());
 
     assert_eq!(gpu_hist.bins.len(), 256);
     assert_eq!(
@@ -548,10 +559,10 @@ fn histogram_gpu_capability_counts_pixels() {
     let gpu = common::vips_to_gpu(&img, &ctx);
 
     let hist = gpu.histogram().unwrap();
-    let mat = pixors_engine::target::HistogramTarget::new(hist)
+    let mat = chromors::target::HistogramTarget::new(hist)
         .pull()
         .unwrap();
-    let result = pixors_engine::data::histogram::HistogramResult::from_bytes(&mat.buffer);
+    let result = chromors::data::histogram::HistogramResult::from_bytes(&mat.buffer);
 
     assert_eq!(mat.bins, 256);
     assert_eq!(
@@ -575,7 +586,7 @@ fn scale_alpha_band_matches_opacity() {
 
     // Vips reference: OpacityOperation halves alpha via extract/scale/join
     let cpu = img
-        .execute(&pixors_engine::OpacityOperation { amount: 0.5 })
+        .execute(&chromors::OpacityOperation { amount: 0.5 })
         .unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -583,7 +594,7 @@ fn scale_alpha_band_matches_opacity() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu_out = gpu
-        .execute(&pixors_engine::operation::bands::ScaleBandGpuOp {
+        .execute(&chromors::operation::bands::ScaleBandGpuOp {
             band: 3,
             factor: 0.5,
         })
@@ -611,21 +622,21 @@ fn scale_red_band_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
 
     // Vips: extract R, scale by 0.5, join G + B + A back
-    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+    let red: chromors::data::image::Image2D<chromors::backend::vips::VipsBackend> = img
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(1),
         })
         .unwrap();
     let scaled_red = red
-        .execute(&pixors_engine::operation::arithmetic::LinearOperation {
+        .execute(&chromors::operation::arithmetic::LinearOperation {
             a: 0.5,
             b: 0.0,
             uchar: Some(true),
         })
         .unwrap();
     let gba = img
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 1,
             count: Some(3),
         })
@@ -637,7 +648,7 @@ fn scale_red_band_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu_out = gpu
-        .execute(&pixors_engine::operation::bands::ScaleBandGpuOp {
+        .execute(&chromors::operation::bands::ScaleBandGpuOp {
             band: 0,
             factor: 0.5,
         })
@@ -669,7 +680,7 @@ fn extract_red_band_matches_vips() {
 
     // Vips: 1-band gray image with red values
     let cpu = img
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(1),
         })
@@ -680,7 +691,7 @@ fn extract_red_band_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu_out = gpu
-        .execute(&pixors_engine::operation::bands::ExtractBandGpuOp { band: 0 })
+        .execute(&chromors::operation::bands::ExtractBandGpuOp { band: 0 })
         .unwrap();
     let poc_bytes = common::poc_materialize(&gpu_out);
     let poc_u8 = common::poc_f32_to_u8(&poc_bytes, w, h, 4);
@@ -708,21 +719,21 @@ fn chain_add_and_scale_band_matches_vips() {
 
     // Vips: (R + 0.1 clamped) then scale blue by 0.5
     // Step 1: add 0.1 to red (linear a=1.0 b=25.5 on extracted red band, then bandjoin)
-    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+    let red: chromors::data::image::Image2D<chromors::backend::vips::VipsBackend> = img
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(1),
         })
         .unwrap();
     let red_shifted = red
-        .execute(&pixors_engine::operation::arithmetic::LinearOperation {
+        .execute(&chromors::operation::arithmetic::LinearOperation {
             a: 1.0,
             b: 25.5,
             uchar: Some(true),
         })
         .unwrap();
     let gba = img
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 1,
             count: Some(3),
         })
@@ -730,26 +741,26 @@ fn chain_add_and_scale_band_matches_vips() {
     let img_r_shifted = red_shifted.bandjoin(&gba).unwrap();
     // Step 2: scale blue by 0.5
     let rg = img_r_shifted
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 0,
             count: Some(2),
         })
         .unwrap();
     let blue = img_r_shifted
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 2,
             count: Some(1),
         })
         .unwrap();
     let scaled_blue = blue
-        .execute(&pixors_engine::operation::arithmetic::LinearOperation {
+        .execute(&chromors::operation::arithmetic::LinearOperation {
             a: 0.5,
             b: 0.0,
             uchar: Some(true),
         })
         .unwrap();
     let a = img_r_shifted
-        .execute(&pixors_engine::operation::bands::ExtractBandOperation {
+        .execute(&chromors::operation::bands::ExtractBandOperation {
             band: 3,
             count: Some(1),
         })
@@ -762,13 +773,13 @@ fn chain_add_and_scale_band_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu_add = gpu
-        .execute(&pixors_engine::operation::bands::AddToBandGpuOp {
+        .execute(&chromors::operation::bands::AddToBandGpuOp {
             band: 0,
             offset: 0.1,
         })
         .unwrap();
     let gpu_out = gpu_add
-        .execute(&pixors_engine::operation::bands::ScaleBandGpuOp {
+        .execute(&chromors::operation::bands::ScaleBandGpuOp {
             band: 2,
             factor: 0.5,
         })
@@ -788,10 +799,10 @@ fn chain_add_and_scale_band_matches_vips() {
 // Arithmetic operations — GPU vs vips cross-backend
 // ═══════════════════════════════════════════════════════════════════════════════
 
-use pixors_engine::operation::arithmetic::{
+use chromors::operation::arithmetic::{
     AddOperation, LinearOperation, MathOperation, MultiplyOperation, SubtractOperation,
 };
-use pixors_engine::operation::{OperationMath, OperationMath2};
+use chromors::operation::{OperationMath, OperationMath2};
 
 /// GPU LinearOperation must match vips `linear`.
 #[test]
@@ -933,7 +944,7 @@ fn math2_const_matches_vips() {
     init();
     let img = common::rgba();
 
-    use pixors_engine::operation::arithmetic::Math2ConstOperation;
+    use chromors::operation::arithmetic::Math2ConstOperation;
     let op = Math2ConstOperation {
         math2: OperationMath2::Pow,
         constants: vec![2.0],
@@ -1005,7 +1016,7 @@ fn chained_linear_add_matches_vips() {
 // Band extract / band join — GPU vs vips cross-backend
 // ═══════════════════════════════════════════════════════════════════════════════
 
-use pixors_engine::operation::bands::{BandjoinOperation, ExtractBandOperation};
+use chromors::operation::bands::{BandjoinOperation, ExtractBandOperation};
 
 /// GPU ExtractBandOperation (single band) must match vips `extract_band`.
 #[test]
@@ -1088,7 +1099,7 @@ fn bandjoin4_matches_vips() {
     let img = common::rgba();
     let (w, h) = (img.width() as usize, img.height() as usize);
 
-    let r: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
+    let r: chromors::data::image::Image2D<chromors::backend::vips::VipsBackend> = img
         .execute(&ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -1167,7 +1178,7 @@ fn bandjoin2_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let red: pixors_engine::data::image::Image2D<pixors_engine::backend::vips::VipsBackend> = img
+    let red: chromors::data::image::Image2D<chromors::backend::vips::VipsBackend> = img
         .execute(&ExtractBandOperation {
             band: 0,
             count: Some(1),
@@ -1231,7 +1242,7 @@ fn divide_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::DivideOperation {
+    let op = chromors::operation::arithmetic::DivideOperation {
         right: img2.clone(),
     };
     let cpu = img.execute(&op).unwrap();
@@ -1240,7 +1251,7 @@ fn divide_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::DivideOperation {
+    let op_gpu = chromors::operation::arithmetic::DivideOperation {
         right: gpu2.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
@@ -1261,7 +1272,7 @@ fn maxpair_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::MaxPairOperation {
+    let op = chromors::operation::arithmetic::MaxPairOperation {
         right: img2.clone(),
     };
     let cpu = img.execute(&op).unwrap();
@@ -1270,7 +1281,7 @@ fn maxpair_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::MaxPairOperation {
+    let op_gpu = chromors::operation::arithmetic::MaxPairOperation {
         right: gpu2.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
@@ -1291,7 +1302,7 @@ fn minpair_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::MinPairOperation {
+    let op = chromors::operation::arithmetic::MinPairOperation {
         right: img2.clone(),
     };
     let cpu = img.execute(&op).unwrap();
@@ -1300,7 +1311,7 @@ fn minpair_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::MinPairOperation {
+    let op_gpu = chromors::operation::arithmetic::MinPairOperation {
         right: gpu2.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
@@ -1321,7 +1332,7 @@ fn remainder_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RemainderOperation {
+    let op = chromors::operation::arithmetic::RemainderOperation {
         right: img2.clone(),
     };
     let cpu = img.execute(&op).unwrap();
@@ -1330,7 +1341,7 @@ fn remainder_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::RemainderOperation {
+    let op_gpu = chromors::operation::arithmetic::RemainderOperation {
         right: gpu2.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
@@ -1351,9 +1362,9 @@ fn boolean_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::BooleanOperation {
+    let op = chromors::operation::arithmetic::BooleanOperation {
         right: img2.clone(),
-        boolean: pixors_engine::operation::OperationBoolean::And,
+        boolean: chromors::operation::OperationBoolean::And,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1361,9 +1372,9 @@ fn boolean_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::BooleanOperation {
+    let op_gpu = chromors::operation::arithmetic::BooleanOperation {
         right: gpu2.clone(),
-        boolean: pixors_engine::operation::OperationBoolean::And,
+        boolean: chromors::operation::OperationBoolean::And,
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
@@ -1383,9 +1394,9 @@ fn relational_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RelationalOperation {
+    let op = chromors::operation::arithmetic::RelationalOperation {
         right: img2.clone(),
-        relational: pixors_engine::operation::OperationRelational::More,
+        relational: chromors::operation::OperationRelational::More,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1393,9 +1404,9 @@ fn relational_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::arithmetic::RelationalOperation {
+    let op_gpu = chromors::operation::arithmetic::RelationalOperation {
         right: gpu2.clone(),
-        relational: pixors_engine::operation::OperationRelational::More,
+        relational: chromors::operation::OperationRelational::More,
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
@@ -1415,9 +1426,9 @@ fn composite2_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::composite::Composite2Operation {
+    let op = chromors::operation::composite::Composite2Operation {
         overlay: img2.clone(),
-        mode: pixors_engine::operation::composite::BlendMode::Over,
+        mode: chromors::operation::composite::BlendMode::Over,
         x: Some(0),
         y: Some(0),
         compositing_space: None,
@@ -1429,9 +1440,9 @@ fn composite2_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let gpu2 = common::vips_to_gpu(&img2, &ctx);
-    let op_gpu = pixors_engine::operation::composite::Composite2Operation {
+    let op_gpu = chromors::operation::composite::Composite2Operation {
         overlay: gpu2.clone(),
-        mode: pixors_engine::operation::composite::BlendMode::Over,
+        mode: chromors::operation::composite::BlendMode::Over,
         x: Some(0),
         y: Some(0),
         compositing_space: None,
@@ -1454,8 +1465,8 @@ fn round_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RoundOperation {
-        round: pixors_engine::operation::OperationRound::Floor,
+    let op = chromors::operation::arithmetic::RoundOperation {
+        round: chromors::operation::OperationRound::Floor,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1479,9 +1490,9 @@ fn boolean_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::BooleanConstOperation {
+    let op = chromors::operation::arithmetic::BooleanConstOperation {
         constants: vec![128.0],
-        boolean: pixors_engine::operation::OperationBoolean::And,
+        boolean: chromors::operation::OperationBoolean::And,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1508,9 +1519,9 @@ fn relational_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RelationalConstOperation {
+    let op = chromors::operation::arithmetic::RelationalConstOperation {
         constants: vec![128.0],
-        relational: pixors_engine::operation::OperationRelational::More,
+        relational: chromors::operation::OperationRelational::More,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1537,7 +1548,7 @@ fn remainder_const_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::arithmetic::RemainderConstOperation {
+    let op = chromors::operation::arithmetic::RemainderConstOperation {
         constants: vec![128.0],
     };
     let cpu = img.execute(&op).unwrap();
@@ -1565,8 +1576,8 @@ fn bandbool_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::bands::BandboolOperation {
-        boolean: pixors_engine::operation::OperationBoolean::And,
+    let op = chromors::operation::bands::BandboolOperation {
+        boolean: chromors::operation::OperationBoolean::And,
         bands: 4,
     };
     let cpu = img.execute(&op).unwrap();
@@ -1591,7 +1602,7 @@ fn bandfold_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::bands::BandfoldOperation { factor: 1 };
+    let op = chromors::operation::bands::BandfoldOperation { factor: 1 };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1614,7 +1625,7 @@ fn bandunfold_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::bands::BandunfoldOperation { factor: 1 };
+    let op = chromors::operation::bands::BandunfoldOperation { factor: 1 };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1637,7 +1648,7 @@ fn bandmean_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::bands::BandmeanOperation { bands: 4 };
+    let op = chromors::operation::bands::BandmeanOperation { bands: 4 };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
@@ -1661,9 +1672,9 @@ fn morph_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::MorphOperation {
+    let op = chromors::operation::convolution::MorphOperation {
         mask: mask.clone(),
-        morph: pixors_engine::operation::OperationMorphology::Erode,
+        morph: chromors::operation::OperationMorphology::Erode,
     };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
@@ -1671,9 +1682,9 @@ fn morph_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::MorphOperation {
+    let op_gpu = chromors::operation::convolution::MorphOperation {
         mask: mask_gpu.clone(),
-        morph: pixors_engine::operation::OperationMorphology::Erode,
+        morph: chromors::operation::OperationMorphology::Erode,
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
 
@@ -1693,7 +1704,7 @@ fn conva_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::ConvaOperation {
+    let op = chromors::operation::convolution::ConvaOperation {
         mask: mask.clone(),
         layers: None,
         cluster: None,
@@ -1704,7 +1715,7 @@ fn conva_matches_vips() {
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConvaOperation {
+    let op_gpu = chromors::operation::convolution::ConvaOperation {
         mask: mask_gpu.clone(),
         layers: None,
         cluster: None,
@@ -1727,14 +1738,14 @@ fn convf_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::ConvfOperation { mask: mask.clone() };
+    let op = chromors::operation::convolution::ConvfOperation { mask: mask.clone() };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConvfOperation {
+    let op_gpu = chromors::operation::convolution::ConvfOperation {
         mask: mask_gpu.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();
@@ -1755,14 +1766,14 @@ fn convi_matches_vips() {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let bands = img.bands() as usize;
 
-    let op = pixors_engine::operation::convolution::ConviOperation { mask: mask.clone() };
+    let op = chromors::operation::convolution::ConviOperation { mask: mask.clone() };
     let cpu = img.execute(&op).unwrap();
     let cpu_bytes = common::vips_materialize(&cpu);
 
     let ctx = common::gpu_ctx();
     let gpu = common::vips_to_gpu(&img, &ctx);
     let mask_gpu = common::vips_to_gpu(&mask, &ctx);
-    let op_gpu = pixors_engine::operation::convolution::ConviOperation {
+    let op_gpu = chromors::operation::convolution::ConviOperation {
         mask: mask_gpu.clone(),
     };
     let gpu_out = gpu.execute(&op_gpu).unwrap();

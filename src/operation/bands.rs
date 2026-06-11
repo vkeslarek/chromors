@@ -64,6 +64,9 @@ impl VipsOperation for BandfoldOperation {
         o.set_int("factor", self.factor as i32);
     }
 }
+impl TypedOperation for BandfoldOperation {
+    type Output = ImageType;
+}
 impl GpuOperation for BandfoldOperation {
     fn output_dims(&self, input_w: u32, input_h: u32) -> Option<(u32, u32)> {
         Some((input_w, input_h * self.factor))
@@ -119,6 +122,9 @@ impl VipsOperation for BandunfoldOperation {
         o.set_image("in", i);
         o.set_int("factor", self.factor as i32);
     }
+}
+impl TypedOperation for BandunfoldOperation {
+    type Output = ImageType;
 }
 impl GpuOperation for BandunfoldOperation {
     fn output_dims(&self, input_w: u32, input_h: u32) -> Option<(u32, u32)> {

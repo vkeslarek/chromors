@@ -2,6 +2,8 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsBandFormat, IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::pixel::PixelFormat;
@@ -539,5 +541,30 @@ impl Lower<VipsBackend> for NoiseReduction<VipsBackend> {
         op.set_int("size", size);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Exposure<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let gain = 2.0f32.powf(self.stops);
+        cx.param_block(ParamBlock::new()
+            .param("gain", "float", gain)
+            .param("preserve", "float", self.preserve)
+        );
+        cx.kernel("exposure_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Brightness<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("gain", "float", self.value)
+            .param("preserve", "float", 0.0f32)
+        );
+        cx.kernel("exposure_kernel");
+        cx.output(self.output_spec().output());
     }
 }

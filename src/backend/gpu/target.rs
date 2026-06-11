@@ -3,6 +3,7 @@ use super::datatype::Targetable;
 use super::handle::GraphNodeHandle;
 use super::handle::Lod;
 use super::value::{MaterializedValue, Storage};
+use super::work_unit::{AnyWorkUnit, Region};
 use crate::backend::gpu::datatype::Executable;
 use crate::backend::{ColorConversionCapability, HistogramTargetCapability, ImageTargetCapability};
 use crate::geometry::Rect;
@@ -21,7 +22,9 @@ fn mat_to_image(
         Storage::Vram(buffer) => {
             // Translate `rect` (source coordinates) into coordinates local to
             // the materialized buffer, which tightly covers `mat`'s extent.
-            let buf_rect = mat.region().map(|r| r.rect).unwrap_or(rect);
+            let buf_rect = super::work_unit::Region::from_work_unit(&mat.extent)
+                .map(|r| r.rect)
+                .unwrap_or(rect);
             let buffer_rect = Rect::new(
                 rect.x - buf_rect.x,
                 rect.y - buf_rect.y,
@@ -52,9 +55,8 @@ impl ImageTargetCapability for GpuBackend {
             handle.ctx.cache.clone(),
             handle.root_id,
             handle.ctx.clone(),
-            Lod(lod),
         );
-        region.prepare(rect);
+        region.prepare(Region::new(rect, Lod(lod)));
         mat_to_image(&region.materialize()?, handle, rect)
     }
 
@@ -68,10 +70,10 @@ impl ImageTargetCapability for GpuBackend {
             handle.ctx.cache.clone(),
             handle.root_id,
             handle.ctx.clone(),
-            Lod(lod),
         );
+        let wus: Vec<Region> = rects.iter().map(|&r| Region::new(r, Lod(lod))).collect();
         region
-            .materialize_batch(rects)?
+            .materialize_batch(&wus)?
             .into_iter()
             .zip(rects.iter())
             .map(|(mat, &rect)| mat_to_image(&mat, handle, rect))
@@ -107,7 +109,7 @@ impl HistogramTargetCapability for GpuBackend {
         };
         let hist_type = crate::backend::gpu::HistogramType { bins };
         let data = hist_type
-            .pull(handle, Lod::FULL, &crate::backend::gpu::work_unit::Atomic)
+            .pull(handle, &crate::backend::gpu::work_unit::Atomic)
             .map_err(|e| crate::Error::Gpu(format!("{:?}", e)))?;
         Ok(MaterializedHistogram {
             _marker: std::marker::PhantomData,

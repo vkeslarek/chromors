@@ -1,12 +1,10 @@
 //! [`Mask1dType`] / [`Mask2dType`] — separable and 2-D convolution mask datatypes.
 
 use crate::error::Error;
-use crate::pixel::PixelFormat;
 
 use super::super::context::GpuContext;
-use super::super::handle::Lod;
 use super::super::value::{MaterializedValue, Storage};
-use super::super::work_unit::{Range, Region, WorkUnitKind};
+use super::super::work_unit::{Range, Region, WorkUnit, WorkUnitKind};
 use super::{DataType, TypedData};
 
 /// 1-D Mask (e.g. for separable convolution).
@@ -20,7 +18,7 @@ impl DataType for Mask1dType {
         self
     }
 
-    fn byte_size(&self, _w: u32, _h: u32, _image_format: PixelFormat) -> u64 {
+    fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         (self.length as u64 * 4).max(64) // f32 masks
     }
 
@@ -36,7 +34,6 @@ impl TypedData for Mask1dType {
     fn finish(
         &self,
         value: &MaterializedValue,
-        _lod: Lod,
         wu: &Range,
         _ctx: &GpuContext,
     ) -> Result<Self::Value, Error> {
@@ -65,7 +62,7 @@ impl DataType for Mask2dType {
         self
     }
 
-    fn byte_size(&self, _w: u32, _h: u32, _image_format: PixelFormat) -> u64 {
+    fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         (self.width as u64 * self.height as u64 * 4).max(64)
     }
 
@@ -81,7 +78,6 @@ impl TypedData for Mask2dType {
     fn finish(
         &self,
         value: &MaterializedValue,
-        _lod: Lod,
         wu: &Region,
         _ctx: &GpuContext,
     ) -> Result<Self::Value, Error> {

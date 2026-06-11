@@ -21,13 +21,9 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use crate::geometry::Rect;
-use crate::pixel::PixelFormat;
-
 use super::context::GpuContext;
-use super::handle::Lod;
 use super::value::{MaterializedValue, Storage, WriteMode};
-use super::work_unit::{AnyWorkUnit, WorkUnitKind};
+use super::work_unit::{AnyWorkUnit, WorkUnit, WorkUnitKind};
 use crate::error::Error;
 
 pub mod fft;
@@ -77,14 +73,12 @@ pub trait DataType: Send + Sync + Debug + 'static {
 
     /// Byte size of the GPU output buffer for a node of this datatype.
     ///
-    /// `w`/`h` are the resolved output-rect dimensions (pixels) for spatially
-    /// divisible datatypes (Image2D, Features, Fft2D); `image_format` is the
-    /// resolved pixel format for image outputs (decided by the layout pass,
-    /// not embedded in `ImageType` — a node's declared `ImageType` describes
-    /// its *working-space* shape, the final target format may differ).
-    /// Self-describing datatypes (Histogram, masks, Fft1D, Scalar, PointList,
-    /// Mask2D) ignore both `w`/`h`/`image_format` and use their own fixed extent.
-    fn byte_size(&self, w: u32, h: u32, image_format: PixelFormat) -> u64;
+    /// `wu` is the resolved [`WorkUnit`] for the node — spatially divisible
+    /// datatypes (Image2D, Features, Fft2D, Mask2D) read `WorkUnit::Region`'s
+    /// `rect`; `ImageType` additionally reads its own `format` field for
+    /// bytes-per-pixel. Self-describing datatypes (Histogram, Mask1D, Fft1D,
+    /// Scalar, PointList) ignore `wu` and use their own fixed size.
+    fn byte_size(&self, wu: &WorkUnit) -> u64;
 
     /// This datatype's natural division strategy — `Region` (2-D rects),
     /// `Range` (1-D extents), or `Atomic` (indivisible).
@@ -106,10 +100,12 @@ pub trait TypedData: DataType + Sized {
     type WorkUnit: AnyWorkUnit;
 
     /// Convert a materialised [`MaterializedValue`] to the typed payload.
+    ///
+    /// `wu` is the work unit that was requested — for `Region` it carries
+    /// both `rect` and `lod`, so there is no separate `lod` parameter.
     fn finish(
         &self,
         value: &MaterializedValue,
-        lod: Lod,
         wu: &Self::WorkUnit,
         ctx: &GpuContext,
     ) -> Result<Self::Value, Error>;
@@ -125,12 +121,14 @@ pub trait TypedData: DataType + Sized {
 /// datatype-side counterpart to [`Targetable::pull`] — generic glue
 /// (`Storage` out), no rect/buffer-layout reconstruction (that stays in
 /// `materialize.rs`).
-pub trait Sourceable: DataType {
+///
+/// `wu` is `Self::WorkUnit` — for [`ImageType`] that's [`super::work_unit::Region`],
+/// carrying `rect` and `lod` together. There is no separate `lod` parameter.
+pub trait Sourceable: TypedData {
     fn fetch_region(
         &self,
         src: &super::source::GpuSource,
-        rect: Rect,
-        lod: Lod,
+        wu: &Self::WorkUnit,
         ctx: &Arc<GpuContext>,
     ) -> Result<Storage, Error>;
 }
@@ -148,7 +146,6 @@ pub trait Targetable: TypedData + Clone {
     fn pull(
         &self,
         node: &super::handle::GraphNodeHandle,
-        lod: Lod,
         wu: &Self::WorkUnit,
     ) -> Result<Self::Value, Error> {
         let request = super::request::GpuRequest::new(
@@ -156,7 +153,6 @@ pub trait Targetable: TypedData + Clone {
             node.ctx.cache.clone(),
             node.root_id,
             node.ctx.clone(),
-            lod,
             self.clone(),
             wu.clone(),
         );

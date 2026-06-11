@@ -3,6 +3,8 @@ use std::hash::Hasher;
 use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder, IntoVipsEnum};
 use crate::data::image::ImageKind;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
 use crate::operation::{
     AnyInput, Input, Lower, Operation, OperationComplex2, OperationMath, OperationMath2,
     OperationRound,
@@ -334,5 +336,60 @@ impl Lower<VipsBackend> for Math2<VipsBackend> {
         op.set_int("math2", self.math2.into_vips());
         let out_handle = op.run().expect("vips math2 failed");
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Add<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("add_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Subtract<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("subtract_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Multiply<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("multiply_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Divide<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("divide_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for MaxPair<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("maxpair_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for MinPair<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("minpair_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Remainder<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("remainder_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Complexform<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("complexform_kernel"); cx.output(self.output_spec().output()); }
+}
+impl Lower<GpuBackend> for Complex2<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", "uint", self.cmplx.into_vips() as u32));
+        cx.kernel("complex2_kernel"); 
+        cx.output(self.output_spec().output()); 
+    }
+}
+impl Lower<GpuBackend> for Math<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", "uint", self.math.into_vips() as u32));
+        cx.kernel("math_kernel"); 
+        cx.output(self.output_spec().output()); 
+    }
+}
+impl Lower<GpuBackend> for Round<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", "uint", self.round.into_vips() as u32));
+        cx.kernel("round_kernel"); 
+        cx.output(self.output_spec().output()); 
+    }
+}
+impl Lower<GpuBackend> for Math2<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", "uint", self.math2.into_vips() as u32));
+        cx.kernel("math2_kernel"); 
+        cx.output(self.output_spec().output()); 
     }
 }

@@ -53,7 +53,32 @@ void {{ entry.name }}(uint3 tid : SV_DispatchThreadID)
     {{ entry.bounds_check }}
     uint2 idx = tid.xy;
 
-{{ entry.body }}
+{% for sv in entry.source_vars %}
+    CodecRegion<{{ sv.codec }}, {{ sv.ch_layout }}> _raw_src_{{ sv.binding }} = {{ "{" }} src_{{ sv.binding }}, g_params[0].inputs_{{ sv.binding }} {{ "}" }};
+    WorkingDecodeRegion<CodecRegion<{{ sv.codec }}, {{ sv.ch_layout }}>> region_src_{{ sv.binding }} = {{ "{" }} _raw_src_{{ sv.binding }}, src_cs_{{ sv.binding }} {{ "}" }};
+{%- endfor %}
+{% for tv in entry.temp_vars %}
+    RWRegion region_tmp_{{ tv.binding }} = {{ "{" }} temp_buf_{{ tv.binding }}, g_params[0].temp_region_{{ tv.binding }} {{ "}" }};
+{%- endfor %}
+{% if let Some(ti) = entry.histogram_target %}
+    HistogramOut hist_out_{{ ti }} = {{ "{" }} target_{{ ti }}, g_params[0].bin_count_{{ ti }} {{ "}" }};
+{%- endif %}
+{% if let Some(call) = entry.kernel_call %}
+    {{ call.function }}({% for a in call.args %}{{ a }}{% if !loop.last %}, {% endif %}{% endfor %});
+{%- endif %}
+{% if let Some(oe) = entry.output_encode %}
+    float4 _packed;
+    float _extra;
+{% if let Some(b) = oe.temp_binding %}
+    from_working(temp_buf_{{ b }}[region_index(g_params[0].temp_region_{{ b }}, idx.x, idx.y)], dst_cs, _packed, _extra);
+{%- else if let Some(si) = oe.source_binding %}
+    from_working(region_src_{{ si }}.read(idx), dst_cs, _packed, _extra);
+{%- endif %}
+    if (idx.x < g_params[0].{{ oe.region_param }}.width && idx.y < g_params[0].{{ oe.region_param }}.height) {
+        uint _linear = region_index(g_params[0].{{ oe.region_param }}, idx.x, idx.y);
+        {{ oe.dst_codec }}::encode({{ oe.target_name }}, _linear, _packed, {{ oe.dst_ch_layout }});
+    }
+{%- endif %}
 }
 
 {% endfor %}

@@ -6,9 +6,9 @@
 //! all. A segfault in libvips would abort the test binary (test fails).
 
 use crate::common::{init, rgb};
-use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image2D;
-use pixors_engine::*;
+use chromors::backend::vips::VipsBackend;
+use chromors::data::image::Image2D;
+use chromors::*;
 
 /// Call an expression and discard its `Result` — we only care that it returned.
 macro_rules! safe {

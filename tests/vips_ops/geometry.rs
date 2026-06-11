@@ -1,7 +1,7 @@
 //! vips backend — geometry / resampling ops.
 
 use crate::common::rgb;
-use pixors_engine::*;
+use chromors::*;
 
 #[test]
 fn resize() {

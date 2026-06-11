@@ -4,15 +4,13 @@ use std::sync::Arc;
 
 use crate::color::space::ColorSpace;
 use crate::error::Error;
-use crate::geometry::Rect;
 use crate::pixel::{AlphaPolicy, PixelFormat, PixelMeta};
 
 use super::super::buffer::ImageBuffer;
 use super::super::context::GpuContext;
-use super::super::handle::Lod;
 use super::super::source::{AnyGpuSource, GpuSource};
 use super::super::value::{MaterializedValue, Storage};
-use super::super::work_unit::{Region, WorkUnitKind};
+use super::super::work_unit::{Region, WorkUnit, WorkUnitKind};
 use super::{DataType, Sourceable, TypedData};
 
 /// A 2-D pixel image. Gray images are represented here with a Gray
@@ -32,9 +30,12 @@ impl DataType for ImageType {
         true
     }
 
-    fn byte_size(&self, w: u32, h: u32, image_format: PixelFormat) -> u64 {
-        let bpp = image_format.bytes_per_pixel() as u64;
-        (w as u64 * h as u64 * bpp).max(64)
+    fn byte_size(&self, wu: &WorkUnit) -> u64 {
+        let WorkUnit::Region { rect, .. } = wu else {
+            unreachable!("ImageType::work_unit_kind is Region")
+        };
+        let bpp = self.format.bytes_per_pixel() as u64;
+        (rect.width as u64 * rect.height as u64 * bpp).max(64)
     }
 
     fn work_unit_kind(&self) -> WorkUnitKind {
@@ -46,11 +47,10 @@ impl Sourceable for ImageType {
     fn fetch_region(
         &self,
         src: &GpuSource,
-        rect: Rect,
-        lod: Lod,
+        wu: &Region,
         ctx: &Arc<GpuContext>,
     ) -> Result<Storage, Error> {
-        let buf = src.fetch_region(rect, lod, ctx)?;
+        let buf = src.fetch_region(wu.rect, wu.lod, ctx)?;
         Ok(Storage::Vram(buf.buffer.clone()))
     }
 }
@@ -62,7 +62,6 @@ impl TypedData for ImageType {
     fn finish(
         &self,
         value: &MaterializedValue,
-        _lod: Lod,
         wu: &Region,
         _ctx: &GpuContext,
     ) -> Result<Self::Value, Error> {

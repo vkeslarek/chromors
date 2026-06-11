@@ -24,8 +24,6 @@ pub struct EmittedIr {
     pub params_bytes: Vec<u8>,
     pub entry_points: Vec<(String, u32, u32)>,
     pub target_output_kinds: Vec<Arc<dyn DataType>>,
-    /// Output pixel format for image passes — `None` for non-image outputs.
-    pub dst_format: Option<PixelFormat>,
 }
 
 impl EmittedIr {
@@ -697,10 +695,43 @@ struct TargetData {
 }
 
 #[derive(Debug)]
+struct SourceVarData {
+    binding: u32,
+    codec: &'static str,
+    ch_layout: &'static str,
+}
+
+#[derive(Debug)]
+struct TempVarData {
+    binding: u32,
+}
+
+#[derive(Debug)]
+struct KernelCallData {
+    function: &'static str,
+    args: Vec<String>,
+}
+
+#[derive(Debug)]
+struct OutputEncodeData {
+    region_param: String,
+    target_name: String,
+    dst_codec: &'static str,
+    dst_ch_layout: &'static str,
+    /// Reads from `temp_buf_{binding}` when set, else from the first source.
+    temp_binding: Option<u32>,
+    source_binding: Option<u32>,
+}
+
+#[derive(Debug)]
 struct EntryData {
     name: String,
     bounds_check: String,
-    body: String,
+    source_vars: Vec<SourceVarData>,
+    temp_vars: Vec<TempVarData>,
+    histogram_target: Option<u32>,
+    kernel_call: Option<KernelCallData>,
+    output_encode: Option<OutputEncodeData>,
 }
 
 // ── Template struct ───────────────────────────────────────────────────────────
@@ -822,54 +853,40 @@ impl<'a> SlangEmitter<'a> {
         }
     }
 
-    fn build_source_vars(&self) -> String {
-        let mut out = String::new();
-        for src in &self.layout.sources {
-            let i = src.binding;
-            let codec = src.format.slang_codec();
-            let ch_layout = src.format.slang_layout();
-            out.push_str(&format!(
-                "    CodecRegion<{codec}, {ch_layout}> _raw_src_{i} = {{ src_{i}, g_params[0].inputs_{i} }};\n"
-            ));
-            out.push_str(&format!(
-                "    WorkingDecodeRegion<CodecRegion<{codec}, {ch_layout}>> region_src_{i} = {{ _raw_src_{i}, src_cs_{i} }};\n"
-            ));
-        }
-        if !self.layout.sources.is_empty() {
-            out.push('\n');
-        }
-        out
+    fn source_vars_data(&self) -> Vec<SourceVarData> {
+        self.layout
+            .sources
+            .iter()
+            .map(|src| SourceVarData {
+                binding: src.binding,
+                codec: src.format.slang_codec(),
+                ch_layout: src.format.slang_layout(),
+            })
+            .collect()
     }
 
-    fn build_temp_vars(&self, id: NodeId, node: &super::graph::GraphNode) -> String {
-        let mut out = String::new();
+    fn temp_vars_data(&self, id: NodeId, node: &super::graph::GraphNode) -> Vec<TempVarData> {
         let mut declared = BTreeSet::new();
         if let Some(tmp) = self.layout.temps.get(&id) {
-            let b = tmp.binding;
-            declared.insert(b);
-            out.push_str(&format!(
-                "    RWRegion region_tmp_{b} = {{ temp_buf_{b}, g_params[0].temp_region_{b} }};\n"
-            ));
+            declared.insert(tmp.binding);
         }
         for &inp in &node.inputs {
             if let Some(tmp) = self.layout.temps.get(&inp) {
-                let b = tmp.binding;
-                if declared.insert(b) {
-                    out.push_str(&format!(
-                        "    RWRegion region_tmp_{b} = {{ temp_buf_{b}, g_params[0].temp_region_{b} }};\n"
-                    ));
-                }
+                declared.insert(tmp.binding);
             }
         }
-        out
+        declared
+            .into_iter()
+            .map(|binding| TempVarData { binding })
+            .collect()
     }
 
-    fn build_kernel_call(
+    fn kernel_call_data(
         &self,
         id: NodeId,
         node: &super::graph::GraphNode,
         is_histogram_target: bool,
-    ) -> String {
+    ) -> KernelCallData {
         let NodeEval::Kernel(k) = &node.eval;
         let encoders = node.op.input_encoders(node.inputs.len());
         let mut args: Vec<String> = vec!["idx".into()];
@@ -880,7 +897,7 @@ impl<'a> SlangEmitter<'a> {
             let name = if let Some(&si) = self.layout.source_pos.get(&inp) {
                 // For image sources both `_raw_src_{si}` (CodecRegion) and
                 // `region_src_{si}` (WorkingDecodeRegion) are declared by
-                // `build_source_vars`; the op's InputEncoder picks which one.
+                // the source-var entries; the op's InputEncoder picks which one.
                 match encoder {
                     InputEncoder::CodecRegion => format!("_raw_src_{si}"),
                     InputEncoder::WorkingDecodeRegion => format!("region_src_{si}"),
@@ -906,46 +923,30 @@ impl<'a> SlangEmitter<'a> {
         for i in 0..node.params.len() as u32 {
             args.push(format!("g_params[0].u{}", pi_base + i));
         }
-        format!("    {}({});\n", k.function, args.join(", "))
+        KernelCallData {
+            function: k.function,
+            args,
+        }
     }
 
-    fn build_output_encode(&self, id: NodeId, final_target_id: Option<NodeId>) -> String {
+    fn output_encode_data(
+        &self,
+        id: NodeId,
+        final_target_id: Option<NodeId>,
+    ) -> Option<OutputEncodeData> {
         if Some(id) != final_target_id {
-            return String::new();
+            return None;
         }
         let ti = self.layout.target_pos.get(&id).copied().unwrap_or(0);
-        let tname = format!("target_{ti}");
-        let region_param = format!("region_target_{ti}");
         let fmt = self.color.dst_format.unwrap_or(PixelFormat::RgbaF32);
-        let dst_codec = fmt.slang_codec();
-        let dst_ch_layout = fmt.slang_layout();
-        let mut out = String::new();
-        out.push('\n');
-        out.push_str("    float4 _packed;\n");
-        out.push_str("    float _extra;\n");
-        if let Some(tmp) = self.layout.temps.get(&id) {
-            let b = tmp.binding;
-            out.push_str(&format!(
-                "    from_working(temp_buf_{b}[region_index(g_params[0].temp_region_{b}, idx.x, idx.y)], dst_cs, _packed, _extra);\n"
-            ));
-        } else if let Some(src) = self.layout.sources.first() {
-            let si = src.binding;
-            out.push_str(&format!(
-                "    from_working(region_src_{si}.read(idx), dst_cs, _packed, _extra);\n"
-            ));
-        }
-        out.push_str(&format!(
-            "    if (idx.x < g_params[0].{region_param}.width && idx.y < g_params[0].{region_param}.height) {{\n"
-        ));
-        out.push_str(&format!(
-            "        uint _linear = region_index(g_params[0].{region_param}, idx.x, idx.y);\n"
-        ));
-        out.push_str(&format!(
-            "        {}::encode({tname}, _linear, _packed, {dst_ch_layout});\n",
-            dst_codec
-        ));
-        out.push_str("    }\n");
-        out
+        Some(OutputEncodeData {
+            region_param: format!("region_target_{ti}"),
+            target_name: format!("target_{ti}"),
+            dst_codec: fmt.slang_codec(),
+            dst_ch_layout: fmt.slang_layout(),
+            temp_binding: self.layout.temps.get(&id).map(|t| t.binding),
+            source_binding: self.layout.sources.first().map(|s| s.binding),
+        })
     }
 
     fn emit(&self, wg_dim: u32) -> EmittedIr {
@@ -1041,20 +1042,21 @@ impl<'a> SlangEmitter<'a> {
                 )
             };
 
-            let mut body = self.build_source_vars();
+            let source_vars = self.source_vars_data();
+            let mut temp_vars = Vec::new();
+            let mut histogram_target = None;
+            let mut kernel_call = None;
             // Default `true` mirrors the pre-existing histogram special case —
             // a node missing from the graph can't declare an encoder, so don't
             // emit a wrap that has nothing to read from.
             let mut skip_encode = true;
             if let Some(node) = self.graph.get_node(id) {
-                body.push_str(&self.build_temp_vars(id, node));
+                temp_vars = self.temp_vars_data(id, node);
                 if is_histogram_target {
-                    let ti = self.layout.target_pos.get(&id).copied().unwrap_or(0);
-                    body.push_str(&format!(
-                        "    HistogramOut hist_out_{ti} = {{ target_{ti}, g_params[0].bin_count_{ti} }};\n"
-                    ));
+                    histogram_target =
+                        Some(self.layout.target_pos.get(&id).copied().unwrap_or(0) as u32);
                 }
-                body.push_str(&self.build_kernel_call(id, node, is_histogram_target));
+                kernel_call = Some(self.kernel_call_data(id, node, is_histogram_target));
                 // Skip the from_working + codec::encode step for non-image outputs
                 // (histogram bins, raw masks, FFT, …).
                 skip_encode = !matches!(
@@ -1062,14 +1064,20 @@ impl<'a> SlangEmitter<'a> {
                     OutputDecoder::WorkingEncodeRegion { .. }
                 );
             }
-            if !skip_encode {
-                body.push_str(&self.build_output_encode(id, final_target_id));
-            }
+            let output_encode = if skip_encode {
+                None
+            } else {
+                self.output_encode_data(id, final_target_id)
+            };
 
             entries.push(EntryData {
                 name: entry_name,
                 bounds_check,
-                body,
+                source_vars,
+                temp_vars,
+                histogram_target,
+                kernel_call,
+                output_encode,
             });
         }
 
@@ -1125,7 +1133,6 @@ impl<'a> SlangEmitter<'a> {
             params_bytes: self.layout.params.bytes.clone(),
             entry_points,
             target_output_kinds,
-            dst_format: self.color.dst_format,
         }
     }
 }

@@ -1,11 +1,11 @@
 use crate::common::rgb;
-use pixors_engine::data::histogram::HistogramResult;
-use pixors_engine::operation::custom_ops::HistogramSink;
-use pixors_engine::target::HistogramTarget;
+use chromors::data::histogram::HistogramResult;
+use chromors::operation::custom_ops::HistogramSink;
+use chromors::target::HistogramTarget;
 
 fn pull_histogram(
-    hist: &pixors_engine::data::histogram::Histogram<pixors_engine::backend::vips::VipsBackend>,
-) -> pixors_engine::target::MaterializedHistogram<pixors_engine::backend::vips::VipsBackend> {
+    hist: &chromors::data::histogram::Histogram<chromors::backend::vips::VipsBackend>,
+) -> chromors::target::MaterializedHistogram<chromors::backend::vips::VipsBackend> {
     HistogramTarget::new(hist.clone()).pull().unwrap()
 }
 

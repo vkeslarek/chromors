@@ -50,3 +50,6 @@ module_inception                = "allow"
 new_without_default             = "allow"
 too_many_arguments              = "allow"
 type_complexity                 = "allow"
+
+[workspace]
+members = ["poc"]

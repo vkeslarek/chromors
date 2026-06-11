@@ -4,7 +4,7 @@
 //! [`HistogramSink`] (arbitrary Rust value output).
 
 use crate::common::rgb;
-use pixors_engine::*;
+use chromors::*;
 
 // ── Invert (VipsCustomOperation → Image2D<VipsBackend>) ────────────────────────────────────
 

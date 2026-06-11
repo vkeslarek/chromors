@@ -2,6 +2,7 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -61,7 +62,12 @@ impl<B: Backend> Operation<B> for Crop<B> where Crop<B>: Lower<B> {
             lod: out.lod,
         }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind { 
+        let mut spec = (*self.input.spec).clone();
+        spec.width = self.width;
+        spec.height = self.height;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.left);
         state.write_i32(self.top);
@@ -80,6 +86,15 @@ impl Lower<VipsBackend> for Crop<VipsBackend> {
         op.set_int("height", self.height);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Crop<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.kernel("passthrough_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 

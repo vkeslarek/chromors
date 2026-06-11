@@ -5,6 +5,7 @@ pub enum Error {
     InvalidWorkUnit(String),
     Io(String),
     Vips(String),
+    Raw(String),
 }
 
 impl std::fmt::Display for Error {
@@ -15,6 +16,7 @@ impl std::fmt::Display for Error {
             Error::InvalidWorkUnit(msg) => write!(f, "invalid work unit: {msg}"),
             Error::Io(msg) => write!(f, "io error: {msg}"),
             Error::Vips(msg) => write!(f, "vips error: {msg}"),
+            Error::Raw(msg) => write!(f, "raw error: {msg}"),
         }
     }
 }

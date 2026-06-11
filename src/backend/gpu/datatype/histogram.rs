@@ -3,13 +3,11 @@
 use std::sync::Arc;
 
 use crate::error::Error;
-use crate::pixel::PixelFormat;
 
 use super::super::context::GpuContext;
-use super::super::handle::Lod;
 use super::super::typed::histogram::HistogramBuffer;
 use super::super::value::{MaterializedValue, Storage, WriteMode};
-use super::super::work_unit::{Atomic, WorkUnitKind};
+use super::super::work_unit::{Atomic, WorkUnit, WorkUnitKind};
 use super::{DataType, TypedData};
 
 /// Fixed-size histogram accumulator. `bins` × u32 atomic counters.
@@ -27,7 +25,7 @@ impl DataType for HistogramType {
         WriteMode::AtomicAccumulate { count: self.bins }
     }
 
-    fn byte_size(&self, _w: u32, _h: u32, _image_format: PixelFormat) -> u64 {
+    fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         (self.bins as u64 * 4).max(64)
     }
 
@@ -43,7 +41,6 @@ impl TypedData for HistogramType {
     fn finish(
         &self,
         value: &MaterializedValue,
-        _lod: Lod,
         _wu: &Atomic,
         _ctx: &GpuContext,
     ) -> Result<Self::Value, Error> {

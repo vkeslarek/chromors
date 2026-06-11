@@ -1,14 +1,14 @@
-use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image;
-use pixors_engine::pixel::PixelFormat;
+use chromors::backend::vips::VipsBackend;
+use chromors::data::image::Image2D;
+use chromors::pixel::PixelFormat;
 
 fn main() {
-    pixors_engine::init();
+    chromors::init();
     let data = vec![0u8; 100 * 100 * 6];
-    let img = Image::<VipsBackend>::from_memory(&data, 100, 100, 3, PixelFormat::Rgb16).unwrap();
+    let img = Image2D::<VipsBackend>::from_memory(&data, 100, 100, 3, PixelFormat::Rgb16).unwrap();
     println!("Original format: {:?}", img.pixel_format());
 
-    use pixors_engine::operation::arithmetic::LinearOperation;
+    use chromors::operation::arithmetic::LinearOperation;
     let op = LinearOperation {
         a: 1.5,
         b: 0.0,

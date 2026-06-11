@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use super::buffer::GpuBuffer;
 use super::datatype::DataType;
-use super::work_unit::{Region, WorkUnit};
+use super::work_unit::WorkUnit;
 
 // ── WriteMode ─────────────────────────────────────────────────────────────────
 
@@ -72,14 +72,6 @@ impl MaterializedValue {
             datatype,
             extent,
         }
-    }
-
-    /// The 2-D extent this value covers, if its datatype is spatially
-    /// divisible (`extent` is `WorkUnit::Region`). `None` for Range/Atomic
-    /// datatypes (histograms, masks, FFT1D, scalars, …).
-    pub fn region(&self) -> Option<Region> {
-        use super::work_unit::AnyWorkUnit;
-        Region::from_work_unit(&self.extent)
     }
 
     pub fn byte_size(&self) -> u64 {

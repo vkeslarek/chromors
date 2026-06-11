@@ -1,5 +1,7 @@
 use std::hash::Hasher;
 
+use crate::backend::gpu::view::ParamBlock;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
@@ -316,5 +318,82 @@ impl Lower<VipsBackend> for Blur<VipsBackend> {
         op.set_double("sigma", self.sigma as f64);
         let out_handle = op.run().expect("vips gaussblur failed");
         cx.emit(out_handle);
+    }
+}
+
+// ── Blur (GPU Separable) ──────────────────────────────────────────────────────
+
+pub struct BlurH {
+    pub input: Input<ImageKind, GpuBackend>,
+    pub sigma: f32,
+}
+
+impl Operation<GpuBackend> for BlurH {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let scaled_radius = ((self.sigma * 3.0) / out.lod.scale_factor() as f32).ceil() as i32;
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x - scaled_radius,
+            y: out.y,
+            w: out.w + 2 * scaled_radius,
+            h: out.h,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_u32(self.sigma.to_bits());
+    }
+}
+
+impl Lower<GpuBackend> for BlurH {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let wu = cx.wu().clone();
+        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
+        cx.param_block(ParamBlock::scalar("sigma", "float", self.sigma / scale));
+        cx.kernel("blur_h_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+pub struct BlurV {
+    pub input: Input<ImageKind, GpuBackend>,
+    pub sigma: f32,
+}
+
+impl Operation<GpuBackend> for BlurV {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let scaled_radius = ((self.sigma * 3.0) / out.lod.scale_factor() as f32).ceil() as i32;
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x,
+            y: out.y - scaled_radius,
+            w: out.w,
+            h: out.h + 2 * scaled_radius,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_u32(self.sigma.to_bits());
+    }
+}
+
+impl Lower<GpuBackend> for BlurV {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let wu = cx.wu().clone();
+        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
+        cx.param_block(ParamBlock::scalar("sigma", "float", self.sigma / scale));
+        cx.kernel("blur_v_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl crate::data::image::Image2D<GpuBackend> {
+    pub fn blur(&self, sigma: f32) -> Self {
+        let h = self.push(BlurH { input: self.as_input(), sigma });
+        h.push(BlurV { input: h.as_input(), sigma })
     }
 }

@@ -1,9 +1,9 @@
-use pixors_engine::backend::vips::VipsBackend;
-use pixors_engine::data::image::Image2D;
-use pixors_engine::*;
+use chromors::backend::vips::VipsBackend;
+use chromors::data::image::Image2D;
+use chromors::*;
 
 fn init() {
-    std::sync::Once::new().call_once(pixors_engine::init);
+    std::sync::Once::new().call_once(chromors::init);
 }
 
 fn sample() -> Image2D<VipsBackend> {

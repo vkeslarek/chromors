@@ -7,7 +7,6 @@ use super::datatype::DataType;
 use super::emit::EmittedIr;
 use super::materialize::MaterializePlan;
 use super::op::working_image_type;
-use crate::pixel::PixelFormat;
 
 // ── CompiledShader — cacheable artifact ──────────────────────────────────────
 
@@ -347,10 +346,13 @@ impl DispatchPass {
             .iter()
             .enumerate()
             .map(|(i, &(tw, th))| {
-                let fmt = ir.dst_format.unwrap_or(PixelFormat::RgbaF32);
+                let wu = super::work_unit::WorkUnit::Region {
+                    rect: crate::geometry::Rect::new(0, 0, tw as i32, th as i32),
+                    lod: super::Lod::FULL,
+                };
                 let sz = match ir.target_output_kinds.get(i) {
-                    Some(dt) => dt.byte_size(tw, th, fmt),
-                    None => working_image_type().byte_size(tw, th, fmt),
+                    Some(dt) => dt.byte_size(&wu),
+                    None => working_image_type().byte_size(&wu),
                 };
                 ctx.arena.allocate(
                     &ctx.device,

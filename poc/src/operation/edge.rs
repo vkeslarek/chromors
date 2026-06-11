@@ -1,6 +1,7 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
@@ -95,6 +96,13 @@ impl Lower<VipsBackend> for Invert<VipsBackend> {
         op.set_image("in", input_handle.ptr);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Invert<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.kernel("invert_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 

@@ -3,9 +3,7 @@
 //! today (no decode path is wired up yet); they exist as `Arc<dyn DataType>`
 //! tags so ops can declare them as outputs.
 
-use crate::pixel::PixelFormat;
-
-use super::super::work_unit::WorkUnitKind;
+use super::super::work_unit::{WorkUnit, WorkUnitKind};
 use super::DataType;
 
 /// Single float scalar output.
@@ -17,7 +15,7 @@ impl DataType for ScalarType {
         self
     }
 
-    fn byte_size(&self, _w: u32, _h: u32, _image_format: PixelFormat) -> u64 {
+    fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         64
     }
 
@@ -37,7 +35,7 @@ impl DataType for PointListType {
         self
     }
 
-    fn byte_size(&self, _w: u32, _h: u32, _image_format: PixelFormat) -> u64 {
+    fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         (4 + self.capacity as u64 * 8).max(64)
     }
 
@@ -57,8 +55,11 @@ impl DataType for FeaturesType {
         self
     }
 
-    fn byte_size(&self, w: u32, h: u32, _image_format: PixelFormat) -> u64 {
-        (w as u64 * h as u64 * self.channels.div_ceil(4) as u64 * 16).max(64)
+    fn byte_size(&self, wu: &WorkUnit) -> u64 {
+        let WorkUnit::Region { rect, .. } = wu else {
+            unreachable!("FeaturesType::work_unit_kind is Region")
+        };
+        (rect.width as u64 * rect.height as u64 * self.channels.div_ceil(4) as u64 * 16).max(64)
     }
 
     fn work_unit_kind(&self) -> WorkUnitKind {
