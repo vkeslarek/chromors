@@ -1,0 +1,55 @@
+/// Assert two floats are within `eps` (default `1e-6`). Used by `color`/`pixel`
+/// unit tests; defined once here so every submodule's `use crate::assert_approx_eq`
+/// resolves.
+#[macro_export]
+macro_rules! assert_approx_eq {
+    ($a:expr, $b:expr) => {
+        $crate::assert_approx_eq!($a, $b, 1e-6)
+    };
+    ($a:expr, $b:expr, $eps:expr) => {{
+        let (a, b, eps) = ($a as f64, $b as f64, $eps as f64);
+        assert!(
+            (a - b).abs() <= eps,
+            "assert_approx_eq failed: `{}` vs `{}` (|Δ| = {} > {})",
+            a, b, (a - b).abs(), eps
+        );
+    }};
+}
+
+pub mod backend;
+pub mod buffer;
+pub mod data;
+pub mod error;
+pub mod io;
+pub mod kind;
+pub mod node;
+pub mod operation;
+pub mod work_unit;
+pub mod color;
+pub mod pixel;
+
+#[allow(non_upper_case_globals)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(dead_code)]
+pub mod slang_wrapper_ffi {
+    include!(concat!(env!("OUT_DIR"), "/slang_wrapper_ffi.rs"));
+}
+
+#[allow(non_upper_case_globals)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(dead_code)]
+pub mod ffi {
+    include!(concat!(env!("OUT_DIR"), "/ffi.rs"));
+}
+
+pub use backend::*;
+pub use backend::gpu::*;
+pub use buffer::*;
+pub use error::*;
+pub use io::*;
+pub use kind::*;
+pub use node::*;
+pub use operation::*;
+pub use work_unit::*;

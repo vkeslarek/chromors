@@ -1,0 +1,226 @@
+pub mod context;
+pub mod buffer;
+pub mod view;
+pub mod emit;
+pub mod compile;
+pub mod materialize;
+pub mod slang;
+
+pub use context::*;
+pub use buffer::*;
+pub use view::*;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use crate::error::Error;
+use crate::kind::Kind;
+use crate::node::Node;
+use crate::work_unit::WorkUnit;
+
+pub struct GpuBackend;
+
+/// Where a kernel step reads one of its arguments from.
+#[derive(Clone, Copy, Debug)]
+pub enum StepInput {
+    /// A source leaf's decoded buffer (`in_{i}`, a `CodecRegion`).
+    Source(usize),
+    /// A prior step's working temp (`work_{j}`, read as an `RWRegion`).
+    Step(usize),
+}
+
+/// One kernel invocation in the fused pass. Steps are emitted in topo order;
+/// each writes its own working temp, so a node reachable by several consumers
+/// (a diamond) is computed once and read by index — exactly the old engine's
+/// per-node-temp model.
+pub struct Step {
+    pub kernel: &'static str,
+    pub inputs: Vec<StepInput>,
+    pub params: Vec<String>,
+}
+
+pub struct GpuBuilder {
+    /// Decode views for each source input, in binding order (== `source_buffers`).
+    pub input_views: Vec<View>,
+    /// Kernel steps, topo order. Each writes its own temp (`work_{step}`).
+    pub steps: Vec<Step>,
+    /// How the final output is written, as declared by its Kind.
+    pub output: Option<OutputWrap>,
+    pub source_buffers: Vec<Arc<crate::backend::gpu::buffer::GpuBuffer>>,
+    pub params: ParamBlock,
+
+    /// node-pointer → source slot index (set when a Source leaf lowers).
+    source_of: HashMap<usize, usize>,
+    /// node-pointer → its final step index (set as an op's kernels lower).
+    last_step_of: HashMap<usize, usize>,
+    /// The node currently lowering, and its resolved input edges — so the
+    /// node's *first* kernel reads its graph inputs and later kernels chain.
+    cur_node: Option<usize>,
+    cur_inputs: Vec<StepInput>,
+    cur_started: bool,
+
+    ctx: Arc<GpuContext>,
+    error: Option<Error>,
+    current_wu: Option<WorkUnit>,
+}
+
+impl GpuBuilder {
+    pub fn new(ctx: Arc<GpuContext>) -> Self {
+        Self {
+            input_views: Vec::new(),
+            steps: Vec::new(),
+            output: None,
+            source_buffers: Vec::new(),
+            params: ParamBlock::default(),
+            source_of: HashMap::new(),
+            last_step_of: HashMap::new(),
+            cur_node: None,
+            cur_inputs: Vec::new(),
+            cur_started: false,
+            ctx,
+            error: None,
+            current_wu: None,
+        }
+    }
+
+    /// Materializer hook: announce the node about to be lowered — its pointer
+    /// identity, the identities of its input nodes (resolved to source slots or
+    /// prior steps), and its resolved WorkUnit.
+    pub fn enter(&mut self, node_key: usize, input_keys: &[usize], wu: WorkUnit) {
+        self.current_wu = Some(wu);
+        self.cur_node = Some(node_key);
+        self.cur_started = false;
+        self.cur_inputs = input_keys
+            .iter()
+            .map(|k| {
+                if let Some(&si) = self.source_of.get(k) {
+                    StepInput::Source(si)
+                } else if let Some(&st) = self.last_step_of.get(k) {
+                    StepInput::Step(st)
+                } else {
+                    // Pruned/absent input reached a consumer — shouldn't happen
+                    // for a live node; fall back to source 0 to stay total.
+                    StepInput::Source(0)
+                }
+            })
+            .collect();
+    }
+
+    pub fn ctx(&self) -> &Arc<GpuContext> {
+        &self.ctx
+    }
+    pub fn fail(&mut self, e: Error) {
+        if self.error.is_none() {
+            self.error = Some(e);
+        }
+    }
+    pub fn take_error(&mut self) -> Option<Error> {
+        self.error.take()
+    }
+    pub fn wu(&self) -> &WorkUnit {
+        self.current_wu.as_ref().expect("GpuBuilder::wu called outside a lower()")
+    }
+
+    /// Register a **source input**: decode `View`, geometry, fetched buffer.
+    /// Called by a Source leaf's `lower`; binds this node to a source slot.
+    pub fn input(&mut self, view: View, region: RegionParams, buf: Arc<crate::backend::gpu::buffer::GpuBuffer>) -> &mut Self {
+        let slot = self.input_views.len();
+        if let Some(k) = self.cur_node {
+            self.source_of.insert(k, slot);
+        }
+        region.push_into(&mut self.params, &format!("region_in_{slot}"));
+        self.input_views.push(view);
+        self.source_buffers.push(buf);
+        self
+    }
+
+    /// Add a kernel step to the current node. Its first kernel reads the node's
+    /// graph inputs; any later kernel (intra-node multistep) reads the step
+    /// before it. The step's output temp is its own index.
+    pub fn kernel(&mut self, entry: &'static str) -> &mut Self {
+        let inputs = if !self.cur_started {
+            self.cur_started = true;
+            self.cur_inputs.clone()
+        } else {
+            vec![StepInput::Step(self.steps.len() - 1)]
+        };
+        self.steps.push(Step { kernel: entry, inputs, params: Vec::new() });
+        let idx = self.steps.len() - 1;
+        if let Some(k) = self.cur_node {
+            self.last_step_of.insert(k, idx);
+        }
+        self
+    }
+
+    /// A scalar param for the current step. Namespaced by step index so two
+    /// steps (or two nodes) using the same name never collide in `ChainParams`.
+    pub fn param<T: bytemuck::Pod>(&mut self, name: &str, value: T) -> &mut Self {
+        let idx = self.steps.len() - 1;
+        let field = format!("s{idx}_{name}");
+        self.params.fields.push((field.clone(), "scalar"));
+        self.params.bytes.extend_from_slice(bytemuck::bytes_of(&value));
+        self.steps[idx].params.push(field);
+        self
+    }
+
+    /// Register the output, as described by its **Kind** (`GpuView::output`).
+    pub fn output(&mut self, wrap: OutputWrap) -> &mut Self {
+        if let Some(WorkUnit::Region(r)) = &self.current_wu {
+            RegionParams::tight(r.w, r.h).push_into(&mut self.params, "region_out");
+        }
+        self.output = Some(wrap);
+        self
+    }
+
+    /// Merge a whole `ParamBlock` (e.g. a reduction's `bin_count`) into the
+    /// shared `ChainParams`.
+    pub fn param_block(&mut self, block: ParamBlock) -> &mut Self {
+        self.params.fields.extend(block.fields);
+        self.params.bytes.extend_from_slice(&block.bytes);
+        self
+    }
+
+    /// Does the output use the codec sandwich (image) vs a direct write?
+    pub fn needs_scratch(&self) -> bool {
+        matches!(&self.output, Some(w) if w.arg_buffer == OutBuffer::Scratch)
+    }
+
+    /// `float4` working temps to bind: one per step that writes a temp. With a
+    /// direct (atomic) output the final step writes the target instead.
+    pub fn work_buffer_count(&self) -> usize {
+        if self.needs_scratch() {
+            self.steps.len()
+        } else {
+            self.steps.len().saturating_sub(1)
+        }
+    }
+}
+
+/// A Kind's GPU lowering capability: it declares how its data is **decoded** at
+/// a shader input and **encoded** at a shader output (its codec sandwich lives
+/// here, not in the emitter or the ops). An op only contributes its kernel.
+pub trait GpuView: Kind {
+    /// Wrapper a kernel reads this Kind through at an input slot (decodes).
+    fn input(&self) -> View;
+    /// How an output of this Kind is written (see [`OutputWrap`]).
+    fn output(&self) -> OutputWrap;
+    /// Extra wrapper params beyond the universal per-slot `BufferRegion`
+    /// (e.g. a histogram's `bin_count`). Default: none.
+    fn params(&self, _wu: &WorkUnit) -> ParamBlock {
+        ParamBlock::empty()
+    }
+}
+
+impl crate::backend::Backend for GpuBackend {
+    type Ctx = GpuContext;
+    type Payload = GpuBuffer;
+    type Builder = GpuBuilder;
+
+    fn materialize(
+        ctx: &Arc<Self::Ctx>,
+        root: &Arc<Node<Self>>,
+        wu: &WorkUnit,
+    ) -> Result<crate::buffer::Buffer<Self>, Error> {
+        let materializer = materialize::Materializer { ctx, root };
+        materializer.execute(wu)
+    }
+}
