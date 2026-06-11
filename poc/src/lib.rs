@@ -54,6 +54,7 @@ pub mod operation;
 pub mod work_unit;
 pub mod color;
 pub mod pixel;
+pub mod export;
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]

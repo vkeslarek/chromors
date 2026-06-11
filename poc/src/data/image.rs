@@ -16,7 +16,7 @@ use crate::backend::vips::{VipsBackend, VipsBand, VipsBuilder};
 use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
-use crate::operation::{Blur, Invert, Lower};
+use crate::operation::Lower;
 use crate::pixel::format::PixelFormat;
 use crate::work_unit::{Region, Shape, WorkUnit};
 
