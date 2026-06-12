@@ -314,3 +314,91 @@ fn convf_matches_vips() {
 fn convi_matches_vips() {
     // TEST STRIPPED FOR REWRITE
 }
+#[test]
+fn sobel_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.sobel();
+    let gpu_res = gpu_img.sobel();
+
+    let vips_bytes = common::vips_materialize_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_f32(bytemuck::cast_slice(&vips_bytes), &gpu_bytes);
+    println!("sobel RMS = {}", rms);
+    assert!(rms < 10.0, "sobel diff too high: {}", rms);
+}
+
+#[test]
+fn prewitt_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.prewitt();
+    let gpu_res = gpu_img.prewitt();
+
+    let vips_bytes = common::vips_materialize_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_f32(bytemuck::cast_slice(&vips_bytes), &gpu_bytes);
+    println!("prewitt RMS = {}", rms);
+    assert!(rms < 10.0, "prewitt diff too high: {}", rms);
+}
+
+#[test]
+fn scharr_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.scharr();
+    let gpu_res = gpu_img.scharr();
+
+    let vips_bytes = common::vips_materialize_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_f32(bytemuck::cast_slice(&vips_bytes), &gpu_bytes);
+    println!("scharr RMS = {}", rms);
+    assert!(rms < 10.0, "scharr diff too high: {}", rms);
+}
+#[test]
+fn abs_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.abs();
+    let gpu_res = gpu_img.abs();
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("abs RMS = {}", rms);
+    assert!(rms < 5.0, "abs diff too high: {}", rms);
+}
+
+#[test]
+fn sign_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.sign();
+    let gpu_res = gpu_img.sign();
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("sign RMS = {}", rms);
+    assert!(rms < 5.0, "sign diff too high: {}", rms);
+}

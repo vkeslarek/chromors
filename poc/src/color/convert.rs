@@ -29,7 +29,7 @@ impl ColorConversion {
         let to_opaque = matches!(self.to.alpha_policy, crate::pixel::AlphaPolicy::OpaqueDrop);
 
         let has_alpha = unsafe { ffi::vips_image_hasalpha(img.ptr) } != 0;
-        let bands = unsafe { ffi::vips_image_get_bands(img.ptr) };
+        let _bands = unsafe { ffi::vips_image_get_bands(img.ptr) };
 
         if from_premultiplied && (to_straight || to_opaque) && has_alpha {
             let mut op = VipsGObject::new(b"unpremultiply\0")?;

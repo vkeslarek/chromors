@@ -5,7 +5,6 @@ pub mod handle;
 use std::sync::Arc;
 use crate::backend::Backend;
 use crate::error::Error;
-use crate::pixel::PixelFormat;
 use crate::buffer::Buffer;
 use crate::work_unit::WorkUnit;
 use crate::node::Node;

@@ -310,3 +310,21 @@ fn vectorscope_kernel_runs_and_writes_grid() {
     assert_eq!(bins.len(), (grid * grid) as usize);
     assert_eq!(total, (gpu_img.width() as u64) * (gpu_img.height() as u64));
 }
+
+#[test]
+fn edge_detection_kernels_compile_and_run() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let sobel = gpu_img.sobel();
+    let prewitt = gpu_img.prewitt();
+    let scharr = gpu_img.scharr();
+
+    for img in [&sobel, &prewitt, &scharr] {
+        let rect = poc::work_unit::Region { x: 0, y: 0, w: 10, h: 10, lod: poc::work_unit::Lod(0) };
+        let bytes = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
+        assert!(!bytes.is_empty());
+    }
+}

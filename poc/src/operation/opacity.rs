@@ -2,7 +2,7 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder};
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::GpuView;
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};

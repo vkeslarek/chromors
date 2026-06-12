@@ -16,7 +16,6 @@ use crate::backend::vips::{VipsBackend, VipsBand, VipsBuilder};
 use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
-use crate::operation::Lower;
 use crate::pixel::format::PixelFormat;
 use crate::work_unit::{Region, Shape, WorkUnit};
 
@@ -445,6 +444,90 @@ impl Source<GpuBackend> for VipsImageSource {
         // Identity is based on the Vips pipeline root.
         let k = Arc::as_ptr(&self.vips_img.root) as *const () as usize;
         state.write_usize(k);
+    }
+}
+
+pub struct GpuConstantSource {
+    pub spec: Arc<ImageKind>,
+    pub data: Vec<f32>,
+}
+
+impl Source<GpuBackend> for GpuConstantSource {
+    type Kind = ImageKind;
+
+    fn spec(&self) -> Arc<ImageKind> {
+        self.spec.clone()
+    }
+
+    fn fetch(
+        &self,
+        ctx: &crate::backend::gpu::GpuContext,
+        _wu: &Region,
+    ) -> Result<Buffer<GpuBackend>, crate::error::Error> {
+        use wgpu::util::DeviceExt;
+        let bytes = unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4) };
+        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gpu_constant_source"),
+            contents: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+
+        Ok(Buffer {
+            payload: crate::backend::gpu::GpuBuffer::from_raw(
+                std::sync::Arc::new(wgpu_buffer),
+                bytes.len() as u64,
+            ),
+            spec: self.spec.clone(),
+        })
+    }
+
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let wu = cx.wu().clone();
+        let WorkUnit::Region(region) = &wu else {
+            cx.fail(crate::error::Error::InvalidWorkUnit(
+                "constant source expects a Region".into(),
+            ));
+            return;
+        };
+        match self.fetch(cx.ctx().as_ref(), region) {
+            Ok(buf) => {
+                let geom = crate::backend::gpu::view::RegionParams::tight(self.spec.width, self.spec.height);
+                cx.input(self.spec.input(), geom, buf.payload);
+            }
+            Err(e) => cx.fail(e),
+        }
+    }
+
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        for &v in &self.data {
+            state.write_u32(v.to_bits());
+        }
+    }
+}
+
+impl Image2D<GpuBackend> {
+    pub fn from_constant_f32(
+        ctx: Arc<crate::backend::gpu::GpuContext>,
+        width: i32,
+        height: i32,
+        data: &[f32],
+    ) -> Self {
+        let spec = Arc::new(ImageKind {
+            width,
+            height,
+            format: crate::pixel::format::PixelFormat::GrayF32,
+            color_space: crate::color::space::ColorSpace::SRGB,
+        });
+        let src = GpuConstantSource {
+            spec: spec.clone(),
+            data: data.to_vec(),
+        };
+        Self {
+            root: Arc::new(crate::node::Node::Source(Arc::new(src))),
+            ctx,
+            spec,
+            _m: std::marker::PhantomData,
+        }
     }
 }
 

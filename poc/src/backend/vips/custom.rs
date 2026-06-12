@@ -22,13 +22,10 @@
 //! let out = img.custom(AddConst { k: 10.0 })?;
 //! ```
 
-use std::ffi::{CString, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void};
 use std::slice;
 
 use super::FromVipsBandFormat;
-use crate::backend::vips::VipsBackend;
-use crate::backend::vips::vips_error;
-use crate::data::image::Image2D;
 use crate::error::Error;
 use crate::ffi as ffi;
 
