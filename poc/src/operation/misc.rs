@@ -643,6 +643,23 @@ impl Lower<GpuBackend> for Saturation<GpuBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Cast<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        // Cast is just a codec change in output_spec.
+        cx.kernel("passthrough_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Msb<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        // Warning: MSB is currently implemented as an 8-bit scale extraction.
+        cx.param_block(ParamBlock::new().param("band", "int", self.band.unwrap_or(-1)));
+        cx.kernel("msb_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
 impl Lower<GpuBackend> for Exposure<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let gain = 2.0f32.powf(self.stops);

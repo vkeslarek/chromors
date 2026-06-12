@@ -106,6 +106,20 @@ impl Lower<GpuBackend> for Invert<GpuBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Sign<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.kernel("sign_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Abs<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.kernel("abs_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
 pub struct Sign<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
