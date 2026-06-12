@@ -31,7 +31,23 @@ impl<B: Backend> Operation<B> for HistogramFind<B> where HistogramFind<B>: Lower
         // Histograms typically scan the entire input
         vec![Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.input.spec.width, h: self.input.spec.height, lod: out.lod }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() } // Note: Actual format may be different, simplify for now
+    // vips_hist_find: 1D histogram, `bins x 1`, one band per input band
+    // (or a single band if `band` selects one). bins is 2^bits for the
+    // input's sample depth (256 for 8-bit formats; the POC only models 8-bit
+    // histograms here).
+    fn output_spec(&self) -> ImageKind {
+        let input = &*self.input.spec;
+        let bands = match self.band {
+            Some(_) => 1,
+            None => input.format.channel_count() as i32,
+        };
+        ImageKind {
+            width: 256,
+            height: 1,
+            format: input.with_band_count(bands),
+            color_space: input.color_space,
+        }
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         if let Some(v) = self.band { state.write_i32(v); }
     }
@@ -126,7 +142,17 @@ impl<B: Backend> Operation<B> for HistogramPlot<B> where HistogramPlot<B>: Lower
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    // vips_hist_plot renders a histogram image (e.g. `256 x 1`) into a square
+    // chart, `width x width`, preserving the band count.
+    fn output_spec(&self) -> ImageKind {
+        let input = &*self.input.spec;
+        ImageKind {
+            width: input.width,
+            height: input.width,
+            format: input.format,
+            color_space: input.color_space,
+        }
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 impl Lower<VipsBackend> for HistogramPlot<VipsBackend> {
@@ -185,7 +211,25 @@ impl<B: Backend> Operation<B> for HistFindNdim<B> where HistFindNdim<B>: Lower<B
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.input.spec.width, h: self.input.spec.height, lod: out.lod }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    // vips_hist_find_ndim: N-dimensional histogram (N = input band count,
+    // default bins = 10), flattened to 2D. For 2 bands: `bins x bins`. For
+    // higher band counts vips flattens the extra dims into height
+    // (`bins x bins^(N-1)`); only the 2-band case is handled precisely here.
+    fn output_spec(&self) -> ImageKind {
+        let input = &*self.input.spec;
+        let bins = self.bins.unwrap_or(10);
+        let bands = input.format.channel_count() as i32;
+        // TODO: for bands > 2, vips flattens the extra dimensions into
+        // height (bins^(bands-1)); this only covers the bands == 2 case
+        // precisely (and bands == 1, where height collapses to 1).
+        let height = if bands <= 1 { 1 } else { bins.pow((bands - 1) as u32) };
+        ImageKind {
+            width: bins,
+            height,
+            format: input.with_band_count(1),
+            color_space: input.color_space,
+        }
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         if let Some(v) = self.bins { state.write_i32(v); }
     }

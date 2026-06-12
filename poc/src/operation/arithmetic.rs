@@ -354,10 +354,10 @@ impl Lower<GpuBackend> for Divide<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("divide_kernel"); cx.output(self.output_spec().output()); }
 }
 impl Lower<GpuBackend> for MaxPair<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("maxpair_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("max_kernel"); cx.output(self.output_spec().output()); }
 }
 impl Lower<GpuBackend> for MinPair<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("minpair_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("min_kernel"); cx.output(self.output_spec().output()); }
 }
 impl Lower<GpuBackend> for Remainder<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("remainder_kernel"); cx.output(self.output_spec().output()); }

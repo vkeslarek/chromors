@@ -20,7 +20,11 @@ impl<B: Backend> Operation<B> for Bandbool<B> where Bandbool<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.with_band_count(1);
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.boolean.into_vips());
         state.write_u32(self.bands);
@@ -50,19 +54,19 @@ impl<B: Backend> Operation<B> for Bandfold<B> where Bandfold<B>: Lower<B> {
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let f = self.factor as i32;
-        let y = out.y / f;
-        let h = ((out.y + out.h + f - 1) / f) - y;
         vec![Some(WorkUnit::Region(Region {
-            x: out.x,
-            y,
-            w: out.w,
-            h,
+            x: out.x * f,
+            y: out.y,
+            w: out.w * f,
+            h: out.h,
             lod: out.lod,
         }))]
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.height *= self.factor as i32;
+        let bands = spec.format.channel_count() as i32;
+        spec.width /= self.factor as i32;
+        spec.format = spec.with_band_count(bands * self.factor as i32);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -93,17 +97,21 @@ impl<B: Backend> Operation<B> for Bandunfold<B> where Bandunfold<B>: Lower<B> {
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let f = self.factor as i32;
+        let x = out.x / f;
+        let w = ((out.x + out.w + f - 1) / f) - x;
         vec![Some(WorkUnit::Region(Region {
-            x: out.x,
-            y: out.y * f,
-            w: out.w,
-            h: out.h * f,
+            x,
+            y: out.y,
+            w,
+            h: out.h,
             lod: out.lod,
         }))]
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.height /= self.factor as i32;
+        let bands = spec.format.channel_count() as i32;
+        spec.width *= self.factor as i32;
+        spec.format = spec.with_band_count(bands / self.factor as i32);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -133,7 +141,11 @@ impl<B: Backend> Operation<B> for Bandmean<B> where Bandmean<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.with_band_count(1);
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u32(self.bands);
     }
@@ -161,7 +173,11 @@ impl<B: Backend> Operation<B> for ExtractBand<B> where ExtractBand<B>: Lower<B> 
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.with_band_count(self.count.unwrap_or(1));
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.band);
         if let Some(c) = self.count {
@@ -198,7 +214,11 @@ impl<B: Backend> Operation<B> for Bandjoin<B> where Bandjoin<B>: Lower<B> {
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone())); self.images.len()]
     }
-    fn output_spec(&self) -> ImageKind { (*self.images[0].spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.images[0].spec).clone();
+        spec.format = spec.with_band_count(self.images.len() as i32);
+        spec
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -230,7 +250,11 @@ impl Lower<VipsBackend> for Bandjoin<VipsBackend> {
 
 impl Lower<GpuBackend> for Bandbool<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("boolean", "uint", self.boolean.into_vips() as u32));
+        cx.param_block(
+            ParamBlock::new()
+                .param("boolean", "uint", self.boolean.into_vips() as u32)
+                .param("bands", "uint", self.bands),
+        );
         cx.kernel("bandbool_kernel");
         cx.output(self.output_spec().output());
     }
@@ -254,6 +278,7 @@ impl Lower<GpuBackend> for Bandunfold<GpuBackend> {
 
 impl Lower<GpuBackend> for Bandmean<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("bands", "uint", self.bands));
         cx.kernel("bandmean_kernel");
         cx.output(self.output_spec().output());
     }
@@ -261,15 +286,29 @@ impl Lower<GpuBackend> for Bandmean<GpuBackend> {
 
 impl Lower<GpuBackend> for ExtractBand<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("band", "int", self.band));
-        cx.kernel("extract_band_kernel");
+        match self.count {
+            // Single-band extract is free: alias the input through the
+            // selected component instead of adding a kernel pass.
+            None | Some(1) => {
+                cx.alias(self.band as u32);
+            }
+            Some(count) => {
+                cx.param_block(
+                    ParamBlock::new()
+                        .param("band", "uint", self.band as u32)
+                        .param("count", "uint", count as u32),
+                );
+                cx.kernel("extract_band_range_kernel");
+            }
+        }
         cx.output(self.output_spec().output());
     }
 }
 
 impl Lower<GpuBackend> for Bandjoin<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let kernel = match self.images.len() {
+        let n = self.images.len();
+        let kernel = match n {
             1 => "bandjoin1_kernel",
             2 => "bandjoin2_kernel",
             3 => "bandjoin3_kernel",
@@ -277,6 +316,13 @@ impl Lower<GpuBackend> for Bandjoin<GpuBackend> {
             5 => "bandjoin5_kernel",
             _ => panic!("Bandjoin: unsupported number of inputs (max 5)"),
         };
+        // Each input is itself a single-band image (its working temp
+        // broadcasts r=g=b=value), so every source contributes channel 0.
+        let mut params = ParamBlock::new();
+        for i in 0..n {
+            params = params.param(&format!("ch{i}"), "uint", 0u32);
+        }
+        cx.param_block(params);
         cx.kernel(kernel);
         cx.output(self.output_spec().output());
     }

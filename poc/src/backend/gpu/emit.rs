@@ -49,7 +49,8 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     s.push_str("import ops.opacity;\n");
     s.push_str("import ops.saturation;\n");
     s.push_str("import ops.shrink;\n");
-    s.push_str("import ops.unary;\n\n");
+    s.push_str("import ops.unary;\n");
+    s.push_str("import ops.data_driven;\n\n");
 
     // ── ChainParams (one SSBO: per-slot BufferRegions + op scalars) ──────────
     s.push_str("struct ChainParams {\n");

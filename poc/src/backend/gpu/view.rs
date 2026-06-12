@@ -151,6 +151,11 @@ pub struct OutputWrap {
     pub arg_ctor: Cow<'static, str>,
     /// Where the argument's buffer comes from.
     pub arg_buffer: OutBuffer,
+    /// Raw element type for the `target_buffer` declaration (e.g. `"uint"` for
+    /// a `HistogramOut` wrapper around `RWStructuredBuffer<uint>`). Only used
+    /// when `encode` is `None` — when `Some`, the encode view's `buffer_type`
+    /// (the codec sandwich's scratch type) is used instead.
+    pub buffer_type: Cow<'static, str>,
     /// Optional post-kernel step that lands the working result in the target —
     /// the image codec sandwich closes here. `None` ⇒ the kernel wrote the
     /// target directly.

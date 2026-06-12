@@ -225,7 +225,7 @@ impl Lower<GpuBackend> for Composite2<GpuBackend> {
             .param("x", "int", self.x.unwrap_or(0))
             .param("y", "int", self.y.unwrap_or(0))
         );
-        cx.kernel("composite2_kernel");
+        cx.kernel("compose_kernel");
         cx.output(self.output_spec().output());
     }
 }

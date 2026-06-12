@@ -683,6 +683,51 @@ impl Lower<GpuBackend> for Brightness<GpuBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Maplut<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("lut_width", "uint", self.lut.spec.width as u32)
+            .param("band", "int", self.band.unwrap_or(-1))
+        );
+        cx.kernel("maplut_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Recomb<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("n", "uint", self.input.spec.format.channel_count() as u32)
+        );
+        cx.kernel("recomb_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Ifthenelse<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("blend", "uint", self.blend.unwrap_or(false) as u32)
+        );
+        cx.kernel("ifthenelse_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Case<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let n = self.cases.len();
+        match n {
+            0 => cx.kernel("passthrough_kernel"), // Fallback for 0 cases
+            1 => cx.kernel("case1_kernel"),
+            2 => cx.kernel("case2_kernel"),
+            3 => cx.kernel("case3_kernel"),
+            4 => cx.kernel("case4_kernel"),
+            _ => cx.kernel("case5_kernel"), // Hard cap fallback
+        };
+        cx.output(self.output_spec().output());
+    }
+}
 
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
@@ -762,6 +807,15 @@ where
 {
     pub fn case(&self, cases: Vec<Input<ImageKind, B>>) -> Self {
         self.push(Case { input: self.as_input(), cases })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Ifthenelse<B>: crate::operation::Lower<B>,
+{
+    pub fn ifthenelse(&self, if_true: Input<ImageKind, B>, if_false: Input<ImageKind, B>, blend: Option<bool>) -> Self {
+        self.push(Ifthenelse { cond: self.as_input(), if_true, if_false, blend })
     }
 }
 

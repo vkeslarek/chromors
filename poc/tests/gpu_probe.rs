@@ -214,6 +214,32 @@ fn newly_imported_kernel_modules_compile_and_run() {
 }
 
 #[test]
+fn data_driven_kernels_compile_and_run() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let lut = gpu_img.crop(0, 0, 256, 1);
+    let matrix = gpu_img.crop(0, 0, 3, 3);
+    let cond = gpu_img.crop(0, 0, 10, 10);
+    let bg = gpu_img.crop(0, 0, 10, 10);
+    let t = gpu_img.crop(0, 0, 10, 10);
+    let f = gpu_img.crop(0, 0, 10, 10);
+
+    let maplut = bg.maplut(lut.as_input(), None);
+    let recomb = bg.recomb(matrix.as_input());
+    let ifthenelse = cond.ifthenelse(t.as_input(), f.as_input(), Some(true));
+    let case = bg.case(vec![t.as_input(), f.as_input()]);
+
+    for img in [&maplut, &recomb, &ifthenelse, &case] {
+        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        assert!(!bytes.is_empty());
+    }
+}
+
+#[test]
 fn histogram_kernel_runs_and_counts_pixels() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

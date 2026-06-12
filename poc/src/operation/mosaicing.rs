@@ -33,7 +33,12 @@ impl<B: Backend> Operation<B> for Mosaic<B> where Mosaic<B>: Lower<B> {
             Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.secondary.spec.width, h: self.secondary.spec.height, lod: out.lod })),
         ]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() } // approximate
+    // TODO: vips_mosaic's real output is the bounding box of `input` and
+    // `secondary` after alignment search (offset is data-dependent, found at
+    // run time), so it's larger than either input. There's no struct field to
+    // compute that bound from statically; this placeholder (input dims) is
+    // wrong but harmless for now.
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
         state.write_i32(self.x_reference);
@@ -98,6 +103,9 @@ impl<B: Backend> Operation<B> for Mosaic1<B> where Mosaic1<B>: Lower<B> {
             Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.secondary.spec.width, h: self.secondary.spec.height, lod: out.lod })),
         ]
     }
+    // TODO: vips_mosaic1's real output is the bounding box of `input` and
+    // `secondary` after alignment search (offset is data-dependent), larger
+    // than either input. No struct field gives a static bound; placeholder.
     fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
@@ -168,6 +176,9 @@ impl<B: Backend> Operation<B> for Match<B> where Match<B>: Lower<B> {
             Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.secondary.spec.width, h: self.secondary.spec.height, lod: out.lod })),
         ]
     }
+    // TODO: vips_match's real output is the bounding box of `input` and
+    // `secondary` after the tie-point alignment, larger than either input.
+    // No struct field gives a static bound; placeholder.
     fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.x_reference_1);
@@ -227,7 +238,22 @@ impl<B: Backend> Operation<B> for Merge<B> where Merge<B>: Lower<B> {
             Some(WorkUnit::Region(Region { x: 0, y: 0, w: self.secondary.spec.width, h: self.secondary.spec.height, lod: out.lod })),
         ]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    // vips_merge places `secondary` at offset (dx, dy) relative to `input`;
+    // the output canvas is the bounding box of both.
+    fn output_spec(&self) -> ImageKind {
+        let input = &*self.input.spec;
+        let sec = &*self.secondary.spec;
+        let left = 0.min(self.dx);
+        let top = 0.min(self.dy);
+        let right = input.width.max(self.dx + sec.width);
+        let bottom = input.height.max(self.dy + sec.height);
+        ImageKind {
+            width: right - left,
+            height: bottom - top,
+            format: input.format,
+            color_space: input.color_space,
+        }
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
         state.write_i32(self.dx);
@@ -266,6 +292,10 @@ impl<B: Backend> Operation<B> for GlobalBalance<B> where GlobalBalance<B>: Lower
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
+    // TODO: vips_globalbalance's real output is the bounding box of all
+    // mosaiced pieces in `input`'s assembly graph, which can differ from
+    // `input`'s own dims. `input` here is a single image with no per-piece
+    // bbox info available statically; placeholder.
     fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         if let Some(v) = self.gamma { state.write(&v.to_ne_bytes()); }
