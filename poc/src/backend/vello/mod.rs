@@ -1,0 +1,66 @@
+pub mod handle;
+
+use std::sync::Arc;
+use crate::backend::{Backend, Builder};
+use crate::error::Error;
+use crate::buffer::Buffer;
+use crate::work_unit::WorkUnit;
+use crate::kind::AnyKind;
+use crate::node::{Node, NodeId};
+
+pub use handle::{VelloHandle, VelloScene};
+
+// ── Backend marker ─────────────────────────────────────────────────────────────
+
+pub struct VelloBackend;
+
+pub struct VelloBuilder {
+    outputs: std::collections::HashMap<NodeId, Arc<VelloHandle>>,
+    current: Option<NodeId>,
+}
+
+impl Default for VelloBuilder {
+    fn default() -> Self {
+        Self { outputs: std::collections::HashMap::new(), current: None }
+    }
+}
+
+impl VelloBuilder {
+    pub fn input(&self, src: &Arc<Node<VelloBackend>>) -> Arc<VelloHandle> {
+        self.outputs.get(&NodeId::of(src)).expect("input lowered before its consumer").clone()
+    }
+    pub fn emit(&mut self, handle: Arc<VelloHandle>) {
+        let k = self.current.expect("emit() called outside a lower()");
+        self.outputs.insert(k, handle);
+    }
+    fn take(&mut self, node: NodeId) -> Option<Arc<VelloHandle>> {
+        self.outputs.remove(&node)
+    }
+}
+
+impl Backend for VelloBackend {
+    type Ctx = ();
+    type Payload = VelloHandle;
+    type Builder = VelloBuilder;
+}
+
+impl Builder<VelloBackend> for VelloBuilder {
+    fn new(_ctx: Arc<()>) -> Self {
+        Self::default()
+    }
+
+    fn enter(&mut self, node: NodeId, _inputs: &[NodeId], _wu: &WorkUnit) {
+        self.current = Some(node);
+    }
+
+    fn finish(mut self, root: NodeId, spec: Arc<dyn AnyKind>, _root_wu: &WorkUnit) -> Result<Buffer<VelloBackend>, Error> {
+        let handle = self
+            .take(root)
+            .ok_or_else(|| Error::Backend("root node produced no handle".into()))?;
+
+        Ok(Buffer {
+            payload: handle,
+            spec,
+        })
+    }
+}
