@@ -29,10 +29,12 @@ impl Drop for GpuBuffer {
 }
 
 impl GpuBuffer {
+    /// Access the underlying wgpu buffer.
     pub fn buffer(&self) -> &Arc<wgpu::Buffer> {
         &self.buffer
     }
 
+    /// Create an untracked buffer (no VRAM accounting).
     pub fn from_raw(buffer: Arc<wgpu::Buffer>, byte_len: u64) -> Arc<Self> {
         Arc::new(GpuBuffer {
             buffer,
@@ -41,6 +43,8 @@ impl GpuBuffer {
         })
     }
 
+    /// Create a buffer with VRAM accounting. On drop, subtracts the buffer's
+    /// size from the context's `allocated_bytes` counter.
     pub fn from_raw_tracked(
         buffer: Arc<wgpu::Buffer>,
         byte_len: u64,
@@ -55,6 +59,8 @@ impl GpuBuffer {
         })
     }
 
+    /// Downloads the buffer contents from VRAM to CPU via a staging buffer.
+    /// Blocks until the GPU copy completes.
     pub fn read_to_cpu(&self, ctx: &GpuContext) -> Result<Vec<u8>, Error> {
         let size = self.buffer.size();
         let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {

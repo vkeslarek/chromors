@@ -4,13 +4,20 @@ use super::IntoVipsName;
 use crate::error::Error;
 use crate::ffi as ffi;
 
+/// Vips interpolation methods for geometric transforms (resize, rotate, affine, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InterpolationMethod {
+    /// Nearest-neighbor (fastest, lowest quality).
     Nearest,
+    /// Bilinear interpolation.
     Bilinear,
+    /// Bicubic interpolation (Mitchell filter).
     Bicubic,
+    /// Locally Bounded Bicubic (moderate quality, sharp).
     Lbb,
+    /// Nohalo (edge-directed, high quality).
     Nohalo,
+    /// Vsqbs (variable-size quadratic B-spline).
     Vsqbs,
 }
 
@@ -27,6 +34,7 @@ impl IntoVipsName for InterpolationMethod {
     }
 }
 
+/// An opaque libvips interpolator object, created from an [`InterpolationMethod`].
 pub struct Interpolate {
     pub(crate) ptr: *mut ffi::VipsInterpolate,
 }
@@ -54,6 +62,7 @@ impl Drop for Interpolate {
 }
 
 impl Interpolate {
+    /// Creates a new libvips interpolator from the given method.
     pub fn new(method: impl IntoVipsName) -> Result<Interpolate, Error> {
         let c = CString::new(method.into_vips_name())
             .map_err(|_| Error::Vips("invalid nickname".into()))?;

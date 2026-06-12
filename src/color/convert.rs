@@ -4,16 +4,27 @@ use crate::error::Error;
 use crate::ffi;
 use crate::pixel::PixelMeta;
 
+/// A color conversion descriptor: source metadata → target metadata.
+///
+/// `execute` chains libvips operations (unpremultiply, colourspace, premultiply,
+/// flatten, cast) to transform a Vips image between the two formats.
 pub struct ColorConversion {
+    /// Source pixel metadata (format, color space, alpha policy).
     pub from: PixelMeta,
+    /// Target pixel metadata (format, color space, alpha policy).
     pub to: PixelMeta,
 }
 
 impl ColorConversion {
+    /// Creates a new conversion from `from` to `to`.
     pub fn new(from: PixelMeta, to: PixelMeta) -> Self {
         ColorConversion { from, to }
     }
 
+    /// Applies the conversion chain to a Vips image and returns the converted result.
+    ///
+    /// The chain is: unpremultiply (if needed) → colourspace transform →
+    /// premultiply/flatten (if needed) → add alpha (if needed) → cast format.
     pub fn execute(&self, image: &VipsHandle) -> Result<VipsHandle, Error> {
         let mut img = image.clone();
 

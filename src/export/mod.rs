@@ -1,4 +1,8 @@
 //! Export configuration types for all supported image formats.
+//!
+//! Each format has its own config struct (e.g. `PngExportConfig`) with
+//! format-specific options. `ExportConfig` is the unified enum that wraps
+//! all of them and converts to vips option strings via `to_vips_options()`.
 
 pub mod avif;
 pub mod bmp;
@@ -10,18 +14,30 @@ pub mod webp;
 
 use crate::error::Error;
 
+/// Unified export configuration for all supported output formats.
+///
+/// Each variant wraps the format-specific config. Use `to_vips_options()`
+/// to serialize into a libvips-compatible option string.
 #[derive(Debug, Clone)]
 pub enum ExportConfig {
+    /// PNG export options.
     Png(png::PngExportConfig),
+    /// TIFF export options.
     Tiff(tiff::TiffExportConfig),
+    /// JPEG export options.
     Jpeg(jpeg::JpegExportConfig),
+    /// WebP export options.
     WebP(webp::WebPExportConfig),
+    /// AVIF export options.
     Avif(avif::AvifExportConfig),
+    /// GIF export options.
     Gif(gif::GifExportConfig),
+    /// BMP export options.
     Bmp(bmp::BmpExportConfig),
 }
 
 impl ExportConfig {
+    /// Serializes the config to a libvips option string (e.g. `"[Q=90,interlace=true]"`).
     pub fn to_vips_options(&self) -> String {
         match self {
             ExportConfig::Png(c) => c.to_vips_options(),
@@ -36,6 +52,10 @@ impl ExportConfig {
 }
 
 impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
+    /// Saves this image to a file with the given export configuration.
+    ///
+    /// Materializes the full image through the Vips pipeline, then writes
+    /// it using `vips_image_write_to_file` with the format-specific options.
     pub fn save_with_config(
         &self,
         filename: &str,

@@ -10,10 +10,17 @@ use crate::node::{Node, NodeId};
 
 pub use handle::{VelloHandle, VelloScene};
 
-// ── Backend marker ─────────────────────────────────────────────────────────────
-
+/// Marker struct for the Vello vector graphics rasterization backend.
+///
+/// This backend converts vector scenes (SVG, etc.) into rasterized pixel
+/// buffers. It is a leaf-only backend — operations on vector graphics
+/// require converting to a pixel-processing backend (Vips or GPU) first.
 pub struct VelloBackend;
 
+/// Lowering accumulator for the Vello backend.
+///
+/// Node-keyed handle map — each lowered node registers its produced `VelloHandle`;
+/// a consumer looks its inputs up by edge identity.
 pub struct VelloBuilder {
     outputs: std::collections::HashMap<NodeId, Arc<VelloHandle>>,
     current: Option<NodeId>,
@@ -26,13 +33,18 @@ impl Default for VelloBuilder {
 }
 
 impl VelloBuilder {
+    /// Look up an already-lowered upstream input's vello handle.
+    /// Post-order lowering guarantees it is present.
     pub fn input(&self, src: &Arc<Node<VelloBackend>>) -> Arc<VelloHandle> {
         self.outputs.get(&NodeId::of(src)).expect("input lowered before its consumer").clone()
     }
+
+    /// Register the vello handle this node produced.
     pub fn emit(&mut self, handle: Arc<VelloHandle>) {
         let k = self.current.expect("emit() called outside a lower()");
         self.outputs.insert(k, handle);
     }
+
     fn take(&mut self, node: NodeId) -> Option<Arc<VelloHandle>> {
         self.outputs.remove(&node)
     }

@@ -29,11 +29,23 @@ impl<K: Kind, B: Backend> AnyInput<B> for Input<K, B> {
     }
 }
 
+/// Object-safe surface for any operation node in the DAG.
+///
+/// The materializer drives the graph through this trait without knowing the
+/// concrete operation type or its `Output` Kind. A blanket impl bridges every
+/// typed `Operation<B>`.
 pub trait AnyOperation<B: Backend>: Send + Sync + 'static {
+    /// Returns the operation's input edges, each carrying its source node and Kind.
     fn inputs(&self) -> Vec<&dyn AnyInput<B>>;
+    /// Propagates a downstream demand to this operation's inputs.
+    /// Each entry corresponds to an input edge; `None` means that input is pruned
+    /// (not needed to satisfy the request).
     fn demand_erased(&self, out: &WorkUnit) -> Vec<Option<WorkUnit>>;
+    /// Returns the output Kind metadata for this operation.
     fn output_kind(&self) -> Arc<dyn AnyKind>;
+    /// Lower this operation into a backend-specific builder.
     fn lower(&self, cx: &mut B::Builder);
+    /// Feed the operation's identity into a hasher for cache keying.
     fn dyn_hash(&self, state: &mut dyn Hasher);
 }
 
@@ -62,14 +74,26 @@ impl<B: Backend, T: Operation<B>> AnyOperation<B> for T {
     }
 }
 
+/// Typed operation contract. Every image/stat/fft operation implements this
+/// for each backend it supports. The `Output` Kind determines the work unit
+/// shape and the output metadata.
 pub trait Operation<B: Backend>: Lower<B> + 'static + Send + Sync {
+    /// The Kind of data this operation produces.
     type Output: Kind;
+    /// Returns this operation's input edges.
     fn inputs(&self) -> Vec<&dyn AnyInput<B>>;
+    /// Given a requested output work unit, returns the corresponding work units
+    /// needed from each input. Returns `None` for inputs that can be pruned.
     fn demand(&self, out: &<Self::Output as Kind>::WorkUnit) -> Vec<Option<WorkUnit>>;
+    /// Returns a clone of the output Kind metadata (format, color space, etc.).
     fn output_spec(&self) -> Self::Output;
+    /// Feed operation parameters into a hasher for cache keying.
     fn dyn_hash(&self, state: &mut dyn Hasher);
 }
 
+/// Per-backend lowering strategy. Each operation implements this for every
+/// backend it supports, translating its abstract semantics into backend-specific
+/// builder calls (kernel emission for GPU, GObject wiring for Vips, etc.).
 pub trait Lower<B: Backend> {
     fn lower(&self, cx: &mut B::Builder);
 }

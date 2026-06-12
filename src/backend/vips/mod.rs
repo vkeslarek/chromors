@@ -32,30 +32,37 @@ pub(crate) fn vips_error() -> String {
 }
 
 pub trait IntoVipsEnum {
+    /// Convert this enum variant to its libvips integer representation.
     fn into_vips(self) -> i32;
 }
 
 pub trait IntoVipsName {
+    /// Convert to the libvips string name (e.g. interpolation method nickname).
     fn into_vips_name(self) -> &'static str;
 }
 
 pub trait IntoVipsOption {
+    /// Serialize into a libvips option string (key=value pairs).
     fn to_vips_options(&self) -> String;
 }
 
 pub trait IntoVipsBandFormat {
+    /// Map this type to a `VipsBandFormat` enum integer.
     fn into_vips_band_format(self) -> i32;
 }
 
 pub trait FromVipsBandFormat: Sized {
+    /// Reconstruct from a `VipsBandFormat` integer and band count.
     fn from_vips_band_format(raw: i32, bands: i32) -> Self;
 }
 
 pub trait IntoVipsInterpretation {
+    /// Map this color space to a `VipsInterpretation` enum integer.
     fn into_vips_interpretation(self) -> i32;
 }
 
 pub trait FromVipsInterpretation: Sized {
+    /// Reconstruct a color space from a `VipsInterpretation` integer.
     fn from_vips_interpretation(raw: i32) -> Self;
 }
 

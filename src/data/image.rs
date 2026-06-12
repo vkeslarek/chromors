@@ -101,6 +101,7 @@ impl GpuView for ImageKind {
 }
 
 impl ImageKind {
+    /// Returns the corresponding codec name for this format (`"U8Codec"`, `"U16Codec"`, `"F32Codec"`).
     fn codec(&self) -> &'static str {
         match self.format {
             PixelFormat::RgbaF32 | PixelFormat::RgbF32 | PixelFormat::GrayF32 | PixelFormat::GrayAF32 => "F32Codec",
@@ -347,10 +348,12 @@ use crate::io::Source;
 /// A GPU Source that reads from a Vips pipeline.
 /// This enforces the boundary invariant: data enters the GPU ONLY through a Source.
 pub struct VipsImageSource {
+    /// The Vips pipeline root to read from. Every GPU frame begins here.
     pub vips_img: Image2D<VipsBackend>,
 }
 
 impl VipsImageSource {
+    /// Creates a GPU source that reads from a Vips pipeline.
     pub fn new(vips_img: Image2D<VipsBackend>) -> Self {
         Self { vips_img }
     }
@@ -431,8 +434,10 @@ impl Source<GpuBackend> for VipsImageSource {
     }
 }
 
+/// A GPU source backed by a constant f32 array (used for test images, kernels, etc.).
 pub struct GpuConstantSource {
     pub spec: Arc<ImageKind>,
+    /// Raw float data, tightly packed: `[r,g,b, ...]` or `[g, ...]` for grayscale.
     pub data: Vec<f32>,
 }
 
@@ -539,11 +544,14 @@ impl Target<ImageKind, VipsBackend> for RamImageTarget {
     }
 }
 
+/// A Vips source that reads from a RAW pipeline — bridges the RawBackend
+/// into the VipsBackend so RAW images can be processed with Vips operations.
 pub struct RawImageSource {
     pub raw_img: Image2D<crate::backend::raw::RawBackend>,
 }
 
 impl RawImageSource {
+    /// Creates a new Vips source backed by a RAW image.
     pub fn new(raw_img: Image2D<crate::backend::raw::RawBackend>) -> Self {
         Self { raw_img }
     }

@@ -4,6 +4,10 @@ use crate::backend::vips::vips_error;
 use crate::error::Error;
 use crate::ffi as ffi;
 
+/// A libvips input source (file or memory buffer).
+///
+/// Sources are the entry point for loading image data into Vips. They can be
+/// created from a file path or an in-memory byte buffer.
 pub struct Source {
     pub(crate) ptr: *mut ffi::VipsSource,
 }
@@ -31,6 +35,7 @@ impl Drop for Source {
 }
 
 impl Source {
+    /// Opens a file as a Vips source.
     pub fn new_from_file(filename: &str) -> Result<Source, Error> {
         let c = CString::new(filename).map_err(|_| Error::Vips("invalid filename".into()))?;
         let ptr = unsafe { ffi::vips_source_new_from_file(c.as_ptr()) };
@@ -40,6 +45,10 @@ impl Source {
         Ok(Source { ptr })
     }
 
+    /// Creates a Vips source from an in-memory byte buffer.
+    ///
+    /// The data is **copied** into a Vips-owned blob, so the source remains
+    /// valid after the original `data` buffer is dropped.
     pub fn new_from_memory(data: &[u8]) -> Result<Source, Error> {
         // `vips_source_new_from_memory` would reference `data` without copying,
         // so the source (and anything built on it) would dangle once `data`

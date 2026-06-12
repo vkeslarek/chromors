@@ -3,6 +3,11 @@ use crate::ffi as ffi;
 
 use super::Source;
 
+/// A libvips sequential buffer — reads a `Source` byte by byte.
+///
+/// Used internally by libvips format loaders (JPEG, PNG, etc.) to parse
+/// headers and pixel data from a source without loading the entire file
+/// into memory at once.
 pub struct Sbuf {
     pub(crate) ptr: *mut ffi::VipsSbuf,
 }
@@ -18,6 +23,7 @@ impl Drop for Sbuf {
 }
 
 impl Sbuf {
+    /// Creates a new buffered reader from a Vips source.
     pub fn new(source: &Source) -> Result<Sbuf, Error> {
         let ptr = unsafe { ffi::vips_sbuf_new_from_source(source.ptr) };
         if ptr.is_null() {
@@ -26,6 +32,7 @@ impl Sbuf {
         Ok(Sbuf { ptr })
     }
 
+    /// Reads the next byte from the buffer. Returns `None` at EOF or on error.
     pub fn getc(&mut self) -> Option<u8> {
         let c = unsafe { ffi::vips_sbuf_getc(self.ptr) };
         if c == -1 {

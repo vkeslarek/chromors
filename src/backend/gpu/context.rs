@@ -13,15 +13,26 @@ pub struct CachedPipelines {
     pub pipelines: Vec<Arc<wgpu::ComputePipeline>>,
 }
 
-/// GPU wgpu context — wraps device, queue, pipeline storage.
+/// GPU wgpu context — holds the device, queue, pipeline cache, and
+/// hardware-derived limits. Created once at engine init; shared across
+/// all GPU operations via `Arc`.
+///
 /// Note: The data cache is NOT here in v2. The caller wraps Sources in `Cached`.
 pub struct GpuContext {
+    /// The wgpu device (Vulkan/Metal/DX12 abstraction).
     pub device: Arc<wgpu::Device>,
+    /// The wgpu command queue for submitting compute dispatches.
     pub queue: Arc<wgpu::Queue>,
-    /// The only cache owned by the engine, caching compiled pipelines by IR hash.
+    /// Compiled pipeline cache keyed by Slang IR text hash.
     pub pipeline_cache: Arc<RwLock<LruCache<u64, Arc<CachedPipelines>>>>,
+    /// Running total of allocated VRAM bytes, tracked for diagnostics.
+    /// Updated atomically by `GpuBuffer` on creation/drop.
     pub allocated_bytes: AtomicU64,
+    /// Device limit: max storage buffers per shader stage.
+    /// Used by `CutFinder` to decide when to split a fused pass.
     pub max_storage_buffers: u32,
+    /// Workgroup tile dimension (32 for most GPUs, 16 for low-end).
+    /// Derived from `max_compute_invocations_per_workgroup`.
     pub wg_dim: u32,
 }
 

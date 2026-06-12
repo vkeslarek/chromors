@@ -17,10 +17,17 @@ pub use params::{
     output_flags,
 };
 
-// ── Backend marker ─────────────────────────────────────────────────────────────
-
+/// Marker struct for the LibRaw camera RAW decoding backend.
+///
+/// This backend decodes RAW files into RGB(A) pixel buffers using LibRaw.
+/// It is a leaf-only backend — operations on raw images require converting
+/// to a pixel-processing backend (Vips or GPU) first.
 pub struct RawBackend;
 
+/// Lowering accumulator for the RAW backend.
+///
+/// Node-keyed handle map — each lowered node registers its produced `RawHandle`;
+/// a consumer looks its inputs up by edge identity.
 pub struct RawBuilder {
     outputs: std::collections::HashMap<NodeId, Arc<RawHandle>>,
     current: Option<NodeId>,
@@ -33,13 +40,18 @@ impl Default for RawBuilder {
 }
 
 impl RawBuilder {
+    /// Look up an already-lowered upstream input's raw handle.
+    /// Post-order lowering guarantees it is present.
     pub fn input(&self, src: &Arc<Node<RawBackend>>) -> Arc<RawHandle> {
         self.outputs.get(&NodeId::of(src)).expect("input lowered before its consumer").clone()
     }
+
+    /// Register the raw handle this node produced.
     pub fn emit(&mut self, handle: Arc<RawHandle>) {
         let k = self.current.expect("emit() called outside a lower()");
         self.outputs.insert(k, handle);
     }
+
     fn take(&mut self, node: NodeId) -> Option<Arc<RawHandle>> {
         self.outputs.remove(&node)
     }
