@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::params::ProcessWarnings;
+use super::decode;
 use crate::libraw_ffi as raw;
 
 // ── Source (file path or in-memory buffer) ─────────────────────────────────────
@@ -35,7 +36,7 @@ impl RawSource {
             unsafe {
                 raw::libraw_close(ptr);
             }
-            return Err(super::decode::libraw_error(rc));
+            return Err(decode::libraw_error(rc));
         }
         Ok(ptr)
     }
@@ -206,7 +207,7 @@ pub struct RawFrame {
     /// Bits per sample (8 or 16).
     pub bits: u16,
     /// Libraw process warnings.
-    pub warnings: ProcessWarnings,
+    pub warnings: super::params::ProcessWarnings,
     /// Output colour space from the decode params.
     pub(crate) output_color: super::params::OutputColorSpace,
     /// True when `gamma_power ≈ 1.0` (linear output, no gamma curve applied).
@@ -319,5 +320,87 @@ impl Drop for RawHandle {
             }
         }
         // RawPixels and RawThumb manage their own drops.
+    }
+}
+
+// ── RawHandle API ────────────────────────────────────────────────────────────────
+
+impl RawHandle {
+    // ── Constructors ─────────────────────────────────────────────────────────
+
+    /// Open a RAW file with custom decode parameters.
+    pub fn open_with(path: &str, params: super::params::RawDecodeParams) -> Result<Self, crate::error::Error> {
+        let source = Arc::new(RawSource::File(path.to_owned()));
+        decode::open_raw_source(source, params)
+    }
+
+    /// Decode a RAW file from an in-memory buffer with custom parameters.
+    pub fn from_buffer_with(data: &[u8], params: super::params::RawDecodeParams) -> Result<Self, crate::error::Error> {
+        let source = Arc::new(RawSource::Buffer(Arc::new(data.to_vec())));
+        decode::open_raw_source(source, params)
+    }
+
+    pub fn set_output_color(&self, space: super::params::OutputColorSpace, bps: u8) -> Self {
+        let mut handle = self.clone();
+        handle.pixels = None;
+        handle.params.output_color = space;
+        handle.params.output_bps = bps;
+        handle
+    }
+
+    // ── Materialize (lazy decode) ─────────────────────────────────────────────
+
+    pub fn materialize(&mut self) -> Result<Arc<RawFrame>, crate::error::Error> {
+        decode::materialize(self)
+    }
+
+    pub fn is_materialized(&self) -> bool {
+        self.pixels.is_some()
+    }
+
+    pub fn frame(&self) -> Option<Arc<RawFrame>> {
+        self.pixels.clone()
+    }
+
+    // ── Static metadata ───────────────────────────────────────────────────────
+
+    pub fn meta(&self) -> &RawMeta { &self.meta }
+    pub fn make(&self) -> &str { &self.meta.make }
+    pub fn model(&self) -> &str { &self.meta.model }
+    pub fn iso(&self) -> f32 { self.meta.iso }
+    pub fn shutter(&self) -> f32 { self.meta.shutter }
+    pub fn aperture(&self) -> f32 { self.meta.aperture }
+    pub fn focal_len(&self) -> f32 { self.meta.focal_len }
+    pub fn raw_width(&self) -> u32 { self.meta.raw_width }
+    pub fn raw_height(&self) -> u32 { self.meta.raw_height }
+    pub fn filters(&self) -> u32 { self.meta.filters }
+    pub fn cdesc(&self) -> &str { &self.meta.cdesc }
+
+    // ── Decode params ─────────────────────────────────────────────────────────
+
+    pub fn params(&self) -> &super::params::RawDecodeParams { &self.params }
+    pub fn params_mut(&mut self) -> &mut super::params::RawDecodeParams { &mut self.params }
+
+    // ── Materialized pixel data ───────────────────────────────────────────────
+
+    fn require_frame(&self) -> &RawFrame {
+        self.pixels.as_deref().expect("call materialize() before accessing pixel data")
+    }
+
+    pub fn width(&self) -> u32 { self.require_frame().width }
+    pub fn height(&self) -> u32 { self.require_frame().height }
+    pub fn colors(&self) -> u16 { self.require_frame().colors }
+    pub fn bits(&self) -> u16 { self.require_frame().bits }
+    pub fn pixel_data(&self) -> &[u8] { self.require_frame().pixel_data() }
+    pub fn has_thumbnail(&self) -> bool { self.thumb.is_some() }
+
+    // ── Library info ──────────────────────────────────────────────────────────
+
+    pub fn libraw_version() -> &'static str {
+        unsafe {
+            let p = crate::libraw_ffi::libraw_version();
+            if p.is_null() { return "unknown"; }
+            std::ffi::CStr::from_ptr(p).to_str().unwrap_or("unknown")
+        }
     }
 }

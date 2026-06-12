@@ -1,12 +1,12 @@
 //! vips backend — band manipulation, format casts, colour ops.
 
 use crate::common::rgb;
-use chromors::*;
+use poc::*;
 
 #[test]
 fn extract_band() {
     let r = rgb()
-        .execute(&ExtractBandOperation {
+        .execute(&ExtractBand {
             band: 0,
             count: None,
         })
@@ -17,7 +17,7 @@ fn extract_band() {
 #[test]
 fn bandjoin() {
     let r = rgb()
-        .execute(&ExtractBandOperation {
+        .execute(&ExtractBand {
             band: 0,
             count: None,
         })
@@ -41,7 +41,7 @@ fn bandjoin_const_rejects_empty() {
 fn copy_and_cast() {
     let img = rgb();
     let cp = img
-        .execute(&CopyOperation {
+        .execute(&Copy {
             width: None,
             height: None,
             bands: None,
@@ -56,7 +56,7 @@ fn copy_and_cast() {
     assert_eq!(cp.width(), 200);
 
     let casted = img
-        .execute(&CastOperation {
+        .execute(&Cast {
             format: PixelFormat::RgbF32,
             shift: None,
         })
@@ -67,12 +67,12 @@ fn copy_and_cast() {
 #[test]
 fn falsecolour() {
     let g = rgb()
-        .execute(&ExtractBandOperation {
+        .execute(&ExtractBand {
             band: 0,
             count: None,
         })
         .unwrap();
-    let out = g.execute(&FalsecolourOperation).unwrap();
+    let out = g.execute(&Falsecolour).unwrap();
     assert_eq!(out.bands(), 3);
 }
 
@@ -80,13 +80,13 @@ fn falsecolour() {
 fn ifthenelse() {
     let a = rgb();
     let mask = a
-        .execute(&RelationalConstOperation {
+        .execute(&RelationalConst {
             relational: OperationRelational::More,
             constants: vec![128.0],
         })
         .unwrap();
     let out = mask
-        .execute(&IfthenelseOperation {
+        .execute(&Ifthenelse {
             if_true: &a,
             if_false: &a,
             blend: None,
@@ -97,8 +97,8 @@ fn ifthenelse() {
 
 #[test]
 fn rad_roundtrip() {
-    let f = rgb().execute(&Float2radOperation).unwrap();
-    let back = f.execute(&Rad2floatOperation).unwrap();
+    let f = rgb().execute(&Float2rad).unwrap();
+    let back = f.execute(&Rad2float).unwrap();
     assert_eq!(back.width(), 200);
 }
 
@@ -106,7 +106,7 @@ fn rad_roundtrip() {
 fn composite2() {
     let a = rgb();
     let half = a
-        .execute(&ResizeOperation {
+        .execute(&Resize {
             scale: 0.5,
             kernel: None,
             vertical_scale: None,
@@ -114,7 +114,7 @@ fn composite2() {
         })
         .unwrap();
     let c = a
-        .execute(&Composite2Operation {
+        .execute(&Composite {
             overlay: half,
             mode: BlendMode::Over,
             x: None,

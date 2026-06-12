@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use crate::backend::vips::vips_error;
 use crate::error::Error;
-use crate::libvips_ffi as ffi;
+use crate::ffi as ffi;
 
 pub struct Target {
     pub(crate) ptr: *mut ffi::VipsTarget,

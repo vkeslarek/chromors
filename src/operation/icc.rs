@@ -1,26 +1,41 @@
-use crate::backend::gpu::datatype::ImageType;
-use crate::backend::gpu::graph::{Graph, NodeId};
-use crate::backend::gpu::op::emit_image;
-use crate::backend::gpu::op::{GpuOperation, TypedOperation};
-use crate::backend::gpu::param::Param;
-use std::sync::Arc;
+use std::hash::Hasher;
 
-use crate::backend::vips::gobject::VipsGObject;
-use crate::backend::vips::operation::VipsOperation;
-use crate::libvips_ffi as ffi;
+use crate::backend::Backend;
+use crate::backend::vips::{VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
+use crate::data::image::ImageKind;
+use crate::operation::{AnyInput, Input, Lower, Operation};
+use crate::work_unit::{Region, WorkUnit};
 
-pub struct IccImportOperation {
+// ── IccImport ─────────────────────────────────────────────────────────────────
+
+pub struct IccImport<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub embedded: Option<bool>,
     pub input_profile: Option<String>,
     pub intent: Option<i32>,
 }
-impl VipsOperation for IccImportOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"icc_import\0"
+
+impl<B: Backend> Operation<B> for IccImport<B> where IccImport<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.embedded { state.write_u8(v as u8); }
+        if let Some(ref v) = self.input_profile { state.write(v.as_bytes()); }
+        if let Some(v) = self.intent { state.write_i32(v); }
+    }
+}
+
+impl Lower<VipsBackend> for IccImport<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"icc_import\0").unwrap();
+        op.set_image("in", input_handle.ptr);
         if let Some(v) = self.embedded {
             op.set_bool("embedded", v);
         }
@@ -30,21 +45,39 @@ impl VipsOperation for IccImportOperation {
         if let Some(v) = self.intent {
             op.set_int("intent", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-pub struct IccExportOperation {
+// ── IccExport ─────────────────────────────────────────────────────────────────
+
+pub struct IccExport<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub output_profile: Option<String>,
     pub intent: Option<i32>,
     pub depth: Option<i32>,
 }
-impl VipsOperation for IccExportOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"icc_export\0"
+
+impl<B: Backend> Operation<B> for IccExport<B> where IccExport<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(ref v) = self.output_profile { state.write(v.as_bytes()); }
+        if let Some(v) = self.intent { state.write_i32(v); }
+        if let Some(v) = self.depth { state.write_i32(v); }
+    }
+}
+
+impl Lower<VipsBackend> for IccExport<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"icc_export\0").unwrap();
+        op.set_image("in", input_handle.ptr);
         if let Some(ref v) = self.output_profile {
             op.set_string("output_profile", v);
         }
@@ -54,23 +87,43 @@ impl VipsOperation for IccExportOperation {
         if let Some(v) = self.depth {
             op.set_int("depth", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-pub struct IccTransformOperation {
+// ── IccTransform ──────────────────────────────────────────────────────────────
+
+pub struct IccTransform<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub output_profile: String,
     pub embedded: Option<bool>,
     pub input_profile: Option<String>,
     pub intent: Option<i32>,
     pub depth: Option<i32>,
 }
-impl VipsOperation for IccTransformOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"icc_transform\0"
+
+impl<B: Backend> Operation<B> for IccTransform<B> where IccTransform<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write(self.output_profile.as_bytes());
+        if let Some(v) = self.embedded { state.write_u8(v as u8); }
+        if let Some(ref v) = self.input_profile { state.write(v.as_bytes()); }
+        if let Some(v) = self.intent { state.write_i32(v); }
+        if let Some(v) = self.depth { state.write_i32(v); }
+    }
+}
+
+impl Lower<VipsBackend> for IccTransform<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"icc_transform\0").unwrap();
+        op.set_image("in", input_handle.ptr);
         op.set_string("output_profile", &self.output_profile);
         if let Some(v) = self.embedded {
             op.set_bool("embedded", v);
@@ -84,186 +137,88 @@ impl VipsOperation for IccTransformOperation {
         if let Some(v) = self.depth {
             op.set_int("depth", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GammaOperation {
+// ── Gamma ─────────────────────────────────────────────────────────────────────
+
+pub struct Gamma<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub exponent: Option<f64>,
 }
-impl VipsOperation for GammaOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"gamma\0"
+
+impl<B: Backend> Operation<B> for Gamma<B> where Gamma<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.exponent { state.write(&v.to_ne_bytes()); }
+    }
+}
+
+impl Lower<VipsBackend> for Gamma<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"gamma\0").unwrap();
+        op.set_image("in", input_handle.ptr);
         if let Some(v) = self.exponent {
             op.set_double("exponent", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-// ColourspaceOperation removed — use Image2D::convert(PixelMeta) instead.
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
 
-/// Adjusts saturation by blending the image with its grayscale version.
-/// `amount = 0` produces grayscale, `amount = 1` is identity, `amount > 1` boosts.
-///
-/// Computes luminance-weighted grayscale (Rec. 709) and blends:
-/// `output = gray + amount * (original - gray)`.
-#[derive(Debug, Clone)]
-pub struct SaturationOperation {
-    pub amount: f64,
+impl Lower<GpuBackend> for Gamma<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("exponent", self.exponent.unwrap_or(1.0) as f32)
+        );
+        cx.kernel("ops.gamma", "gamma_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
 }
 
-impl crate::backend::Operation<crate::data::image::Image2D<crate::backend::vips::VipsBackend>>
-    for SaturationOperation
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccImport<B>: crate::operation::Lower<B>,
 {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn execute(
-        &self,
-        image: &crate::data::image::Image2D<crate::backend::vips::VipsBackend>,
-    ) -> Result<Self::Output, crate::error::Error> {
-        let amount = self.amount;
-        let bands = image.bands();
-        let rgb_bands = if bands >= 3 { 3 } else { bands };
-
-        let img_f = image.execute(&crate::operation::misc::CastOperation {
-            format: crate::PixelFormat::RgbaF32,
-            shift: None,
-        })?;
-
-        let rgb = img_f.execute(&crate::operation::bands::ExtractBandOperation {
-            band: 0,
-            count: Some(rgb_bands),
-        })?;
-
-        let r = rgb.execute(&crate::operation::bands::ExtractBandOperation {
-            band: 0,
-            count: Some(1),
-        })?;
-        let g = rgb.execute(&crate::operation::bands::ExtractBandOperation {
-            band: 1.min(rgb_bands - 1),
-            count: Some(1),
-        })?;
-        let b = rgb.execute(&crate::operation::bands::ExtractBandOperation {
-            band: 2.min(rgb_bands - 1),
-            count: Some(1),
-        })?;
-
-        let r_scaled = r.execute(&crate::operation::arithmetic::LinearOperation {
-            a: 0.2126,
-            b: 0.0,
-            uchar: None,
-        })?;
-        let g_scaled = g.execute(&crate::operation::arithmetic::LinearOperation {
-            a: 0.7152,
-            b: 0.0,
-            uchar: None,
-        })?;
-        let b_scaled = b.execute(&crate::operation::arithmetic::LinearOperation {
-            a: 0.0722,
-            b: 0.0,
-            uchar: None,
-        })?;
-
-        let rg =
-            r_scaled.execute(&crate::operation::arithmetic::AddOperation { right: g_scaled })?;
-        let gray = rg.execute(&crate::operation::arithmetic::AddOperation { right: b_scaled })?;
-
-        let diff = rgb.execute(&crate::operation::arithmetic::SubtractOperation {
-            right: gray.clone(),
-        })?;
-        let diff_scaled = diff.execute(&crate::operation::arithmetic::LinearOperation {
-            a: amount,
-            b: 0.0,
-            uchar: None,
-        })?;
-        let out_rgb =
-            gray.execute(&crate::operation::arithmetic::AddOperation { right: diff_scaled })?;
-
-        let final_f = if bands > 3 {
-            let alpha = img_f.execute(&crate::operation::bands::ExtractBandOperation {
-                band: 3,
-                count: Some(bands - 3),
-            })?;
-            let images = [out_rgb.vips_ptr(), alpha.vips_ptr()];
-            let mut out: *mut crate::libvips_ffi::VipsImage = std::ptr::null_mut();
-            let ret = unsafe {
-                crate::libvips_ffi::vips_bandjoin(
-                    images.as_ptr() as *mut *mut crate::libvips_ffi::VipsImage,
-                    &mut out,
-                    2,
-                    crate::backend::vips::null(),
-                )
-            };
-            if ret != 0 {
-                return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
-            }
-            crate::data::image::Image2D::from_handle(crate::backend::vips::VipsHandle { ptr: out })
-        } else {
-            out_rgb
-        };
-
-        final_f.execute(&crate::operation::misc::CastOperation {
-            format: image.pixel_format(),
-            shift: None,
-        })
+    pub fn icc_import(&self, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>) -> Self {
+        self.push(IccImport { input: self.as_input(), embedded, input_profile, intent })
     }
 }
 
-// ── SaturationOperation ───────────────────────────────────────────────────────
-
-impl TypedOperation for SaturationOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for SaturationOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.saturation",
-            "saturation_kernel",
-            vec![Param::F32(self.amount as f32)],
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccExport<B>: crate::operation::Lower<B>,
+{
+    pub fn icc_export(&self, output_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
+        self.push(IccExport { input: self.as_input(), output_profile, intent, depth })
     }
 }
 
-// ── GammaOperation ────────────────────────────────────────────────────────────
-
-impl TypedOperation for GammaOperation {
-    type Output = ImageType;
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    IccTransform<B>: crate::operation::Lower<B>,
+{
+    pub fn icc_transform(&self, output_profile: String, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
+        self.push(IccTransform { input: self.as_input(), output_profile, embedded, input_profile, intent, depth })
+    }
 }
 
-impl GpuOperation for GammaOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let exponent = self.exponent.unwrap_or(1.0);
-        let shader_exp = if exponent != 0.0 {
-            (1.0 / exponent) as f32
-        } else {
-            1.0
-        };
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.gamma",
-            "gamma_kernel",
-            vec![Param::F32(shader_exp)],
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Gamma<B>: crate::operation::Lower<B>,
+{
+    pub fn gamma(&self, exponent: Option<f64>) -> Self {
+        self.push(Gamma { input: self.as_input(), exponent })
     }
 }

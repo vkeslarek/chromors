@@ -164,6 +164,13 @@ public void remainder_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 ri
     output.write(idx, r);
 }
 
+public void hypot_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output)
+{
+    float4 a = left.read(idx);
+    float4 b = right.read(idx);
+    output.write(idx, float4(sqrt(a.rgb * a.rgb + b.rgb * b.rgb), a.a));
+}
+
 // ── Two-image + enum ─────────────────────────────────────────────────────────
 
 public void math2_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output, uint math2)

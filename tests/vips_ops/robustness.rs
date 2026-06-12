@@ -6,9 +6,9 @@
 //! all. A segfault in libvips would abort the test binary (test fails).
 
 use crate::common::{init, rgb};
-use chromors::backend::vips::VipsBackend;
-use chromors::data::image::Image2D;
-use chromors::*;
+use poc::backend::vips::VipsBackend;
+use poc::data::image::Image2D;
+use poc::*;
 
 /// Call an expression and discard its `Result` — we only care that it returned.
 macro_rules! safe {
@@ -22,7 +22,7 @@ fn geometry_absurd_params() {
     let img = rgb();
     // Resize: zero / negative / gigantic scale.
     for s in [0.0, -1.0, -0.5, 1e9, f64::NAN, f64::INFINITY] {
-        safe!(img.execute(&ResizeOperation {
+        safe!(img.execute(&Resize {
             scale: s,
             kernel: None,
             vertical_scale: None,
@@ -36,13 +36,13 @@ fn geometry_absurd_params() {
         (0, 0, 100000, 100000),
         (500, 500, 10, 10),
     ] {
-        safe!(img.execute(&CropOperation {
+        safe!(img.execute(&Crop {
             left: l,
             top: t,
             width: w,
             height: h
         }));
-        safe!(img.execute(&ExtractAreaOperation {
+        safe!(img.execute(&ExtractArea {
             left: l,
             top: t,
             width: w,
@@ -51,7 +51,7 @@ fn geometry_absurd_params() {
     }
     // Embed: zero / negative target.
     for (w, h) in [(0, 0), (-10, -10), (1, 1)] {
-        safe!(img.execute(&EmbedOperation {
+        safe!(img.execute(&Embed {
             x: 0,
             y: 0,
             width: w,
@@ -62,12 +62,12 @@ fn geometry_absurd_params() {
     }
     // Replicate / zoom / subsample with zero / negative factors.
     for n in [0, -1, 100000] {
-        safe!(img.execute(&ReplicateOperation { across: n, down: n }));
-        safe!(img.execute(&ZoomOperation {
+        safe!(img.execute(&Replicate { across: n, down: n }));
+        safe!(img.execute(&Zoom {
             horizontal: n,
             vertical: n
         }));
-        safe!(img.execute(&SubsampleOperation {
+        safe!(img.execute(&Subsample {
             horizontal: n,
             vertical: n,
             point: None
@@ -75,7 +75,7 @@ fn geometry_absurd_params() {
     }
     // Affine with empty / wrong-length / degenerate matrix.
     for m in [vec![], vec![1.0], vec![0.0, 0.0, 0.0, 0.0]] {
-        safe!(img.execute(&AffineOperation {
+        safe!(img.execute(&Affine {
             matrix: m,
             interpolate: None,
             output_area: None,
@@ -95,12 +95,12 @@ fn filter_absurd_params() {
     let img = rgb();
     // Gaussian blur: negative / zero / gigantic / NaN sigma.
     for s in [0.0, -1.0, 1e6, f64::NAN] {
-        safe!(img.execute(&GaussianBlurOperation {
+        safe!(img.execute(&Blur {
             sigma: s,
             minimum_amplitude: None,
             precision: None
         }));
-        safe!(img.execute(&GaussianBlurOperation {
+        safe!(img.execute(&Blur {
             sigma: s,
             minimum_amplitude: Some(-1.0),
             precision: Some(-9)
@@ -108,7 +108,7 @@ fn filter_absurd_params() {
     }
     // Median rank with zero / negative / even / huge window.
     for sz in [0, -3, 2, 4, 100000] {
-        safe!(img.execute(&MedianOperation { size: sz }));
+        safe!(img.execute(&Median { size: sz }));
     }
     // Convolution with an empty / 1×1 / huge mask.
     for mask in [
@@ -118,10 +118,10 @@ fn filter_absurd_params() {
     .into_iter()
     .flatten()
     {
-        safe!(img.execute(&ConvfOperation { mask: mask.clone() }));
-        safe!(img.execute(&ConviOperation { mask: mask }));
+        safe!(img.execute(&Convf { mask: mask.clone() }));
+        safe!(img.execute(&Convi { mask: mask }));
     }
-    safe!(img.execute(&SharpenOperation {
+    safe!(img.execute(&Sharpen {
         sigma: Some(-5.0),
         flat: Some(-1.0),
         jagged: None,
@@ -140,22 +140,22 @@ fn arithmetic_absurd_params() {
         (f64::INFINITY, f64::NEG_INFINITY),
         (0.0, 1e300),
     ] {
-        safe!(img.execute(&LinearOperation { a, b, uchar: None }));
+        safe!(img.execute(&Linear { a, b, uchar: None }));
     }
     // Const ops with empty / oversized constant arrays.
-    safe!(img.execute(&Math2ConstOperation {
+    safe!(img.execute(&Math2Const {
         math2: OperationMath2::Pow,
         constants: vec![]
     }));
-    safe!(img.execute(&Math2ConstOperation {
+    safe!(img.execute(&Math2Const {
         math2: OperationMath2::Pow,
         constants: vec![1.0; 100],
     }));
-    safe!(img.execute(&RelationalConstOperation {
+    safe!(img.execute(&RelationalConst {
         relational: OperationRelational::More,
         constants: vec![],
     }));
-    safe!(img.execute(&RemainderConstOperation {
+    safe!(img.execute(&RemainderConst {
         constants: vec![0.0]
     })); // divide-by-zero
     // bandjoin_const with empty array.
@@ -167,18 +167,18 @@ fn band_and_cast_absurd_params() {
     let img = rgb();
     // Extract a band that doesn't exist / negative.
     for b in [-1, 3, 1000] {
-        safe!(img.execute(&ExtractBandOperation {
+        safe!(img.execute(&ExtractBand {
             band: b,
             count: None
         }));
-        safe!(img.execute(&ExtractBandOperation {
+        safe!(img.execute(&ExtractBand {
             band: 0,
             count: Some(b)
         }));
     }
     // getpoint fully out of bounds.
     for (x, y) in [(-1, -1), (100000, 100000)] {
-        safe!(img.execute(&GetpointOperation {
+        safe!(img.execute(&Getpoint {
             x,
             y,
             unpack_complex: None
@@ -186,7 +186,7 @@ fn band_and_cast_absurd_params() {
     }
     // Percent threshold out of [0,100].
     for p in [-50.0, 0.0, 100.0, 1000.0, f64::NAN] {
-        safe!(img.execute(&PercentOperation { percent: p }));
+        safe!(img.execute(&Percent { percent: p }));
     }
 }
 

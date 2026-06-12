@@ -3,10 +3,11 @@
 use std::sync::{Arc, Mutex, Once};
 
 use bytemuck;
-use chromors::backend::gpu::{GpuBackend, Rect, context::GpuContext};
-use chromors::backend::vips::VipsBackend;
-use chromors::data::image::Image2D as GenImage;
-use chromors::data::image::Image2D;
+use poc::backend::gpu::{GpuBackend, context::GpuContext};
+use poc::work_unit::{Region, Lod};
+use poc::backend::vips::VipsBackend;
+use poc::data::image::Image2D as GenImage;
+use poc::data::image::Image2D;
 
 static INIT: Once = Once::new();
 
@@ -17,7 +18,7 @@ pub fn vips_serial() -> std::sync::MutexGuard<'static, ()> {
 }
 
 pub fn init() {
-    INIT.call_once(chromors::init);
+    // No longer needed
 }
 
 pub fn rgb() -> Image2D<VipsBackend> {
@@ -41,32 +42,33 @@ pub fn gpu_ctx() -> Arc<GpuContext> {
 
 /// Upload a vips image to the POC GpuBackend.
 pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImage<GpuBackend> {
-    let src = chromors::backend::gpu::source::GpuSource::new_vips(img.clone(), ctx.clone());
-    GenImage::<GpuBackend>::new_from_source(&src).unwrap()
+    let src = Arc::new(poc::data::image::VipsImageSource::new(img.clone()));
+    poc::node::Data::from_source(src, ctx.clone())
 }
 
 /// Materialize a POC GPU image and read back the raw f32 bytes.
 pub fn poc_materialize(img: &GenImage<GpuBackend>) -> Vec<u8> {
+    use poc::io::Target;
     let (w, h) = (img.width() as i32, img.height() as i32);
-    let rect = Rect::new(0, 0, w, h);
-    let target = chromors::target::ImageTarget::new(img.clone());
-    let mat = target.pull(rect, 0).unwrap();
-    mat.buffer.read_to_cpu(&img.handle.ctx).unwrap()
+    let rect = Region { x: 0, y: 0, w, h, lod: Lod(0) };
+    let target = poc::data::image::RamImageTarget;
+    img.pull(&target, rect).unwrap()
 }
 
 /// Read vips bytes as f32 in [0, 1] range.
 pub fn vips_to_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
+    use poc::io::Target;
     let (w, h) = (img.width(), img.height());
-    let target = chromors::target::ImageTarget::new(img.clone());
-    let mat = target.pull(Rect::new(0, 0, w as i32, h as i32), 0).unwrap();
-    mat.buffer.iter().map(|b| *b as f32 / 255.0).collect()
+    let target = poc::data::image::RamImageTarget;
+    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    bytes.iter().map(|b| *b as f32 / 255.0).collect()
 }
 
 pub fn vips_materialize(img: &Image2D<VipsBackend>) -> Vec<u8> {
+    use poc::io::Target;
     let (w, h) = (img.width(), img.height());
-    let target = chromors::target::ImageTarget::new(img.clone());
-    let mat = target.pull(Rect::new(0, 0, w as i32, h as i32), 0).unwrap();
-    mat.buffer
+    let target = poc::data::image::RamImageTarget;
+    img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap()
 }
 
 /// Convert POC f32 output (4 channels, [0,1]) to u8 `bands`-channel slice
@@ -120,21 +122,21 @@ pub fn rms_f32(a: &[u8], b: &[u8]) -> f64 {
 /// Convert any Vips materialized image bytes to normalized f32 [0, 1].
 /// Handles u8, u16, and f32 formats.
 pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
+    use poc::io::Target;
     let (w, h) = (img.width(), img.height());
-    let bands = img.bands() as usize;
-    let target = chromors::target::ImageTarget::new(img.clone());
-    let mat = target.pull(Rect::new(0, 0, w as i32, h as i32), 0).unwrap();
-    let bps = mat.meta.format.bytes_per_pixel() as usize / mat.meta.format.channel_count() as usize;
+    let bands = img.format().channel_count() as usize;
+    let target = poc::data::image::RamImageTarget;
+    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    let bps = img.format().bytes_per_pixel() as usize / img.format().channel_count() as usize;
     let pixel_count = w as usize * h as usize * bands;
     match bps {
-        1 => mat
-            .buffer
+        1 => bytes
             .iter()
             .take(pixel_count)
             .map(|&b| b as f32 / 255.0)
             .collect(),
         2 => {
-            let pixels: &[u16] = bytemuck::cast_slice(&mat.buffer);
+            let pixels: &[u16] = bytemuck::cast_slice(&bytes);
             pixels
                 .iter()
                 .take(pixel_count)
@@ -142,7 +144,7 @@ pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
                 .collect()
         }
         _ => {
-            let pixels: &[f32] = bytemuck::cast_slice(&mat.buffer);
+            let pixels: &[f32] = bytemuck::cast_slice(&bytes);
             pixels.iter().take(pixel_count).copied().collect()
         }
     }

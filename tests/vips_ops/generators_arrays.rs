@@ -1,9 +1,9 @@
 //! vips backend — generators and array (multi-input) ops.
 
 use crate::common::rgb;
-use chromors::backend::vips::VipsBackend;
-use chromors::data::image::Image2D;
-use chromors::*;
+use poc::backend::vips::VipsBackend;
+use poc::data::image::Image2D;
+use poc::*;
 
 #[test]
 fn freq_masks() {
@@ -48,13 +48,13 @@ fn array_join_and_switch() {
     assert_eq!(joined.width(), 400);
 
     let g = a
-        .execute(&ExtractBandOperation {
+        .execute(&ExtractBand {
             band: 0,
             count: None,
         })
         .unwrap();
     let mask = g
-        .execute(&RelationalConstOperation {
+        .execute(&RelationalConst {
             relational: OperationRelational::More,
             constants: vec![128.0],
         })
@@ -76,7 +76,7 @@ fn sum_and_bandrank() {
 fn composite_stack() {
     let a = rgb();
     let b = a
-        .execute(&ResizeOperation {
+        .execute(&Resize {
             scale: 0.5,
             kernel: None,
             vertical_scale: None,
@@ -96,7 +96,7 @@ fn composite_stack() {
 fn merge_mosaic() {
     let a = rgb();
     let merged = a
-        .execute(&MergeOperation {
+        .execute(&Merge {
             secondary: &a,
             direction: Direction::Horizontal,
             dx: 200,

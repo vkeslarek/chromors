@@ -41,13 +41,16 @@ impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
         filename: &str,
         config: &ExportConfig,
     ) -> Result<(), crate::error::Error> {
+        let (w, h) = (self.width() as i32, self.height() as i32);
+        let wu = crate::work_unit::Region { x: 0, y: 0, w, h, lod: crate::work_unit::Lod(0) };
+        let mat = self.materialize(wu)?;
         let options = config.to_vips_options();
         let full = format!("{filename}{options}");
         let c = std::ffi::CString::new(full.as_str())
             .map_err(|_| Error::Vips("invalid filename".into()))?;
         if unsafe {
-            crate::libvips_ffi::vips_image_write_to_file(
-                self.vips_ptr(),
+            crate::ffi::vips_image_write_to_file(
+                mat.payload.ptr,
                 c.as_ptr(),
                 std::ptr::null::<std::ffi::c_void>(),
             )

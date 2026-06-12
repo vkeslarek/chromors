@@ -1,283 +1,12 @@
-use super::OperationMorphology;
-use crate::backend::vips::IntoVipsEnum;
-use crate::backend::vips::gobject::VipsGObject;
-use crate::backend::vips::operation::VipsOperation;
-use crate::libvips_ffi as ffi;
+use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::gpu::datatype::ImageType;
-use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeEval, NodeId};
-use crate::backend::gpu::op::working_image_type;
-use crate::backend::gpu::op::{GpuOperation, TypedOperation, splice_sibling};
-use crate::backend::gpu::param::Param;
-use crate::geometry::Rect;
-use std::sync::Arc;
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConvolutionOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct ConvolutionOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-    pub precision: Option<i32>,
-    pub layers: Option<i32>,
-    pub cluster: Option<i32>,
-}
-
-impl<B: Backend> std::fmt::Debug for ConvolutionOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConvolutionOperation")
-            .field("precision", &self.precision)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for ConvolutionOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-            precision: self.precision,
-            layers: self.layers,
-            cluster: self.cluster,
-        }
-    }
-}
-
-impl VipsOperation for ConvolutionOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"conv\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-        if let Some(v) = self.precision {
-            op.set_int("precision", v);
-        }
-        if let Some(v) = self.layers {
-            op.set_int("layers", v);
-        }
-        if let Some(v) = self.cluster {
-            op.set_int("cluster", v);
-        }
-    }
-}
-
-impl TypedOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ConvolutionOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CompassOperation — edge detection with compass operators (GPU TODO)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct CompassOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for CompassOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CompassOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for CompassOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-        }
-    }
-}
-
-impl VipsOperation for CompassOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"compass\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MorphOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct MorphOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-    pub morph: OperationMorphology,
-}
-
-impl<B: Backend> std::fmt::Debug for MorphOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MorphOperation")
-            .field("morph", &self.morph)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for MorphOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-            morph: self.morph,
-        }
-    }
-}
-
-impl VipsOperation for MorphOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"morph\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-        op.set_int("morph", self.morph.into_vips());
-    }
-}
-
-impl TypedOperation for MorphOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for MorphOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "morph_kernel",
-            }),
-            params: vec![
-                Param::U32(self.morph as u32),
-                Param::U32(mw),
-                Param::U32(mh),
-            ],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
-    }
-}
-
-// ── Precision enum ────────────────────────────────────────────────────────────
+use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
+use crate::data::image::ImageKind;
+use crate::operation::{AnyInput, Input, Lower, Operation, OperationMorphology};
+use crate::work_unit::{Region, WorkUnit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Precision {
@@ -291,362 +20,55 @@ impl IntoVipsEnum for Precision {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConvaOperation
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── Convolution ───────────────────────────────────────────────────────────────
 
-pub struct ConvaOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-    pub layers: Option<i32>,
-    pub cluster: Option<i32>,
-}
-
-impl<B: Backend> std::fmt::Debug for ConvaOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConvaOperation")
-            .field("layers", &self.layers)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for ConvaOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-            layers: self.layers,
-            cluster: self.cluster,
-        }
-    }
-}
-
-impl VipsOperation for ConvaOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"conva\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-        if let Some(v) = self.layers {
-            op.set_int("layers", v);
-        }
-        if let Some(v) = self.cluster {
-            op.set_int("cluster", v);
-        }
-    }
-}
-
-impl TypedOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ConvaOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConvfOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct ConvfOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for ConvfOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConvfOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for ConvfOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-        }
-    }
-}
-
-impl VipsOperation for ConvfOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"convf\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-    }
-}
-
-impl TypedOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ConvfOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConviOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct ConviOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for ConviOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConviOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for ConviOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-        }
-    }
-}
-
-impl VipsOperation for ConviOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"convi\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
-    }
-}
-
-impl TypedOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ConviOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConvsepOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct ConvsepOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
+pub struct Convolution<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
     pub precision: Option<Precision>,
     pub layers: Option<i32>,
     pub cluster: Option<i32>,
 }
 
-impl<B: Backend> std::fmt::Debug for ConvsepOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConvsepOperation")
-            .field("precision", &self.precision)
-            .finish()
+impl<B: Backend> Operation<B> for Convolution<B> where Convolution<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.precision { state.write_i32(v.into_vips()); }
+        if let Some(v) = self.layers { state.write_i32(v); }
+        if let Some(v) = self.cluster { state.write_i32(v); }
     }
 }
 
-impl<B: Backend> Clone for ConvsepOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-            precision: self.precision,
-            layers: self.layers,
-            cluster: self.cluster,
-        }
-    }
-}
-
-impl VipsOperation for ConvsepOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"convsep\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
+impl Lower<VipsBackend> for Convolution<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"conv\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
         if let Some(v) = self.precision {
             op.set_int("precision", v.into_vips());
         }
@@ -656,322 +78,526 @@ impl VipsOperation for ConvsepOperation<crate::backend::vips::VipsBackend> {
         if let Some(v) = self.cluster {
             op.set_int("cluster", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
+// ── Compass ───────────────────────────────────────────────────────────────────
+
+pub struct Compass<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
 }
 
-impl GpuOperation for ConvsepOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
+impl<B: Backend> Operation<B> for Compass<B> where Compass<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
     }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
 
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
-        }
+impl Lower<VipsBackend> for Compass<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"compass\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ConvasepOperation
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── Morph ─────────────────────────────────────────────────────────────────────
 
-pub struct ConvasepOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
+pub struct Morph<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
+    pub morph: OperationMorphology,
+}
+
+impl<B: Backend> Operation<B> for Morph<B> where Morph<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.morph.into_vips());
+    }
+}
+
+impl Lower<VipsBackend> for Morph<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"morph\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        op.set_int("morph", self.morph.into_vips());
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+
+// ── Conva ─────────────────────────────────────────────────────────────────────
+
+pub struct Conva<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
     pub layers: Option<i32>,
+    pub cluster: Option<i32>,
 }
 
-impl<B: Backend> std::fmt::Debug for ConvasepOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConvasepOperation")
-            .field("layers", &self.layers)
-            .finish()
+impl<B: Backend> Operation<B> for Conva<B> where Conva<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.layers { state.write_i32(v); }
+        if let Some(v) = self.cluster { state.write_i32(v); }
     }
 }
 
-impl<B: Backend> Clone for ConvasepOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-            layers: self.layers,
-        }
-    }
-}
-
-impl VipsOperation for ConvasepOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"convasep\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
+impl Lower<VipsBackend> for Conva<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"conva\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
         if let Some(v) = self.layers {
             op.set_int("layers", v);
         }
-    }
-}
-
-impl TypedOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ConvasepOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let mask_id = splice_sibling(graph, &self.mask);
-        let mw = self.mask.width();
-        let mh = self.mask.height();
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, mask_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.convolution",
-                function: "convolution_kernel",
-            }),
-            params: vec![Param::U32(mw), Param::U32(mh)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        match wu {
-            crate::backend::gpu::work_unit::WorkUnit::Region { rect, lod } => {
-                let mw = self.mask.width();
-                let mh = self.mask.height();
-                let halo = ((mw as i32) / 2).max((mh as i32) / 2);
-                let expanded = Rect::new(
-                    rect.x - halo,
-                    rect.y - halo,
-                    rect.width + 2 * halo,
-                    rect.height + 2 * halo,
-                );
-                vec![
-                    (
-                        0,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: expanded,
-                            lod: *lod,
-                        },
-                    ),
-                    (
-                        1,
-                        crate::backend::gpu::work_unit::WorkUnit::Region {
-                            rect: Rect::new(0, 0, mw as i32, mh as i32),
-                            lod: *lod,
-                        },
-                    ),
-                ]
-            }
-            _ => vec![(0, wu.clone()), (1, wu.clone())],
+        if let Some(v) = self.cluster {
+            op.set_int("cluster", v);
         }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// FastcorOperation — fast correlation (GPU TODO: frequency-domain operation)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── Convf ─────────────────────────────────────────────────────────────────────
 
-pub struct FastcorOperation<B: Backend> {
-    pub reference: crate::data::image::Image2D<B>,
+pub struct Convf<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
 }
 
-impl<B: Backend> std::fmt::Debug for FastcorOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FastcorOperation").finish()
+impl<B: Backend> Operation<B> for Convf<B> where Convf<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Convf<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"convf\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl<B: Backend> Clone for FastcorOperation<B>
+// ── Convi ─────────────────────────────────────────────────────────────────────
+
+pub struct Convi<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
+}
+
+impl<B: Backend> Operation<B> for Convi<B> where Convi<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Convi<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"convi\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+
+// ── Convsep ───────────────────────────────────────────────────────────────────
+
+pub struct Convsep<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
+    pub precision: Option<Precision>,
+    pub layers: Option<i32>,
+    pub cluster: Option<i32>,
+}
+
+impl<B: Backend> Operation<B> for Convsep<B> where Convsep<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.precision { state.write_i32(v.into_vips()); }
+        if let Some(v) = self.layers { state.write_i32(v); }
+        if let Some(v) = self.cluster { state.write_i32(v); }
+    }
+}
+
+impl Lower<VipsBackend> for Convsep<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"convsep\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        if let Some(v) = self.precision {
+            op.set_int("precision", v.into_vips());
+        }
+        if let Some(v) = self.layers {
+            op.set_int("layers", v);
+        }
+        if let Some(v) = self.cluster {
+            op.set_int("cluster", v);
+        }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+
+// ── Convasep ──────────────────────────────────────────────────────────────────
+
+pub struct Convasep<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub mask: Input<crate::data::mask2d::Mask2DKind, B>,
+    pub layers: Option<i32>,
+}
+
+impl<B: Backend> Operation<B> for Convasep<B> where Convasep<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input, &self.mask] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let mw = self.mask.spec.width;
+        let mh = self.mask.spec.height;
+        let halo = (mw / 2).max(mh / 2);
+        vec![
+            Some(WorkUnit::Region(Region {
+                x: out.x - halo,
+                y: out.y - halo,
+                w: out.w + 2 * halo,
+                h: out.h + 2 * halo,
+                lod: out.lod,
+            })),
+            Some(WorkUnit::Region(Region {
+                x: 0,
+                y: 0,
+                w: mw,
+                h: mh,
+                lod: out.lod,
+            })),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        if let Some(v) = self.layers { state.write_i32(v); }
+    }
+}
+
+impl Lower<VipsBackend> for Convasep<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mask_handle = cx.input(self.mask.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"convasep\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_image("mask", mask_handle.ptr);
+        if let Some(v) = self.layers {
+            op.set_int("layers", v);
+        }
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Convolution<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Morph<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+            .param("morph", self.morph.into_vips() as u32)
+        );
+        cx.kernel("ops.convolution", "morph_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Conva<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Convf<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Convi<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Convsep<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl Lower<GpuBackend> for Convasep<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new()
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+        );
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Convolution<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            reference: self.reference.clone(),
-        }
+    pub fn convolution(&self, mask: &crate::data::mask2d::Mask2D<B>, precision: Option<Precision>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Convolution { input: self.as_input(), mask: mask.as_input(), precision, layers, cluster })
     }
 }
 
-impl VipsOperation for FastcorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"fastcor\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("ref", self.reference.vips_ptr());
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// SpcorOperation — spatial correlation (GPU TODO)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct SpcorOperation<B: Backend> {
-    pub reference: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for SpcorOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SpcorOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for SpcorOperation<B>
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Compass<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            reference: self.reference.clone(),
-        }
+    pub fn compass(&self, mask: &crate::data::mask2d::Mask2D<B>) -> Self {
+        self.push(Compass { input: self.as_input(), mask: mask.as_input() })
     }
 }
 
-impl VipsOperation for SpcorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"spcor\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("ref", self.reference.vips_ptr());
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PhasecorOperation — phase correlation (GPU TODO: FFT-based)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct PhasecorOperation<B: Backend> {
-    pub second: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for PhasecorOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PhasecorOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for PhasecorOperation<B>
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Morph<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            second: self.second.clone(),
-        }
+    pub fn morph(&self, mask: &crate::data::mask2d::Mask2D<B>, morph: OperationMorphology) -> Self {
+        self.push(Morph { input: self.as_input(), mask: mask.as_input(), morph })
     }
 }
 
-impl VipsOperation for PhasecorOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"phasecor\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("in2", self.second.vips_ptr());
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// FreqmultOperation — frequency domain multiply (GPU TODO: FFT-based)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct FreqmultOperation<B: Backend> {
-    pub mask: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for FreqmultOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FreqmultOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for FreqmultOperation<B>
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Conva<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            mask: self.mask.clone(),
-        }
+    pub fn conva(&self, mask: &crate::data::mask2d::Mask2D<B>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Conva { input: self.as_input(), mask: mask.as_input(), layers, cluster })
     }
 }
 
-impl VipsOperation for FreqmultOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"freqmult\0"
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convf<B>: crate::operation::Lower<B>,
+{
+    pub fn convf(&self, mask: &crate::data::mask2d::Mask2D<B>) -> Self {
+        self.push(Convf { input: self.as_input(), mask: mask.as_input() })
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_image("mask", self.mask.vips_ptr());
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convi<B>: crate::operation::Lower<B>,
+{
+    pub fn convi(&self, mask: &crate::data::mask2d::Mask2D<B>) -> Self {
+        self.push(Convi { input: self.as_input(), mask: mask.as_input() })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convsep<B>: crate::operation::Lower<B>,
+{
+    pub fn convsep(&self, mask: &crate::data::mask2d::Mask2D<B>, precision: Option<Precision>, layers: Option<i32>, cluster: Option<i32>) -> Self {
+        self.push(Convsep { input: self.as_input(), mask: mask.as_input(), precision, layers, cluster })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Convasep<B>: crate::operation::Lower<B>,
+{
+    pub fn convasep(&self, mask: &crate::data::mask2d::Mask2D<B>, layers: Option<i32>) -> Self {
+        self.push(Convasep { input: self.as_input(), mask: mask.as_input(), layers })
     }
 }

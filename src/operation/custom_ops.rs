@@ -1,52 +1,7 @@
-//! Placeholder custom operations, one per embedded mould, until real algorithms
-//! land:
-//!
-//! - [`HistogramSink`] — a [`VipsCustomSink`] reduction whose output is an
-//!   arbitrary Rust value (per-band [`Histogram`]); no image produced.
-//! - [`Invert`] — a [`VipsCustomOperation`] producing an output `Image2D`.
-//!
-//! Both run region by region inside the vips pipeline (no download).
-//!
-//! ```ignore
-//! let hist = img.sink(HistogramSink)?;     // Histogram { bins: Vec<[u32; 256]> }
-//! let inv  = img.custom(Invert)?;          // Image2D
-//! ```
-
-use crate::backend::Operation;
-use crate::backend::vips::{CustomRegion, VipsBackend, VipsCustomOperation, VipsCustomSink};
-use crate::data::image::Image2D;
+use crate::backend::vips::custom::{CustomRegion, VipsCustomOperation, VipsCustomSink};
 use crate::error::Error;
 
-// ── execute() bridge ─────────────────────────────────────────────────────────
-//
-// `Image2D::execute` takes any `Operation<VipsBackend>`. A blanket
-// `impl<T: VipsOperation> Operation<VipsBackend> for T` already exists, and Rust
-// coherence forbids a second blanket (or a bare concrete impl) for the same
-// backend. These local wrappers sidestep it: Rust knows `Custom<O>` / `Reduce<S>`
-// are local types that don't implement `VipsOperation`, so the impls don't
-// overlap. Usage: `img.execute(&Custom(Invert))`, `img.execute(&Reduce(HistogramSink))`.
-
-/// Wraps a [`VipsCustomOperation`] so it runs through [`Image2D::execute`].
-pub struct Custom<O>(pub O);
-
-impl<O: VipsCustomOperation + Clone> Operation<Image2D<VipsBackend>> for Custom<O> {
-    type Output = Image2D<VipsBackend>;
-
-    fn execute(&self, image: &Image2D<VipsBackend>) -> Result<Self::Output, Error> {
-        image.custom(self.0.clone())
-    }
-}
-
-/// Wraps a [`VipsCustomSink`] so it runs through [`Image2D::execute`].
-pub struct Reduce<S>(pub S);
-
-impl<S: VipsCustomSink + Clone> Operation<Image2D<VipsBackend>> for Reduce<S> {
-    type Output = S::Output;
-
-    fn execute(&self, image: &Image2D<VipsBackend>) -> Result<Self::Output, Error> {
-        image.sink(self.0.clone())
-    }
-}
+// ── HistogramSink ─────────────────────────────────────────────────────────────
 
 /// Counts per intensity (0..=255) for each band.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -56,7 +11,6 @@ pub struct Histogram {
 }
 
 impl Histogram {
-    /// Total samples counted in `band` (== pixel count for a fully-scanned image).
     pub fn count(&self, band: usize) -> u64 {
         self.bins
             .get(band)
@@ -64,8 +18,6 @@ impl Histogram {
     }
 }
 
-/// 8-bit per-band histogram reduction. Only meaningful for u8 formats (256
-/// bins); each byte of a pixel is one band sample.
 #[derive(Clone)]
 pub struct HistogramSink;
 
@@ -75,7 +27,7 @@ impl VipsCustomSink for HistogramSink {
 
     fn fold(&self, acc: &mut Histogram, region: &CustomRegion) {
         let (_, top, _, h) = region.rect();
-        let bands = region.pixel_bytes(); // u8: 1 byte per band
+        let bands = region.pixel_bytes();
         if acc.bins.len() < bands {
             acc.bins.resize(bands, [0u32; 256]);
         }
@@ -106,21 +58,11 @@ impl VipsCustomSink for HistogramSink {
 
 // ── VectorscopeSink ──────────────────────────────────────────────────────────
 
-/// Grid size for the vectorscope density map (GRID × GRID cells).
 pub const VECTORSCOPE_GRID: usize = 128;
 
-/// 2-D Cb/Cr density grid reduction (u8 images only; other formats skipped).
-///
-/// Maps each pixel's BT.601 Cb/Cr chrominance to a cell in a
-/// [`VECTORSCOPE_GRID`]×[`VECTORSCOPE_GRID`] density grid.  Cb is the X axis
-/// (blue-yellow), Cr is the Y axis (red-cyan).  Cell (0,0) is bottom-left
-/// (Cb=-0.5, Cr=-0.5).
 #[derive(Clone)]
 pub struct VectorscopeSink;
 
-/// Compute a vectorscope density grid from raw RGBA8 bytes (any stride ≥ 3 bpp).
-/// Input: packed rows of `bpp` bytes per pixel (only first 3 = RGB are used).
-/// Output: flattened [`VECTORSCOPE_GRID`]×[`VECTORSCOPE_GRID`] density `Vec<u32>`.
 pub fn vectorscope_from_rgba8(bytes: &[u8], bpp: usize) -> Vec<u32> {
     if bpp < 3 || bytes.is_empty() {
         return vec![0; VECTORSCOPE_GRID * VECTORSCOPE_GRID];
@@ -184,14 +126,12 @@ impl VipsCustomSink for VectorscopeSink {
     }
 }
 
-// ── Invert ───────────────────────────────────────────────────────────────────
+// ── Invert (Custom) ──────────────────────────────────────────────────────────
 
-/// Per-band 8-bit invert (`255 - x`) producing an output image. A
-/// [`VipsCustomOperation`]: the output region is filled from the input region.
 #[derive(Clone)]
-pub struct Invert;
+pub struct CustomInvert;
 
-impl VipsCustomOperation for Invert {
+impl VipsCustomOperation for CustomInvert {
     fn generate(&self, out: &mut CustomRegion, input: &CustomRegion) -> Result<(), Error> {
         let (_, top, _, h) = out.rect();
         for y in top..top + h {
@@ -205,8 +145,8 @@ impl VipsCustomOperation for Invert {
     }
 }
 
-/// Generates a checkerboard transparency pattern. Applied via `img.custom()`.
-/// The input image is ignored — only the output geometry matters.
+// ── Checkerboard ─────────────────────────────────────────────────────────────
+
 #[derive(Clone)]
 pub struct Checkerboard {
     pub square_size: u32,

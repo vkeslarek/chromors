@@ -22,15 +22,12 @@
 //! let out = img.custom(AddConst { k: 10.0 })?;
 //! ```
 
-use std::ffi::{CString, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void};
 use std::slice;
 
 use super::FromVipsBandFormat;
-use crate::backend::vips::VipsBackend;
-use crate::backend::vips::vips_error;
-use crate::data::image::Image2D;
 use crate::error::Error;
-use crate::libvips_ffi as ffi;
+use crate::ffi as ffi;
 
 // glib's data-with-destructor attach — not in the generated bindings, declared
 // here (links against the already-linked glib).
@@ -230,83 +227,3 @@ unsafe extern "C" fn sink_stop<S: VipsCustomSink>(
     0
 }
 
-impl Image2D<VipsBackend> {
-    /// Run a custom [`VipsCustomSink`] reduction — scan the image region by
-    /// region and return an arbitrary Rust value. Lazy/threaded, no download.
-    pub fn sink<S: VipsCustomSink>(&self, sink: S) -> Result<S::Output, Error> {
-        let state = SinkState {
-            sink,
-            global: std::sync::Mutex::new(S::Acc::default()),
-        };
-        let ret = unsafe {
-            ffi::vips_sink(
-                self.vips_ptr(),
-                Some(sink_start::<S>),
-                Some(sink_generate::<S>),
-                Some(sink_stop::<S>),
-                std::ptr::null_mut(),
-                &state as *const SinkState<S> as *mut c_void,
-            )
-        };
-        if ret != 0 {
-            return Err(Error::Vips(vips_error()));
-        }
-        let SinkState { sink, global } = state;
-        let acc = global.into_inner().unwrap_or_else(|e| e.into_inner());
-        Ok(sink.finish(acc))
-    }
-
-    /// Run a [`VipsCustomOperation`] embedded in the vips pipeline. Lazy and
-    /// region-based — the image is never materialised to host memory here.
-    pub fn custom<O: VipsCustomOperation>(&self, op: O) -> Result<Self, Error> {
-        unsafe {
-            let input = self.vips_ptr();
-            let out = ffi::vips_image_new();
-            if out.is_null() {
-                return Err(Error::Vips(vips_error()));
-            }
-            // Copy geometry/format from input + set the demand hint.
-            if ffi::vips_image_pipelinev(
-                out,
-                ffi::VipsDemandStyle_VIPS_DEMAND_STYLE_THINSTRIP,
-                input,
-                std::ptr::null_mut::<ffi::VipsImage>(),
-            ) != 0
-            {
-                ffi::g_object_unref(out as ffi::gpointer);
-                return Err(Error::Vips(vips_error()));
-            }
-
-            // Keep input + op alive for the output's lifetime.
-            ffi::g_object_ref(input as ffi::gpointer);
-            let holder = Box::into_raw(Box::new(CustomHolder {
-                op: Box::new(op),
-                input,
-            }));
-
-            if ffi::vips_image_generate(
-                out,
-                Some(ffi::vips_start_one),
-                Some(generate_tramp),
-                Some(ffi::vips_stop_one),
-                input as *mut c_void,
-                holder as *mut c_void,
-            ) != 0
-            {
-                drop_holder(holder as *mut c_void);
-                ffi::g_object_unref(out as ffi::gpointer);
-                return Err(Error::Vips(vips_error()));
-            }
-
-            let key = CString::new("pixors_custom_op").unwrap();
-            g_object_set_data_full(
-                out as *mut ffi::GObject,
-                key.as_ptr(),
-                holder as *mut c_void,
-                Some(drop_holder),
-            );
-
-            Ok(Image2D::from_vips_ptr(out))
-        }
-    }
-}

@@ -1,12 +1,12 @@
 //! vips backend — geometry / resampling ops.
 
 use crate::common::rgb;
-use chromors::*;
+use poc::*;
 
 #[test]
 fn resize() {
     let half = rgb()
-        .execute(&ResizeOperation {
+        .execute(&Resize {
             scale: 0.5,
             kernel: None,
             vertical_scale: None,
@@ -19,7 +19,7 @@ fn resize() {
 #[test]
 fn resize_with_kernel() {
     let half = rgb()
-        .execute(&ResizeOperation {
+        .execute(&Resize {
             scale: 0.5,
             kernel: Some(Kernel::Lanczos3),
             vertical_scale: None,
@@ -32,7 +32,7 @@ fn resize_with_kernel() {
 #[test]
 fn crop() {
     let cropped = rgb()
-        .execute(&CropOperation {
+        .execute(&Crop {
             left: 10,
             top: 10,
             width: 50,
@@ -45,7 +45,7 @@ fn crop() {
 #[test]
 fn flip() {
     let flipped = rgb()
-        .execute(&FlipOperation {
+        .execute(&Flip {
             direction: Direction::Horizontal,
         })
         .unwrap();
@@ -55,7 +55,7 @@ fn flip() {
 #[test]
 fn rot90() {
     let r = rgb()
-        .execute(&Rot90Operation { angle: Angle::D90 })
+        .execute(&Rot90 { angle: Angle::D90 })
         .unwrap();
     assert_eq!(r.width(), 200);
 }
@@ -63,7 +63,7 @@ fn rot90() {
 #[test]
 fn embed() {
     let e = rgb()
-        .execute(&EmbedOperation {
+        .execute(&Embed {
             x: 10,
             y: 10,
             width: 300,
@@ -78,7 +78,7 @@ fn embed() {
 #[test]
 fn find_trim() {
     let e = rgb()
-        .execute(&EmbedOperation {
+        .execute(&Embed {
             x: 10,
             y: 10,
             width: 300,
@@ -88,7 +88,7 @@ fn find_trim() {
         })
         .unwrap();
     let bounds = e
-        .execute(&FindTrimOperation {
+        .execute(&FindTrim {
             background: None,
             threshold: None,
             line_art: None,
@@ -101,7 +101,7 @@ fn find_trim() {
 fn insert_and_join() {
     let a = rgb();
     let small = a
-        .execute(&ResizeOperation {
+        .execute(&Resize {
             scale: 0.25,
             kernel: None,
             vertical_scale: None,
@@ -109,7 +109,7 @@ fn insert_and_join() {
         })
         .unwrap();
     let ins = a
-        .execute(&InsertOperation {
+        .execute(&Insert {
             sub: small.clone(),
             x: 50,
             y: 50,
@@ -119,7 +119,7 @@ fn insert_and_join() {
         .unwrap();
     assert_eq!(ins.width(), 200);
     let joined = a
-        .execute(&JoinOperation {
+        .execute(&Join {
             right: a.clone(),
             direction: Direction::Horizontal,
             expand: None,
@@ -134,7 +134,7 @@ fn insert_and_join() {
 #[test]
 fn extract_area() {
     let out = rgb()
-        .execute(&ExtractAreaOperation {
+        .execute(&ExtractArea {
             left: 10,
             top: 10,
             width: 50,
@@ -147,7 +147,7 @@ fn extract_area() {
 #[test]
 fn replicate() {
     let out = rgb()
-        .execute(&ReplicateOperation { across: 2, down: 3 })
+        .execute(&Replicate { across: 2, down: 3 })
         .unwrap();
     assert_eq!(out.width(), 400);
     assert_eq!(out.height(), 600);
@@ -156,7 +156,7 @@ fn replicate() {
 #[test]
 fn zoom() {
     let out = rgb()
-        .execute(&ZoomOperation {
+        .execute(&Zoom {
             horizontal: 2,
             vertical: 2,
         })
@@ -167,7 +167,7 @@ fn zoom() {
 #[test]
 fn subsample() {
     let out = rgb()
-        .execute(&SubsampleOperation {
+        .execute(&Subsample {
             horizontal: 2,
             vertical: 2,
             point: None,
@@ -179,7 +179,7 @@ fn subsample() {
 #[test]
 fn grid() {
     let out = rgb()
-        .execute(&GridOperation {
+        .execute(&Grid {
             tile_height: 100,
             across: 2,
             down: 1,
@@ -191,7 +191,7 @@ fn grid() {
 #[test]
 fn affine_identity() {
     let out = rgb()
-        .execute(&AffineOperation {
+        .execute(&Affine {
             matrix: vec![1.0, 0.0, 0.0, 1.0],
             interpolate: None,
             output_area: None,
@@ -210,7 +210,7 @@ fn affine_identity() {
 #[test]
 fn similarity_scale() {
     let out = rgb()
-        .execute(&SimilarityOperation {
+        .execute(&Similarity {
             scale: Some(0.5),
             angle: None,
             interpolate: None,
@@ -228,7 +228,7 @@ fn similarity_scale() {
 fn reduce_shrink_1d() {
     let img = rgb();
     let rh = img
-        .execute(&ReduceHorizontalOperation {
+        .execute(&ReduceHorizontal {
             shrink: 2.0,
             kernel: None,
             gap: None,
@@ -236,7 +236,7 @@ fn reduce_shrink_1d() {
         .unwrap();
     assert_eq!(rh.width(), 100);
     let sv = img
-        .execute(&ShrinkVerticalOperation {
+        .execute(&ShrinkVertical {
             shrink: 2,
             ceil: None,
         })
@@ -247,7 +247,7 @@ fn reduce_shrink_1d() {
 #[test]
 fn thumbnail() {
     let thumb = rgb()
-        .execute(&ThumbnailOperation {
+        .execute(&Thumbnail {
             width: 64,
             height: None,
             size: None,

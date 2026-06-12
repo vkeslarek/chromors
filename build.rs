@@ -2,6 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     let vips = pkg_config::Config::new()
         .atleast_version("8.6")
         .probe("vips")
@@ -21,7 +23,6 @@ fn main() {
         .generate()
         .expect("bindgen failed");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("ffi.rs"))
         .expect("failed to write bindings");
@@ -52,7 +53,6 @@ fn main() {
         .expect("failed to write libraw bindings");
     println!("cargo:rerun-if-changed=cpp/wrapper_libraw.h");
 
-    // ── Slang C API bindings (raw slang.h, for types) ─────────────────────────────
     if let Some((slang_include, slang_lib)) = find_slang_sdk() {
         println!("cargo:rustc-link-search=native={}", slang_lib.display());
         println!("cargo:rustc-link-lib=dylib=slang-compiler");
@@ -74,7 +74,6 @@ fn main() {
             .write_to_file(out_path.join("slang_ffi.rs"))
             .expect("failed to write slang bindings");
 
-        // ── Slang C++ wrapper (thin COM adapter compiled as static lib) ──────────
         println!("cargo:rerun-if-changed=cpp/slang_wrapper.cpp");
         println!("cargo:rerun-if-changed=cpp/slang_wrapper.h");
 
@@ -95,79 +94,6 @@ fn main() {
             .write_to_file(out_path.join("slang_wrapper_ffi.rs"))
             .expect("failed to write slang wrapper bindings");
     }
-
-    // POC Slang Compilation
-    println!("cargo:rerun-if-changed=shaders");
-
-    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let shaders = manifest.join("shaders");
-    let out = manifest.join("target/poc-modules");
-    let _ = std::fs::remove_dir_all(&out);
-    std::fs::create_dir_all(&out).unwrap();
-
-    let slangc = find_slangc();
-
-    let mut all: Vec<PathBuf> = Vec::new();
-    collect_slang(&shaders, &shaders, &mut all);
-    for abs in all {
-        let rel = abs.strip_prefix(&shaders).unwrap().to_path_buf();
-        compile_one(&slangc, &shaders, &out, &rel);
-    }
-}
-
-fn collect_slang(_base: &std::path::Path, dir: &std::path::Path, into: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            let name = p.file_name().and_then(|s| s.to_str());
-            if name == Some("lib") || name == Some("reflect") {
-                continue;
-            }
-            collect_slang(_base, &p, into);
-        } else if p.extension().and_then(|s| s.to_str()) == Some("slang") {
-            into.push(p);
-        }
-    }
-}
-
-fn compile_one(
-    slangc: &std::path::Path,
-    shaders_root: &std::path::Path,
-    out_root: &std::path::Path,
-    rel: &std::path::Path,
-) {
-    let src = shaders_root.join(rel);
-    let dst = out_root.join(rel).with_extension("slang-module");
-    std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
-    println!("cargo:rerun-if-changed={}", src.display());
-
-    let status = std::process::Command::new(slangc)
-        .arg(&src)
-        .arg("-I")
-        .arg(shaders_root)
-        .arg("-I")
-        .arg(out_root)
-        .arg("-o")
-        .arg(&dst)
-        .status()
-        .unwrap_or_else(|e| panic!("slangc launch failed for {}: {e}", rel.display()));
-    if !status.success() {
-        panic!("slangc failed for {} ({})", rel.display(), status);
-    }
-}
-
-fn find_slangc() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let p = PathBuf::from(&home).join("Downloads/slangc/bin/slangc");
-        if p.exists() {
-            return p;
-        }
-        let p = PathBuf::from(&home).join(".local/bin/slangc");
-        if p.exists() {
-            return p;
-        }
-    }
-    PathBuf::from("slangc")
 }
 
 fn find_slang_sdk() -> Option<(PathBuf, PathBuf)> {

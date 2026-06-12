@@ -175,7 +175,6 @@ impl SlangCompiler {
             let mut out_size: usize = 0;
             let mut diag_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
 
-            let _sw = crate::utils::Stopwatch::new("gpu.compile.slang");
             let rc = unsafe {
                 slangw_compile_to_spirv(
                     state.session.0.as_ptr(),
@@ -188,7 +187,6 @@ impl SlangCompiler {
                     &mut diag_ptr,
                 )
             };
-            drop(_sw);
 
             let diag = DiagString(diag_ptr);
             if rc != 0 {
@@ -219,7 +217,6 @@ impl SlangCompiler {
 
         // Optimise and overwrite the raw cache entry.
         let optimized = {
-            let _sw = crate::utils::Stopwatch::new("gpu.compile.opt");
             Self::opt_spirv(spirv_bytes, hash_val)
         };
 
@@ -253,7 +250,14 @@ impl SlangCompiler {
         };
 
         match opt.optimize(words, &mut logger, None) {
-            Ok(bin) => bin.as_bytes().to_vec(),
+            Ok(bin) => {
+                let words = bin.as_words();
+                let mut bytes = Vec::with_capacity(words.len() * 4);
+                for w in words {
+                    bytes.extend_from_slice(&w.to_le_bytes());
+                }
+                bytes
+            }
             Err(e) => {
                 tracing::warn!(
                     target: "gpu_compile",

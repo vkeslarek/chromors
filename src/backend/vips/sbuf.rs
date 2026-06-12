@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::libvips_ffi as ffi;
+use crate::ffi as ffi;
 
 use super::Source;
 

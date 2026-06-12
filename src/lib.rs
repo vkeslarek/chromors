@@ -1,56 +1,27 @@
+/// Assert two floats are within `eps` (default `1e-6`). Used by `color`/`pixel`
+/// unit tests; defined once here so every submodule's `use crate::assert_approx_eq`
+/// resolves.
+#[macro_export]
+macro_rules! assert_approx_eq {
+    ($a:expr, $b:expr) => {
+        $crate::assert_approx_eq!($a, $b, 1e-6)
+    };
+    ($a:expr, $b:expr, $eps:expr) => {{
+        let (a, b, eps) = ($a as f64, $b as f64, $eps as f64);
+        assert!(
+            (a - b).abs() <= eps,
+            "assert_approx_eq failed: `{}` vs `{}` (|Δ| = {} > {})",
+            a, b, (a - b).abs(), eps
+        );
+    }};
+}
+
 pub mod backend;
-pub mod color;
+pub mod buffer;
 pub mod data;
 pub mod error;
-mod exif;
-pub mod export;
-pub mod generator;
-pub mod geometry;
-pub mod operation;
-pub mod pixel;
-pub mod target;
-#[macro_use]
-pub mod utils;
-pub mod vector;
-
-pub use backend::gpu::Rect;
-pub use backend::gpu::{GpuBackend, GpuContext, GpuOperation, GpuSource, Lod};
-pub use backend::vips::data::{ArrayJoinParams, CompositeParams, ThumbnailParams};
-pub use backend::vips::{
-    Interpolate, InterpolationMethod, Region, Sbuf, Source, Target, VipsBackend,
-};
-pub use backend::{SourceInput, TargetOutput};
-pub use color::space::ColorSpace;
-pub use draw::*;
-pub use error::Error;
-pub use exif::Metadata;
-pub use generator::*;
-pub use operation::*;
-pub use pixel::{AlphaPolicy, PixelFormat, PixelMeta};
-
-pub mod libvips_ffi {
-    #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
-    #![allow(dead_code)]
-    #![allow(clippy::all)]
-    #![allow(clippy::approx_constant)]
-    #![allow(clippy::missing_safety_doc)]
-    #![allow(unnecessary_transmutes)]
-    #![allow(unsafe_op_in_unsafe_fn)]
-    include!(concat!(env!("OUT_DIR"), "/ffi.rs"));
-}
-
-pub mod slang_ffi {
-    #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
-    #![allow(dead_code)]
-    #![allow(clippy::all)]
-    #![allow(unsafe_op_in_unsafe_fn)]
-    include!(concat!(env!("OUT_DIR"), "/slang_ffi.rs"));
-}
-
+pub mod io;
+pub mod kind;
 pub(crate) mod slang_wrapper_ffi {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
@@ -78,16 +49,27 @@ pub(crate) mod libraw_ffi {
     include!(concat!(env!("OUT_DIR"), "/libraw_ffi.rs"));
 }
 
-use std::ffi::CString;
-use std::sync::OnceLock;
+pub mod node;
+pub mod operation;
+pub mod work_unit;
+pub mod color;
+pub mod pixel;
+pub mod export;
 
-static INIT: OnceLock<()> = OnceLock::new();
-
-pub fn init() {
-    INIT.get_or_init(|| {
-        let name = CString::new("pixors-engine").unwrap();
-        unsafe {
-            libvips_ffi::vips_init(name.as_ptr());
-        }
-    });
+#[allow(non_upper_case_globals)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(dead_code)]
+pub mod ffi {
+    include!(concat!(env!("OUT_DIR"), "/ffi.rs"));
 }
+
+pub use backend::*;
+pub use backend::gpu::*;
+pub use buffer::*;
+pub use error::*;
+pub use io::*;
+pub use kind::*;
+pub use node::*;
+pub use operation::*;
+pub use work_unit::*;

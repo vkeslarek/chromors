@@ -1,1289 +1,504 @@
-use super::{
-    OperationBoolean, OperationComplex, OperationComplex2, OperationComplexget, OperationMath,
-    OperationMath2, OperationRelational, OperationRound,
-};
-use crate::backend::vips::IntoVipsEnum;
-use crate::backend::vips::gobject::VipsGObject;
-use crate::backend::vips::operation::VipsOperation;
-use crate::libvips_ffi as ffi;
+use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::gpu::datatype::ImageType;
-use crate::backend::gpu::graph::{Graph, GraphNode, KernelSpec, NodeEval, NodeId};
-use crate::backend::gpu::op::{
-    GpuOperation, TypedOperation, emit_image, splice_sibling, working_image_type,
+use crate::backend::vips::{VipsBackend, VipsBuilder, IntoVipsEnum};
+use crate::data::image::ImageKind;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::gpu::view::ParamBlock;
+use crate::operation::{
+    AnyInput, Input, Lower, Operation, OperationComplex2, OperationMath, OperationMath2,
+    OperationRound,
 };
-use crate::backend::gpu::param::Param;
-use std::sync::Arc;
+use crate::work_unit::{Region, WorkUnit};
 
-/// Build a params vec with a fixed count of up to 10 f32 constants, padded with 0.0.
-fn const_params(constants: &[f64]) -> Vec<Param> {
-    let n = constants.len() as u32;
-    let mut params = Vec::with_capacity(2 + 10);
-    params.push(Param::U32(n));
-    for i in 0..10 {
-        let v = constants.get(i).copied().unwrap_or(0.0) as f32;
-        params.push(Param::F32(v));
-    }
-    params
+// ── Binary operations ─────────────────────────────────────────────────────────
+
+pub struct Add<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
 }
 
-fn const_params_with_op(op_val: u32, constants: &[f64]) -> Vec<Param> {
-    let mut params = vec![Param::U32(op_val)];
-    params.append(&mut const_params(constants));
-    params
+impl<B: Backend> Operation<B> for Add<B> where Add<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AddOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct AddOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for AddOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AddOperation").finish()
+impl Lower<VipsBackend> for Add<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"add\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl<B: Backend> Clone for AddOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
+pub struct Subtract<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+}
+
+impl<B: Backend> Operation<B> for Subtract<B> where Subtract<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Subtract<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"subtract\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl VipsOperation for AddOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"add\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
+pub struct Multiply<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+}
+
+impl<B: Backend> Operation<B> for Multiply<B> where Multiply<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Multiply<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"multiply\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for AddOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
+pub struct Divide<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
 }
 
-impl GpuOperation for AddOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "add_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
+impl<B: Backend> Operation<B> for Divide<B> where Divide<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Divide<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"divide\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SubtractOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct SubtractOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
+pub struct MaxPair<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
 }
 
-impl<B: Backend> std::fmt::Debug for SubtractOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SubtractOperation").finish()
+impl<B: Backend> Operation<B> for MaxPair<B> where MaxPair<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for MaxPair<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"maxpair\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl<B: Backend> Clone for SubtractOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
+pub struct MinPair<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+}
+
+impl<B: Backend> Operation<B> for MinPair<B> where MinPair<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for MinPair<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"minpair\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl VipsOperation for SubtractOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"subtract\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
+pub struct Remainder<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+}
+
+impl<B: Backend> Operation<B> for Remainder<B> where Remainder<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Remainder<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"remainder\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for SubtractOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
+pub struct Complexform<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
 }
 
-impl GpuOperation for SubtractOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "subtract_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
+impl<B: Backend> Operation<B> for Complexform<B> where Complexform<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+
+impl Lower<VipsBackend> for Complexform<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"complexform\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MultiplyOperation
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── Operations with enums ─────────────────────────────────────────────────────
 
-pub struct MultiplyOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for MultiplyOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MultiplyOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for MultiplyOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for MultiplyOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"multiply\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for MultiplyOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for MultiplyOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "multiply_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// DivideOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct DivideOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for DivideOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DivideOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for DivideOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for DivideOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"divide\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for DivideOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for DivideOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "divide_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MaxPairOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct MaxPairOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for MaxPairOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MaxPairOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for MaxPairOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for MaxPairOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"maxpair\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for MaxPairOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for MaxPairOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "max_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MinPairOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct MinPairOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for MinPairOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MinPairOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for MinPairOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for MinPairOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"minpair\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for MinPairOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for MinPairOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "min_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// RemainderOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct RemainderOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for RemainderOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemainderOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for RemainderOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for RemainderOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"remainder\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for RemainderOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for RemainderOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "remainder_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Complex2Operation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct Complex2Operation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
+pub struct Complex2<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
     pub cmplx: OperationComplex2,
 }
 
-impl<B: Backend> std::fmt::Debug for Complex2Operation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Complex2Operation")
-            .field("cmplx", &self.cmplx)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for Complex2Operation<B>
+impl<B: Backend> Operation<B> for Complex2<B>
 where
-    B::Handle: Clone,
+    Complex2<B>: Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-            cmplx: self.cmplx,
-        }
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.cmplx.into_vips());
     }
 }
 
-impl VipsOperation for Complex2Operation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"complex2\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
+impl Lower<VipsBackend> for Complex2<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"complex2\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
         op.set_int("cmplx", self.cmplx.into_vips());
+        let out_handle = op.run().expect("vips complex2 failed");
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for Complex2Operation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for Complex2Operation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "complex2_kernel",
-            }),
-            params: vec![Param::U32(self.cmplx as u32)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ComplexformOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct ComplexformOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-}
-
-impl<B: Backend> std::fmt::Debug for ComplexformOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ComplexformOperation").finish()
-    }
-}
-
-impl<B: Backend> Clone for ComplexformOperation<B>
-where
-    B::Handle: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-        }
-    }
-}
-
-impl VipsOperation for ComplexformOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"complexform\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-    }
-}
-
-impl TypedOperation for ComplexformOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ComplexformOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "complexform_kernel",
-            }),
-            params: vec![],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MathOperation (single-image + enum, no struct change needed)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct MathOperation {
+pub struct Math<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub math: OperationMath,
 }
 
-impl VipsOperation for MathOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"math\0"
+impl<B: Backend> Operation<B> for Math<B>
+where
+    Math<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.math.into_vips());
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+}
+
+impl Lower<VipsBackend> for Math<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"math\0")
+            .expect("failed to create vips math op");
+        op.set_image("in", input_handle.ptr);
         op.set_int("math", self.math.into_vips());
+        let out_handle = op.run().expect("vips math failed");
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for MathOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for MathOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "math_kernel",
-            vec![Param::U32(self.math as u32)],
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// RoundOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct RoundOperation {
+pub struct Round<B: Backend> {
+    pub input: Input<ImageKind, B>,
     pub round: OperationRound,
 }
 
-impl VipsOperation for RoundOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"round\0"
+impl<B: Backend> Operation<B> for Round<B>
+where
+    Round<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.round.into_vips());
     }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
+}
+
+impl Lower<VipsBackend> for Round<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"round\0")
+            .expect("failed to create vips round op");
+        op.set_image("in", input_handle.ptr);
         op.set_int("round", self.round.into_vips());
+        let out_handle = op.run().expect("vips round failed");
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for RoundOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for RoundOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "round_kernel",
-            vec![Param::U32(self.round as u32)],
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Math2Operation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct Math2Operation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
+pub struct Math2<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
     pub math2: OperationMath2,
 }
 
-impl<B: Backend> std::fmt::Debug for Math2Operation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Math2Operation")
-            .field("math2", &self.math2)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for Math2Operation<B>
+impl<B: Backend> Operation<B> for Math2<B>
 where
-    B::Handle: Clone,
+    Math2<B>: Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-            math2: self.math2,
-        }
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.math2.into_vips());
     }
 }
 
-impl VipsOperation for Math2Operation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"math2\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
+impl Lower<VipsBackend> for Math2<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"math2\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
         op.set_int("math2", self.math2.into_vips());
+        let out_handle = op.run().expect("vips math2 failed");
+        cx.emit(out_handle);
     }
 }
 
-impl TypedOperation for Math2Operation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
+// ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Add<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "add_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
-
-impl GpuOperation for Math2Operation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "math2_kernel",
-            }),
-            params: vec![Param::U32(self.math2 as u32)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
+impl Lower<GpuBackend> for Subtract<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "subtract_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// BooleanOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct BooleanOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-    pub boolean: OperationBoolean,
+impl Lower<GpuBackend> for Multiply<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "multiply_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
-
-impl<B: Backend> std::fmt::Debug for BooleanOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BooleanOperation")
-            .field("boolean", &self.boolean)
-            .finish()
+impl Lower<GpuBackend> for Divide<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "divide_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+}
+impl Lower<GpuBackend> for MaxPair<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "max_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+}
+impl Lower<GpuBackend> for MinPair<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "min_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+}
+impl Lower<GpuBackend> for Remainder<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "remainder_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+}
+impl Lower<GpuBackend> for Complexform<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "complexform_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+}
+impl Lower<GpuBackend> for Complex2<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", self.cmplx.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "complex2_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
     }
 }
+impl Lower<GpuBackend> for Math<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", self.math.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "math_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
+    }
+}
+impl Lower<GpuBackend> for Round<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", self.round.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "round_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
+    }
+}
+impl Lower<GpuBackend> for Math2<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) { 
+        cx.param_block(ParamBlock::scalar("op", self.math2.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "math2_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
+    }
+}
 
-impl<B: Backend> Clone for BooleanOperation<B>
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Add<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-            boolean: self.boolean,
-        }
+    pub fn add(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Add { left: self.as_input(), right: right.as_input() })
     }
 }
 
-impl VipsOperation for BooleanOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"boolean\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-        op.set_int("boolean", self.boolean.into_vips());
-    }
-}
-
-impl TypedOperation for BooleanOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for BooleanOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "boolean_kernel",
-            }),
-            params: vec![Param::U32(self.boolean as u32)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// RelationalOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub struct RelationalOperation<B: Backend> {
-    pub right: crate::data::image::Image2D<B>,
-    pub relational: OperationRelational,
-}
-
-impl<B: Backend> std::fmt::Debug for RelationalOperation<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RelationalOperation")
-            .field("relational", &self.relational)
-            .finish()
-    }
-}
-
-impl<B: Backend> Clone for RelationalOperation<B>
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
-    B::Handle: Clone,
+    Subtract<B>: crate::operation::Lower<B>,
 {
-    fn clone(&self) -> Self {
-        Self {
-            right: self.right.clone(),
-            relational: self.relational,
-        }
+    pub fn subtract(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Subtract { left: self.as_input(), right: right.as_input() })
     }
 }
 
-impl VipsOperation for RelationalOperation<crate::backend::vips::VipsBackend> {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"relational\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("left", image);
-        op.set_image("right", self.right.vips_ptr());
-        op.set_int("relational", self.relational.into_vips());
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Multiply<B>: crate::operation::Lower<B>,
+{
+    pub fn multiply(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Multiply { left: self.as_input(), right: right.as_input() })
     }
 }
 
-impl TypedOperation for RelationalOperation<crate::backend::gpu::GpuBackend> {
-    type Output = ImageType;
-}
-
-impl GpuOperation for RelationalOperation<crate::backend::gpu::GpuBackend> {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let right_id = splice_sibling(graph, &self.right);
-        graph.add_node(GraphNode {
-            id: NodeId(0),
-            inputs: vec![input, right_id],
-            eval: NodeEval::Kernel(KernelSpec {
-                module: "ops.arithmetic",
-                function: "relational_kernel",
-            }),
-            params: vec![Param::U32(self.relational as u32)],
-            op: self_arc,
-            datatype: working_image_type(),
-        })
-    }
-    fn input_demands(
-        &self,
-        wu: &crate::backend::gpu::work_unit::WorkUnit,
-    ) -> Vec<(usize, crate::backend::gpu::work_unit::WorkUnit)> {
-        vec![(0, wu.clone()), (1, wu.clone())]
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Divide<B>: crate::operation::Lower<B>,
+{
+    pub fn divide(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Divide { left: self.as_input(), right: right.as_input() })
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ComplexOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// Channels (r,g) = complex pair 0, (b,a) = complex pair 1.
-// polar: (real,imag) -> (mag,angle); rect: inverse; conj: conjugate.
-
-#[derive(Debug, Clone)]
-pub struct ComplexOperation {
-    pub cmplx: OperationComplex,
-}
-
-impl VipsOperation for ComplexOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"complex\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_int("cmplx", self.cmplx.into_vips());
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    MaxPair<B>: crate::operation::Lower<B>,
+{
+    pub fn max_pair(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(MaxPair { left: self.as_input(), right: right.as_input() })
     }
 }
 
-impl TypedOperation for ComplexOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ComplexOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "complex_kernel",
-            vec![Param::U32(self.cmplx as u32)],
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    MinPair<B>: crate::operation::Lower<B>,
+{
+    pub fn min_pair(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(MinPair { left: self.as_input(), right: right.as_input() })
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ComplexgetOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct ComplexgetOperation {
-    pub get: OperationComplexget,
-}
-
-impl VipsOperation for ComplexgetOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"complexget\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_int("get", self.get.into_vips());
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Remainder<B>: crate::operation::Lower<B>,
+{
+    pub fn remainder(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Remainder { left: self.as_input(), right: right.as_input() })
     }
 }
 
-impl TypedOperation for ComplexgetOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for ComplexgetOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "complexget_kernel",
-            vec![Param::U32(self.get as u32)],
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Complexform<B>: crate::operation::Lower<B>,
+{
+    pub fn complexform(&self, right: &crate::data::image::Image2D<B>) -> Self {
+        self.push(Complexform { left: self.as_input(), right: right.as_input() })
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Math2ConstOperation (single-image + enum + constant array)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct Math2ConstOperation {
-    pub math2: OperationMath2,
-    pub constants: Vec<f64>,
-}
-
-impl VipsOperation for Math2ConstOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"math2_const\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_int("math2", self.math2.into_vips());
-        op.set_array_double("c", &self.constants);
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Complex2<B>: crate::operation::Lower<B>,
+{
+    pub fn complex2(&self, right: &crate::data::image::Image2D<B>, cmplx: OperationComplex2) -> Self {
+        self.push(Complex2 { left: self.as_input(), right: right.as_input(), cmplx })
     }
 }
 
-impl TypedOperation for Math2ConstOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for Math2ConstOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let params = const_params_with_op(self.math2 as u32, &self.constants);
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "math2_const_kernel",
-            params,
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Math<B>: crate::operation::Lower<B>,
+{
+    pub fn math(&self, math: OperationMath) -> Self {
+        self.push(Math { input: self.as_input(), math })
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// BooleanConstOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct BooleanConstOperation {
-    pub boolean: OperationBoolean,
-    pub constants: Vec<f64>,
-}
-
-impl VipsOperation for BooleanConstOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"boolean_const\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_int("boolean", self.boolean.into_vips());
-        op.set_array_double("c", &self.constants);
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Round<B>: crate::operation::Lower<B>,
+{
+    pub fn round(&self, round: OperationRound) -> Self {
+        self.push(Round { input: self.as_input(), round })
     }
 }
 
-impl TypedOperation for BooleanConstOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for BooleanConstOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let params = const_params_with_op(self.boolean as u32, &self.constants);
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "boolean_const_kernel",
-            params,
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// RelationalConstOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct RelationalConstOperation {
-    pub relational: OperationRelational,
-    pub constants: Vec<f64>,
-}
-
-impl VipsOperation for RelationalConstOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"relational_const\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_int("relational", self.relational.into_vips());
-        op.set_array_double("c", &self.constants);
-    }
-}
-
-impl TypedOperation for RelationalConstOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for RelationalConstOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let params = const_params_with_op(self.relational as u32, &self.constants);
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "relational_const_kernel",
-            params,
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// LinearOperation (single-image + scalar a, b)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct LinearOperation {
-    pub a: f64,
-    pub b: f64,
-    pub uchar: Option<bool>,
-}
-
-impl VipsOperation for LinearOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"linear\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_double("a", self.a);
-        op.set_double("b", self.b);
-        if let Some(v) = self.uchar {
-            op.set_bool("uchar", v);
-        }
-    }
-}
-
-impl TypedOperation for LinearOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for LinearOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "linear_kernel",
-            vec![Param::F32(self.a as f32), Param::F32(self.b as f32)],
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// RemainderConstOperation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone)]
-pub struct RemainderConstOperation {
-    pub constants: Vec<f64>,
-}
-
-impl VipsOperation for RemainderConstOperation {
-    type Output = crate::data::image::Image2D<crate::backend::vips::VipsBackend>;
-    fn name() -> &'static [u8] {
-        b"remainder_const\0"
-    }
-    fn build(&self, op: &mut VipsGObject, image: *mut ffi::VipsImage) {
-        op.set_image("in", image);
-        op.set_array_double("c", &self.constants);
-    }
-}
-
-impl TypedOperation for RemainderConstOperation {
-    type Output = ImageType;
-}
-
-impl GpuOperation for RemainderConstOperation {
-    fn emit(
-        &self,
-        inputs: &[NodeId],
-        graph: &mut Graph,
-        self_arc: Arc<dyn GpuOperation>,
-    ) -> NodeId {
-        let input = inputs[0];
-        let params = const_params(&self.constants);
-        emit_image(
-            graph,
-            input,
-            self_arc,
-            "ops.arithmetic",
-            "remainder_const_kernel",
-            params,
-        )
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Math2<B>: crate::operation::Lower<B>,
+{
+    pub fn math2(&self, right: &crate::data::image::Image2D<B>, math2: OperationMath2) -> Self {
+        self.push(Math2 { left: self.as_input(), right: right.as_input(), math2 })
     }
 }

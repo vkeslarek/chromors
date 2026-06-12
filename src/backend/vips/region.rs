@@ -1,7 +1,7 @@
 use crate::backend::vips::VipsBackend;
 use crate::data::image::Image2D;
 use crate::error::Error;
-use crate::libvips_ffi as ffi;
+use crate::ffi as ffi;
 
 pub struct Region {
     pub(crate) ptr: *mut ffi::VipsRegion,

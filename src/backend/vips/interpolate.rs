@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use super::IntoVipsName;
 use crate::error::Error;
-use crate::libvips_ffi as ffi;
+use crate::ffi as ffi;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InterpolationMethod {

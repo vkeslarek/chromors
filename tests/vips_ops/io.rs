@@ -1,9 +1,9 @@
 //! vips backend — I/O: open, save, buffers, memory, sources.
 
 use crate::common::rgb;
-use chromors::backend::vips::VipsBackend;
-use chromors::data::image::Image2D;
-use chromors::*;
+use poc::backend::vips::VipsBackend;
+use poc::data::image::Image2D;
+use poc::*;
 
 #[test]
 fn open_and_properties() {

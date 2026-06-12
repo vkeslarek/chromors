@@ -1,55 +1,22 @@
 [package]
-name = "chromors"
+name = "poc"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-name = "chromors"
-path = "src/lib.rs"
-
 [dependencies]
-thiserror = "2"
-serde = { version = "1", features = ["derive"] }
-bytemuck = "1"
-half = { version = "2", features = ["bytemuck"] }
-wide = "0.7"
-wgpu = { version = "29", features = ["spirv"] }
-pollster = "0.4"
-rayon = "1.12.0"
-vello = "0.9.0"
-tracing = "0.1.44"
-enum_dispatch = "0.3.13"
+bytemuck = "1.25.0"
 lru = "0.18.0"
-askama = "0.12"
+pollster = "0.4.0"
+wgpu = { version = "29.0.3", features = ["spirv"] }
+libc = "0.2"
 spirv-tools = "0.13.3"
+tracing = "0.1.44"
+half = { version = "2", features = ["bytemuck"] }
+enum_dispatch = "0.3.13"
+serde = { version = "1.0", features = ["derive"] }
+wide = "0.7.28"
 
 [build-dependencies]
 bindgen = "0.71"
-pkg-config = "0.3"
 cc = "1"
-
-[dev-dependencies]
-bytemuck = "1"
-
-[lints.clippy]
-collapsible_if                  = "deny"
-doc_overindented_list_items     = "deny"
-excessive_precision             = "deny"
-io_other_error                  = "deny"
-manual_div_ceil                 = "deny"
-manual_is_multiple_of           = "deny"
-needless_borrow                 = "deny"
-needless_range_loop             = "deny"
-ptr_arg                         = "deny"
-redundant_closure               = "deny"
-slow_vector_initialization      = "deny"
-unnecessary_cast                = "deny"
-unnecessary_map_or              = "deny"
-question_mark                   = "warn"
-module_inception                = "allow"
-new_without_default             = "allow"
-too_many_arguments              = "allow"
-type_complexity                 = "allow"
-
-[workspace]
-members = ["poc"]
+pkg-config = "0.3"

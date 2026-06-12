@@ -1,12 +1,12 @@
 //! vips backend — arithmetic / logic / reduction ops.
 
 use crate::common::rgb;
-use chromors::*;
+use poc::*;
 
 #[test]
 fn linear() {
     let bright = rgb()
-        .execute(&LinearOperation {
+        .execute(&Linear {
             a: 2.0,
             b: 0.0,
             uchar: None,
@@ -18,23 +18,23 @@ fn linear() {
 #[test]
 fn add() {
     let img = rgb();
-    let result = img.execute(&AddOperation { right: img.clone() }).unwrap();
+    let result = img.execute(&Add { right: img.clone() }).unwrap();
     assert_eq!(result.width(), 200);
 }
 
 #[test]
 fn avg_min_max() {
     let img = rgb();
-    let avg: f64 = img.execute(&AverageOperation).unwrap();
+    let avg: f64 = img.execute(&Average).unwrap();
     let min: f64 = img
-        .execute(&MinimumOperation {
+        .execute(&Minimum {
             size: None,
             x: None,
             y: None,
         })
         .unwrap();
     let max: f64 = img
-        .execute(&MaximumOperation {
+        .execute(&Maximum {
             size: None,
             x: None,
             y: None,
@@ -46,7 +46,7 @@ fn avg_min_max() {
 #[test]
 fn math_unary() {
     let out = rgb()
-        .execute(&MathOperation {
+        .execute(&Math {
             math: OperationMath::Sin,
         })
         .unwrap();
@@ -56,7 +56,7 @@ fn math_unary() {
 #[test]
 fn round_op() {
     let out = rgb()
-        .execute(&RoundOperation {
+        .execute(&Round {
             round: OperationRound::Floor,
         })
         .unwrap();
@@ -67,7 +67,7 @@ fn round_op() {
 fn boolean_binary() {
     let img = rgb();
     let out = img
-        .execute(&BooleanOperation {
+        .execute(&Boolean {
             right: img.clone(),
             boolean: OperationBoolean::And,
         })
@@ -78,7 +78,7 @@ fn boolean_binary() {
 #[test]
 fn relational_const() {
     let out = rgb()
-        .execute(&RelationalConstOperation {
+        .execute(&RelationalConst {
             relational: OperationRelational::More,
             constants: vec![128.0],
         })
@@ -89,7 +89,7 @@ fn relational_const() {
 #[test]
 fn bandbool_and() {
     let out = rgb()
-        .execute(&BandboolOperation {
+        .execute(&Bandbool {
             boolean: OperationBoolean::And,
             bands: 3,
         })
@@ -100,7 +100,7 @@ fn bandbool_and() {
 #[test]
 fn math2_const_pow() {
     let out = rgb()
-        .execute(&Math2ConstOperation {
+        .execute(&Math2Const {
             math2: OperationMath2::Pow,
             constants: vec![2.0],
         })
