@@ -110,8 +110,21 @@ pub struct Embed<B: Backend> {
 impl<B: Backend> Operation<B> for Embed<B> where Embed<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x - self.x,
+            y: out.y - self.y,
+            w: out.w,
+            h: out.h,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = self.width;
+        spec.height = self.height;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.x);
         state.write_i32(self.y);
@@ -143,7 +156,14 @@ pub struct Flip<B: Backend> {
 impl<B: Backend> Operation<B> for Flip<B> where Flip<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        let (x, y) = match self.direction {
+            Direction::Horizontal => (spec.width - out.x - out.w, out.y),
+            Direction::Vertical => (out.x, spec.height - out.y - out.h),
+        };
+        vec![Some(WorkUnit::Region(Region { x, y, w: out.w, h: out.h, lod: out.lod }))]
+    }
     fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
@@ -167,8 +187,24 @@ pub struct Rot90<B: Backend> {
 impl<B: Backend> Operation<B> for Rot90<B> where Rot90<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        let (w, h) = (spec.width, spec.height);
+        let region = match self.angle {
+            Angle::D0 => out.clone(),
+            Angle::D90 => Region { x: out.y, y: h - out.x - out.w, w: out.h, h: out.w, lod: out.lod },
+            Angle::D180 => Region { x: w - out.x - out.w, y: h - out.y - out.h, w: out.w, h: out.h, lod: out.lod },
+            Angle::D270 => Region { x: w - out.y - out.h, y: out.x, w: out.h, h: out.w, lod: out.lod },
+        };
+        vec![Some(WorkUnit::Region(region))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        if matches!(self.angle, Angle::D90 | Angle::D270) {
+            std::mem::swap(&mut spec.width, &mut spec.height);
+        }
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.angle.into_vips());
     }
@@ -191,8 +227,34 @@ pub struct Rot45<B: Backend> {
 impl<B: Backend> Operation<B> for Rot45<B> where Rot45<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        let (w, h) = (spec.width, spec.height);
+        match self.angle {
+            Angle45::D0 => vec![Some(WorkUnit::Region(out.clone()))],
+            Angle45::D180 => vec![Some(WorkUnit::Region(Region {
+                x: w - out.x - out.w,
+                y: h - out.y - out.h,
+                w: out.w,
+                h: out.h,
+                lod: out.lod,
+            }))],
+            _ => vec![Some(WorkUnit::Region(Region::full((w, h), out.lod)))],
+        }
+    }
+    fn output_spec(&self) -> ImageKind {
+        let spec = (*self.input.spec).clone();
+        match self.angle {
+            Angle45::D0 | Angle45::D90 | Angle45::D180 | Angle45::D270 => spec,
+            _ => {
+                let mut spec = spec;
+                let diag = ((spec.width as f64 + spec.height as f64) / std::f64::consts::SQRT_2).ceil() as i32;
+                spec.width = diag;
+                spec.height = diag;
+                spec
+            }
+        }
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.angle.into_vips());
     }
@@ -220,7 +282,10 @@ pub struct Rotate<B: Backend> {
 impl<B: Backend> Operation<B> for Rotate<B> where Rotate<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+    }
     fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.angle.to_bits());
@@ -255,8 +320,16 @@ pub struct Smartcrop<B: Backend> {
 impl<B: Backend> Operation<B> for Smartcrop<B> where Smartcrop<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = self.width;
+        spec.height = self.height;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.width);
         state.write_i32(self.height);
@@ -287,8 +360,35 @@ pub struct Gravity<B: Backend> {
 impl<B: Backend> Operation<B> for Gravity<B> where Gravity<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        let (old_w, old_h) = (spec.width, spec.height);
+        let (new_w, new_h) = (self.width, self.height);
+        let (ox, oy) = match self.direction {
+            CompassDirection::Centre => ((new_w - old_w) / 2, (new_h - old_h) / 2),
+            CompassDirection::North => ((new_w - old_w) / 2, 0),
+            CompassDirection::South => ((new_w - old_w) / 2, new_h - old_h),
+            CompassDirection::East => (new_w - old_w, (new_h - old_h) / 2),
+            CompassDirection::West => (0, (new_h - old_h) / 2),
+            CompassDirection::NorthEast => (new_w - old_w, 0),
+            CompassDirection::NorthWest => (0, 0),
+            CompassDirection::SouthEast => (new_w - old_w, new_h - old_h),
+            CompassDirection::SouthWest => (0, new_h - old_h),
+        };
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x - ox,
+            y: out.y - oy,
+            w: out.w,
+            h: out.h,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = self.width;
+        spec.height = self.height;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
         state.write_i32(self.width);
@@ -321,8 +421,25 @@ pub struct Resize<B: Backend> {
 impl<B: Backend> Operation<B> for Resize<B> where Resize<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let hscale = self.scale;
+        let vscale = self.vertical_scale.unwrap_or(self.scale);
+        vec![Some(WorkUnit::Region(Region {
+            x: (out.x as f64 / hscale).floor() as i32,
+            y: (out.y as f64 / vscale).floor() as i32,
+            w: ((out.x + out.w) as f64 / hscale).ceil() as i32 - (out.x as f64 / hscale).floor() as i32,
+            h: ((out.y + out.h) as f64 / vscale).ceil() as i32 - (out.y as f64 / vscale).floor() as i32,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        let hscale = self.scale;
+        let vscale = self.vertical_scale.unwrap_or(self.scale);
+        spec.width = (spec.width as f64 * hscale).round() as i32;
+        spec.height = (spec.height as f64 * vscale).round() as i32;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.scale.to_bits());
         state.write_u64(self.vertical_scale.unwrap_or(0.0).to_bits());
@@ -361,8 +478,29 @@ pub struct Thumbnail<B: Backend> {
 impl<B: Backend> Operation<B> for Thumbnail<B> where Thumbnail<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        let (in_w, in_h) = (spec.width as f64, spec.height as f64);
+        let target_w = self.width as f64;
+        let (out_w, out_h) = match self.height {
+            Some(h) => {
+                let target_h = h as f64;
+                let scale = (target_w / in_w).min(target_h / in_h);
+                (in_w * scale, in_h * scale)
+            }
+            None => {
+                let scale = target_w / in_w;
+                (in_w * scale, in_h * scale)
+            }
+        };
+        spec.width = out_w.round().max(1.0) as i32;
+        spec.height = out_h.round().max(1.0) as i32;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.width);
         state.write_i32(self.height.unwrap_or(0));
@@ -431,6 +569,17 @@ impl Lower<VipsBackend> for Shrink<VipsBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Shrink<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("h_factor", "uint", self.horizontal.ceil() as u32)
+            .param("v_factor", "uint", self.vertical.ceil() as u32)
+        );
+        cx.kernel("shrink_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
 pub struct Reduce<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub horizontal: f64,
@@ -441,8 +590,23 @@ pub struct Reduce<B: Backend> {
 impl<B: Backend> Operation<B> for Reduce<B> where Reduce<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] } // approx
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let hf = self.horizontal;
+        let vf = self.vertical;
+        vec![Some(WorkUnit::Region(Region {
+            x: (out.x as f64 * hf).floor() as i32,
+            y: (out.y as f64 * vf).floor() as i32,
+            w: ((out.x + out.w) as f64 * hf).ceil() as i32 - (out.x as f64 * hf).floor() as i32,
+            h: ((out.y + out.h) as f64 * vf).ceil() as i32 - (out.y as f64 * vf).floor() as i32,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = (spec.width as f64 / self.horizontal).floor() as i32;
+        spec.height = (spec.height as f64 / self.vertical).floor() as i32;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.horizontal.to_bits());
         state.write_u64(self.vertical.to_bits());
@@ -473,8 +637,21 @@ pub struct ReduceHorizontal<B: Backend> {
 impl<B: Backend> Operation<B> for ReduceHorizontal<B> where ReduceHorizontal<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let hf = self.shrink;
+        vec![Some(WorkUnit::Region(Region {
+            x: (out.x as f64 * hf).floor() as i32,
+            y: out.y,
+            w: ((out.x + out.w) as f64 * hf).ceil() as i32 - (out.x as f64 * hf).floor() as i32,
+            h: out.h,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = (spec.width as f64 / self.shrink).floor() as i32;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.shrink.to_bits());
         if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
@@ -503,8 +680,21 @@ pub struct ReduceVertical<B: Backend> {
 impl<B: Backend> Operation<B> for ReduceVertical<B> where ReduceVertical<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let vf = self.shrink;
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x,
+            y: (out.y as f64 * vf).floor() as i32,
+            w: out.w,
+            h: ((out.y + out.h) as f64 * vf).ceil() as i32 - (out.y as f64 * vf).floor() as i32,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.height = (spec.height as f64 / self.shrink).floor() as i32;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.shrink.to_bits());
         if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
@@ -532,8 +722,21 @@ pub struct ShrinkHorizontal<B: Backend> {
 impl<B: Backend> Operation<B> for ShrinkHorizontal<B> where ShrinkHorizontal<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let hf = self.shrink;
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x * hf,
+            y: out.y,
+            w: out.w * hf,
+            h: out.h,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = (spec.width + self.shrink - 1) / self.shrink;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) { state.write_i32(self.shrink); }
 }
 impl Lower<VipsBackend> for ShrinkHorizontal<VipsBackend> {
@@ -548,6 +751,17 @@ impl Lower<VipsBackend> for ShrinkHorizontal<VipsBackend> {
     }
 }
 
+impl Lower<GpuBackend> for ShrinkHorizontal<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("h_factor", "uint", self.shrink as u32)
+            .param("v_factor", "uint", 1u32)
+        );
+        cx.kernel("shrink_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
 pub struct ShrinkVertical<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub shrink: i32,
@@ -556,8 +770,21 @@ pub struct ShrinkVertical<B: Backend> {
 impl<B: Backend> Operation<B> for ShrinkVertical<B> where ShrinkVertical<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let vf = self.shrink;
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x,
+            y: out.y * vf,
+            w: out.w,
+            h: out.h * vf,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.height = (spec.height + self.shrink - 1) / self.shrink;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) { state.write_i32(self.shrink); }
 }
 impl Lower<VipsBackend> for ShrinkVertical<VipsBackend> {
@@ -569,6 +796,17 @@ impl Lower<VipsBackend> for ShrinkVertical<VipsBackend> {
         if let Some(c) = self.ceil { op.set_bool("ceil", c); }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for ShrinkVertical<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("h_factor", "uint", 1u32)
+            .param("v_factor", "uint", self.shrink as u32)
+        );
+        cx.kernel("shrink_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 
@@ -587,7 +825,12 @@ impl<B: Backend> Operation<B> for ExtractArea<B> where ExtractArea<B>: Lower<B> 
             x: out.x + self.left, y: out.y + self.top, w: out.w, h: out.h, lod: out.lod
         }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = self.width;
+        spec.height = self.height;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.left);
         state.write_i32(self.top);
@@ -618,8 +861,21 @@ pub struct Subsample<B: Backend> {
 impl<B: Backend> Operation<B> for Subsample<B> where Subsample<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x * self.horizontal,
+            y: out.y * self.vertical,
+            w: out.w * self.horizontal,
+            h: out.h * self.vertical,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width = (spec.width + self.horizontal - 1) / self.horizontal;
+        spec.height = (spec.height + self.vertical - 1) / self.vertical;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.horizontal);
         state.write_i32(self.vertical);
@@ -646,8 +902,21 @@ pub struct Zoom<B: Backend> {
 impl<B: Backend> Operation<B> for Zoom<B> where Zoom<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(Region {
+            x: out.x / self.horizontal,
+            y: out.y / self.vertical,
+            w: (out.x + out.w + self.horizontal - 1) / self.horizontal - out.x / self.horizontal,
+            h: (out.y + out.h + self.vertical - 1) / self.vertical - out.y / self.vertical,
+            lod: out.lod,
+        }))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width *= self.horizontal;
+        spec.height *= self.vertical;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.horizontal);
         state.write_i32(self.vertical);
@@ -673,8 +942,23 @@ pub struct Replicate<B: Backend> {
 impl<B: Backend> Operation<B> for Replicate<B> where Replicate<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        let (w, h) = (spec.width, spec.height);
+        let x0 = out.x.rem_euclid(w);
+        let y0 = out.y.rem_euclid(h);
+        if x0 + out.w <= w && y0 + out.h <= h {
+            vec![Some(WorkUnit::Region(Region { x: x0, y: y0, w: out.w, h: out.h, lod: out.lod }))]
+        } else {
+            vec![Some(WorkUnit::Region(Region::full((w, h), out.lod)))]
+        }
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width *= self.across;
+        spec.height *= self.down;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.across);
         state.write_i32(self.down);
@@ -701,8 +985,16 @@ pub struct Grid<B: Backend> {
 impl<B: Backend> Operation<B> for Grid<B> where Grid<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        let spec = &*self.input.spec;
+        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.width *= self.across;
+        spec.height = self.tile_height * self.down;
+        spec
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.tile_height);
         state.write_i32(self.across);

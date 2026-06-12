@@ -1,4 +1,4 @@
-use super::{GpuBuilder, StepInput};
+use super::{GpuBuilder, StepInput, TempElem};
 use super::view::OutBuffer;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -38,7 +38,17 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     s.push_str("import ops.invert;\n");
     s.push_str("import ops.gaussian_blur;\n");
     s.push_str("import ops.histogram;\n");
-    s.push_str("import ops.arithmetic;\n\n");
+    s.push_str("import ops.arithmetic;\n");
+    s.push_str("import ops.bands;\n");
+    s.push_str("import ops.composite;\n");
+    s.push_str("import ops.convolution;\n");
+    s.push_str("import ops.exposure;\n");
+    s.push_str("import ops.gamma;\n");
+    s.push_str("import ops.passthrough;\n");
+    s.push_str("import ops.vectorscope;\n");
+    s.push_str("import ops.opacity;\n");
+    s.push_str("import ops.saturation;\n");
+    s.push_str("import ops.shrink;\n\n");
 
     // ── ChainParams (one SSBO: per-slot BufferRegions + op scalars) ──────────
     s.push_str("struct ChainParams {\n");
@@ -55,14 +65,15 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     // The target's element type: the encode wrapper's (sandwich) or the direct
     // out-arg wrapper's.
     let target_elem = output.encode.as_ref().map(|e| e.buffer_type.as_ref())
-        .unwrap_or(output.arg_type.as_ref());
+        .unwrap_or(output.buffer_type.as_ref());
     let mut binding = 0u32;
     s.push_str(&format!("[[vk::binding({binding}, 0)]] RWStructuredBuffer<{target_elem}> target_buffer;\n"));
     binding += 1;
     s.push_str(&format!("[[vk::binding({binding}, 0)]] StructuredBuffer<ChainParams> params;\n"));
     binding += 1;
     for k in 0..n_work {
-        s.push_str(&format!("[[vk::binding({binding}, 0)]] RWStructuredBuffer<float4> work_{k};\n"));
+        let elem = builder.steps[k].temp_elem.buffer_ty;
+        s.push_str(&format!("[[vk::binding({binding}, 0)]] RWStructuredBuffer<{elem}> work_{k};\n"));
         binding += 1;
     }
     for (i, view) in builder.input_views.iter().enumerate() {
@@ -96,11 +107,33 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
             match inp {
                 StepInput::Source(i) => read_args.push(format!("in_{i}")),
                 StepInput::Step(j) => {
-                    // Prior step's temp is RW-bound → wrap in `RWRegion`
-                    // (an `IRegion`, so kernels accept it).
+                    // Prior step's temp is RW-bound → wrap in its region
+                    // wrapper (an `IRegion`, so kernels accept it).
+                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
                     let var = format!("r_{s_i}_{k}");
                     s.push_str(&format!(
-                        "    RWRegion {var} = {{ work_{j}, params[0].region_out }};\n"
+                        "    {wrapper} {var} = {{ work_{j}, params[0].region_out }};\n"
+                    ));
+                    read_args.push(var);
+                }
+                StepInput::SwizzleSource(i, c) => {
+                    // A "free" alias of a source decode (e.g. ExtractBand
+                    // directly on a freshly-opened image): read one component
+                    // of `in_{i}` through `SwizzleView`.
+                    let var = format!("r_{s_i}_{k}");
+                    s.push_str(&format!(
+                        "    SwizzleView<{}> {var} = {{ in_{i}, {c}u }};\n",
+                        builder.input_views[*i].slang
+                    ));
+                    read_args.push(var);
+                }
+                StepInput::SwizzleStep(j, c) => {
+                    // A "free" alias (e.g. ExtractBand): read one component
+                    // of a prior step's temp through `SwizzleView`.
+                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
+                    let var = format!("r_{s_i}_{k}");
+                    s.push_str(&format!(
+                        "    SwizzleView<{wrapper}> {var} = {{ {{ work_{j}, params[0].region_out }}, {c}u }};\n"
                     ));
                     read_args.push(var);
                 }
@@ -119,8 +152,9 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
                 .replace("{region}", "params[0].region_out");
             s.push_str(&format!("    {} {out_var} = {init};\n", output.arg_type));
         } else {
+            let wrapper = step.temp_elem.region_wrapper;
             s.push_str(&format!(
-                "    RWRegion {out_var} = {{ work_{s_i}, params[0].region_out }};\n"
+                "    {wrapper} {out_var} = {{ work_{s_i}, params[0].region_out }};\n"
             ));
         }
 
@@ -138,7 +172,39 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         if is_last && let Some(encode) = &output.encode {
             let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
             s.push_str(&format!("    {} enc = {};\n", encode.slang, init));
-            s.push_str(&format!("    enc.write(idx, {out_var}.read(idx));\n"));
+            if let Some(c) = builder.output_swizzle {
+                // The DAG root is a pure alias: broadcast the swizzled
+                // component back into this temp's full shape before encode.
+                let comp = step.temp_elem.component(c);
+                let scalar = format!("{out_var}.read(idx).{comp}");
+                let broadcast = step.temp_elem.broadcast_expr(&scalar);
+                s.push_str(&format!("    enc.write(idx, {broadcast});\n"));
+            } else {
+                s.push_str(&format!("    enc.write(idx, {out_var}.read(idx));\n"));
+            }
+        }
+    }
+
+    // A pure alias of a source with zero kernel steps (e.g. `extract_band`
+    // applied directly to a freshly-opened image — no other ops in the
+    // chain). The per-step loop above never ran, so encode straight from the
+    // resolved source read here.
+    if n_steps == 0 {
+        if let Some(encode) = &output.encode {
+            let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
+            s.push_str(&format!("    {} enc = {};\n", encode.slang, init));
+            match (builder.cur_inputs.first(), builder.output_swizzle) {
+                (Some(StepInput::SwizzleSource(i, c)), Some(_)) => {
+                    let comp = TempElem::F4.component(*c);
+                    let scalar = format!("in_{i}.read(idx).{comp}");
+                    let broadcast = TempElem::F4.broadcast_expr(&scalar);
+                    s.push_str(&format!("    enc.write(idx, {broadcast});\n"));
+                }
+                (Some(StepInput::Source(i)), _) => {
+                    s.push_str(&format!("    enc.write(idx, in_{i}.read(idx));\n"));
+                }
+                _ => {}
+            }
         }
     }
 

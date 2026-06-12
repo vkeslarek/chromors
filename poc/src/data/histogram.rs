@@ -55,6 +55,7 @@ impl GpuView for HistogramKind {
             arg_type: "HistogramOut".into(),
             arg_ctor: "{ {buf}, {params}[0].bin_count }".into(),
             arg_buffer: OutBuffer::Target,
+            buffer_type: "uint".into(),
             encode: None,
         }
     }
@@ -99,8 +100,9 @@ impl Lower<GpuBackend> for HistogramOp {
         let wu = cx.wu().clone();
         // Inputs come from the source leaf, not here. Reduction output: the
         // kernel writes the atomic-accumulate wrapper directly (no sandwich).
-        cx.param_block(self.output_spec().params(&wu)); // bin_count
-        cx.kernel("histogram_main").param("channel", self.channel);
+        // bin_count is consumed by the output ctor only, not a kernel arg.
+        cx.output_params(self.output_spec().params(&wu));
+        cx.kernel("histogram_kernel").param("channel", self.channel);
         cx.output(self.output_spec().output());
     }
 }
@@ -110,5 +112,24 @@ impl Lower<GpuBackend> for HistogramOp {
 impl crate::data::image::Image2D<GpuBackend> {
     pub fn histogram(&self, bins: u32, channel: u32) -> Histogram {
         self.push(HistogramOp { input: self.as_input(), bins, channel })
+    }
+}
+
+// ── Target ───────────────────────────────────────────────────────────────────
+
+/// Reads an `Atomic`-shaped GPU buffer (e.g. histogram bins) back to host RAM
+/// as raw `u32` counter bytes.
+pub struct RawTarget;
+
+impl crate::io::Target<HistogramKind, GpuBackend> for RawTarget {
+    type Out = Vec<u8>;
+
+    fn extract(
+        &self,
+        buf: &crate::buffer::Buffer<GpuBackend>,
+        _wu: &Atomic,
+        ctx: &crate::backend::gpu::context::GpuContext,
+    ) -> Result<Self::Out, crate::error::Error> {
+        buf.payload.read_to_cpu(ctx)
     }
 }

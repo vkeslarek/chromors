@@ -42,17 +42,20 @@ impl Kind for VectorscopeKind {
 
 impl GpuView for VectorscopeKind {
     fn input(&self) -> View {
-        View::new("uint", "VectorscopeOut", "{ {buf}, {params}[0].grid_size }")
+        View::new("uint", "HistogramOut", "{ {buf}, {params}[0].bin_count }")
     }
     /// Reduction output: written directly into the target (atomic), no sandwich.
     fn output(&self) -> OutputWrap {
         OutputWrap {
-            arg_type: "VectorscopeOut".into(),
-            arg_ctor: "{ {buf}, {params}[0].grid_size }".into(),
+            arg_type: "HistogramOut".into(),
+            arg_ctor: "{ {buf}, {params}[0].bin_count }".into(),
             arg_buffer: OutBuffer::Target,
+            buffer_type: "uint".into(),
             encode: None,
         }
     }
+    /// `grid_size` is a kernel arg (used for gx/gy math); `bin_count` (=
+    /// grid*grid) is consumed only by the output ctor's bounds check.
     fn params(&self, _wu: &WorkUnit) -> ParamBlock {
         ParamBlock::scalar("grid_size", "uint", self.grid)
     }
@@ -89,6 +92,9 @@ impl Lower<GpuBackend> for VectorscopeOp {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         // Inputs come from the source leaf. Reduction output: written directly.
+        // bin_count (= grid*grid) is consumed only by the output ctor, not a
+        // kernel arg; grid_size is a real kernel arg used in gx/gy math.
+        cx.output_params(ParamBlock::scalar("bin_count", "uint", self.grid * self.grid));
         cx.param_block(self.output_spec().params(&wu));
         cx.kernel("vectorscope_kernel");
         cx.output(self.output_spec().output());
@@ -100,5 +106,20 @@ impl Lower<GpuBackend> for VectorscopeOp {
 impl crate::data::image::Image2D<GpuBackend> {
     pub fn vectorscope(&self, grid: u32) -> Vectorscope {
         self.push(VectorscopeOp { input: self.as_input(), grid })
+    }
+}
+
+// ── Target ───────────────────────────────────────────────────────────────────
+
+impl crate::io::Target<VectorscopeKind, GpuBackend> for crate::data::histogram::RawTarget {
+    type Out = Vec<u8>;
+
+    fn extract(
+        &self,
+        buf: &crate::buffer::Buffer<GpuBackend>,
+        _wu: &Atomic,
+        ctx: &crate::backend::gpu::context::GpuContext,
+    ) -> Result<Self::Out, crate::error::Error> {
+        buf.payload.read_to_cpu(ctx)
     }
 }

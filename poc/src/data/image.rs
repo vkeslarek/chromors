@@ -94,6 +94,7 @@ impl GpuView for ImageKind {
             arg_type: "RWRegion".into(),
             arg_ctor: "{ {buf}, {region} }".into(),
             arg_buffer: OutBuffer::Scratch,
+            buffer_type: "uint".into(),
             encode: Some(View::new(
                 "Atomic<uint>",
                 format!("RWCodecRegion<{}, {}>", self.codec(), self.layout()),
@@ -106,8 +107,8 @@ impl GpuView for ImageKind {
 impl ImageKind {
     fn codec(&self) -> &'static str {
         match self.format {
-            PixelFormat::RgbaF32 | PixelFormat::RgbF32 => "F32Codec",
-            PixelFormat::Rgba16 | PixelFormat::Rgb16 | PixelFormat::Gray16 => "U16Codec",
+            PixelFormat::RgbaF32 | PixelFormat::RgbF32 | PixelFormat::GrayF32 | PixelFormat::GrayAF32 => "F32Codec",
+            PixelFormat::Rgba16 | PixelFormat::Rgb16 | PixelFormat::Gray16 | PixelFormat::GrayA16 => "U16Codec",
             _ => "U8Codec",
         }
     }
@@ -116,8 +117,32 @@ impl ImageKind {
         match self.format {
             PixelFormat::Rgba8 | PixelFormat::Rgba16 | PixelFormat::RgbaF32 => 0,
             PixelFormat::Rgb8 | PixelFormat::Rgb16 | PixelFormat::RgbF32 => 1,
-            PixelFormat::Gray8 | PixelFormat::Gray16 => 2,
+            PixelFormat::Gray8 | PixelFormat::Gray16 | PixelFormat::GrayF32 => 2,
+            PixelFormat::GrayA8 | PixelFormat::GrayA16 | PixelFormat::GrayAF32 => 3,
             _ => 0,
+        }
+    }
+
+    /// The format with `count` bands, same sample type as `self` — used by
+    /// `ExtractBand`/`Bandjoin`'s GPU output spec. Family-aware (byte size
+    /// alone can't disambiguate U16 vs F16, both 2 bytes/sample); only
+    /// U8/U16/F32 codecs exist, so F16-family inputs fall back to F32. Band
+    /// counts outside 1..=4 keep `self.format` (no codec/layout for them).
+    pub fn with_band_count(&self, count: i32) -> PixelFormat {
+        match (self.codec(), count) {
+            ("F32Codec", 1) => PixelFormat::GrayF32,
+            ("F32Codec", 2) => PixelFormat::GrayAF32,
+            ("F32Codec", 3) => PixelFormat::RgbF32,
+            ("F32Codec", 4) => PixelFormat::RgbaF32,
+            ("U16Codec", 1) => PixelFormat::Gray16,
+            ("U16Codec", 2) => PixelFormat::GrayA16,
+            ("U16Codec", 3) => PixelFormat::Rgb16,
+            ("U16Codec", 4) => PixelFormat::Rgba16,
+            (_, 1) => PixelFormat::Gray8,
+            (_, 2) => PixelFormat::GrayA8,
+            (_, 3) => PixelFormat::Rgb8,
+            (_, 4) => PixelFormat::Rgba8,
+            _ => self.format,
         }
     }
 }

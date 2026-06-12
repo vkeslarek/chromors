@@ -483,8 +483,8 @@ impl Lower<VipsBackend> for Exposure<VipsBackend> {
         let gain = 2.0f64.powf(self.stops as f64);
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
         op.set_image("in", input_handle.ptr);
-        op.set_double("a", gain);
-        op.set_double("b", 0.0);
+        op.set_array_double("a", &[gain]);
+        op.set_array_double("b", &[0.0]);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -510,8 +510,8 @@ impl Lower<VipsBackend> for Brightness<VipsBackend> {
         let input_handle = cx.input(self.input.src());
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
         op.set_image("in", input_handle.ptr);
-        op.set_double("a", self.value as f64);
-        op.set_double("b", 0.0);
+        op.set_array_double("a", &[self.value as f64]);
+        op.set_array_double("b", &[0.0]);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -544,7 +544,104 @@ impl Lower<VipsBackend> for NoiseReduction<VipsBackend> {
     }
 }
 
+// ── Saturation ────────────────────────────────────────────────────────────────
+
+pub struct Saturation<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub amount: f32,
+}
+
+impl<B: Backend> Operation<B> for Saturation<B> where Saturation<B>: Lower<B> {
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_u32(self.amount.to_bits());
+    }
+}
+
+impl Lower<VipsBackend> for Saturation<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let ptr = input_handle.ptr;
+        let bands = unsafe { crate::ffi::vips_image_get_bands(ptr) };
+        if bands < 3 {
+            // Grayscale: saturation has no effect
+            unsafe { crate::ffi::g_object_ref(ptr as *mut _) };
+            cx.emit(crate::backend::vips::VipsHandle { ptr });
+            return;
+        }
+
+        let ext = |b| {
+            let mut o = crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
+            o.set_image("in", ptr);
+            o.set_int("band", b);
+            o.run().unwrap().ptr
+        };
+        let r = ext(0);
+        let g = ext(1);
+        let b = ext(2);
+
+        let mul = |p, w: f64| {
+            let mut o = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
+            o.set_image("in", p);
+            o.set_array_double("a", &[w]);
+            o.set_array_double("b", &[0.0]);
+            o.run().unwrap().ptr
+        };
+        let luma_r = mul(r, 0.2126);
+        let luma_g = mul(g, 0.7152);
+        let luma_b = mul(b, 0.0722);
+
+        let add = |p1, p2| {
+            let mut o = crate::backend::vips::gobject::VipsGObject::new(b"add\0").unwrap();
+            o.set_image("left", p1);
+            o.set_image("right", p2);
+            o.run().unwrap().ptr
+        };
+        let luma1 = add(luma_r, luma_g);
+        let luma = add(luma1, luma_b);
+
+        let mut op_rgb = crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
+        op_rgb.set_image("in", ptr);
+        op_rgb.set_int("band", 0);
+        op_rgb.set_int("n", 3);
+        let rgb_ptr = op_rgb.run().unwrap().ptr;
+
+        let rgb_scaled = mul(rgb_ptr, self.amount as f64);
+        let luma_scaled = mul(luma, 1.0 - self.amount as f64);
+
+        let out_rgb = add(rgb_scaled, luma_scaled);
+
+        let out_ptr = if bands > 3 {
+            let mut op_a = crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
+            op_a.set_image("in", ptr);
+            op_a.set_int("band", 3);
+            op_a.set_int("n", bands - 3);
+            let a_ptr = op_a.run().unwrap().ptr;
+
+            let mut out: *mut crate::ffi::VipsImage = std::ptr::null_mut();
+            let arr = [out_rgb, a_ptr];
+            let ret = unsafe { crate::ffi::vips_bandjoin(arr.as_ptr() as *mut *mut _, &mut out, 2, crate::backend::vips::null()) };
+            if ret != 0 { panic!("vips_bandjoin failed"); }
+            out
+        } else {
+            out_rgb
+        };
+        cx.emit(crate::backend::vips::VipsHandle { ptr: out_ptr });
+    }
+}
+
 // ── GPU Lowering ──────────────────────────────────────────────────────────────
+
+impl Lower<GpuBackend> for Saturation<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("amount", "float", self.amount));
+        cx.kernel("saturation_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
 
 impl Lower<GpuBackend> for Exposure<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
@@ -675,5 +772,14 @@ where
 {
     pub fn noise_reduction(&self, strength: f32) -> Self {
         self.push(NoiseReduction { input: self.as_input(), strength })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Saturation<B>: crate::operation::Lower<B>,
+{
+    pub fn saturation(&self, amount: f32) -> Self {
+        self.push(Saturation { input: self.as_input(), amount })
     }
 }

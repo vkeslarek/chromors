@@ -2,10 +2,10 @@ use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
-use crate::pixel::PixelFormat;
 
 pub struct Opacity<B: Backend> {
     pub input: Input<ImageKind, B>,
@@ -20,10 +20,11 @@ impl<B: Backend> Operation<B> for Opacity<B> where Opacity<B>: Lower<B> {
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        // If it didn't have alpha, it now does.
+        // If it didn't have alpha, it now does (same codec, +1 band).
         let channels = spec.format.channel_count();
-        if channels == 1 { spec.format = PixelFormat::GrayA8; } // roughly
-        if channels == 3 { spec.format = PixelFormat::Rgba8; }
+        if channels == 1 || channels == 3 {
+            spec.format = spec.with_band_count(channels as i32 + 1);
+        }
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -67,8 +68,8 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         if bands < 2 {
             let mut op = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
             op.set_image("in", ptr);
-            op.set_double("a", self.amount as f64);
-            op.set_double("b", 0.0);
+            op.set_array_double("a", &[self.amount as f64]);
+            op.set_array_double("b", &[0.0]);
             let out_handle = op.run().unwrap();
             cx.emit(out_handle);
             return;
@@ -91,8 +92,8 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         // 4. Scale Alpha
         let mut op_lin = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
         op_lin.set_image("in", alpha_handle.ptr);
-        op_lin.set_double("a", self.amount as f64);
-        op_lin.set_double("b", 0.0);
+        op_lin.set_array_double("a", &[self.amount as f64]);
+        op_lin.set_array_double("b", &[0.0]);
         let uchar = format == crate::ffi::VipsBandFormat_VIPS_FORMAT_UCHAR;
         if uchar { op_lin.set_bool("uchar", true); }
         let scaled_alpha_handle = op_lin.run().unwrap();
@@ -117,6 +118,14 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         if ret != 0 { panic!("vips_bandjoin failed"); }
 
         cx.emit(crate::backend::vips::VipsHandle { ptr: out });
+    }
+}
+
+impl crate::operation::Lower<crate::backend::gpu::GpuBackend> for Opacity<crate::backend::gpu::GpuBackend> {
+    fn lower(&self, cx: &mut crate::backend::gpu::GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new().param("amount", "float", self.amount));
+        cx.kernel("opacity_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 
