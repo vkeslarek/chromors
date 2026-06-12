@@ -454,78 +454,78 @@ impl Lower<VipsBackend> for Convasep<VipsBackend> {
 impl Lower<GpuBackend> for Convolution<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Morph<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
-            .param("morph", "uint", self.morph.into_vips() as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
+            .param("morph", self.morph.into_vips() as u32)
         );
-        cx.kernel("morph_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "morph_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Conva<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Convf<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Convi<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Convsep<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Convasep<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mw", "uint", self.mask.spec.width as u32)
-            .param("mh", "uint", self.mask.spec.height as u32)
+            .param("mw", self.mask.spec.width as u32)
+            .param("mh", self.mask.spec.height as u32)
         );
-        cx.kernel("convolution_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.convolution", "convolution_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

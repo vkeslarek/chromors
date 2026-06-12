@@ -43,13 +43,7 @@ pub fn gpu_ctx() -> Arc<GpuContext> {
 /// Upload a vips image to the POC GpuBackend.
 pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImage<GpuBackend> {
     let src = Arc::new(poc::data::image::VipsImageSource::new(img.clone()));
-    let root = Arc::new(poc::node::Node::Source(src.clone()));
-    GenImage::<GpuBackend> {
-        root,
-        ctx: ctx.clone(),
-        spec: <poc::data::image::VipsImageSource as poc::io::Source<GpuBackend>>::spec(&src),
-        _m: std::marker::PhantomData,
-    }
+    poc::node::Data::from_source(src, ctx.clone())
 }
 
 /// Materialize a POC GPU image and read back the raw f32 bytes.

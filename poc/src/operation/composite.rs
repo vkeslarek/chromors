@@ -66,7 +66,7 @@ where
     }
 
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone()))]
+        vec![Some(WorkUnit::Region(out.clone())); 2]
     }
 
     fn output_spec(&self) -> ImageKind {
@@ -125,7 +125,7 @@ where
     }
 
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone()))]
+        vec![Some(WorkUnit::Region(out.clone())); 2]
     }
 
     fn output_spec(&self) -> ImageKind {
@@ -185,7 +185,7 @@ where
     }
 
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone()))]
+        vec![Some(WorkUnit::Region(out.clone())); 2]
     }
 
     fn output_spec(&self) -> ImageKind {
@@ -221,34 +221,34 @@ impl Lower<VipsBackend> for Insert<VipsBackend> {
 impl Lower<GpuBackend> for Composite2<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("mode", "uint", self.mode.into_vips() as u32)
-            .param("x", "int", self.x.unwrap_or(0))
-            .param("y", "int", self.y.unwrap_or(0))
+            .param("mode", self.mode.into_vips() as u32)
+            .param("x", self.x.unwrap_or(0))
+            .param("y", self.y.unwrap_or(0))
         );
-        cx.kernel("compose_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.composite", "compose_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Join<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("direction", "int", self.direction.into_vips())
-            .param("shim", "int", self.shim.unwrap_or(0))
-            .param("align", "int", self.align.map(|a| a.into_vips()).unwrap_or(0))
+            .param("direction", self.direction.into_vips())
+            .param("shim", self.shim.unwrap_or(0))
+            .param("align", self.align.map(|a| a.into_vips()).unwrap_or(0))
         );
-        cx.kernel("join_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.composite", "join_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Insert<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("x", "int", self.x)
-            .param("y", "int", self.y)
+            .param("x", self.x)
+            .param("y", self.y)
         );
-        cx.kernel("insert_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.composite", "insert_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }

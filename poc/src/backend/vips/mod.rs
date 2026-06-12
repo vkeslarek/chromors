@@ -10,7 +10,8 @@ use crate::error::Error;
 use crate::ffi;
 use crate::node::Node;
 use crate::work_unit::WorkUnit;
-use crate::backend::Backend;
+use crate::kind::AnyKind;
+use crate::backend::{Backend, Builder};
 use crate::buffer::Buffer;
 
 pub(crate) fn null() -> *const std::ffi::c_void {
@@ -93,10 +94,10 @@ pub trait VipsBand: crate::kind::Kind {
     fn band_format(&self) -> i32;
 }
 
-type NodeKey = usize;
+type NodeKey = crate::node::NodeId;
 
 fn node_key(node: &Arc<Node<VipsBackend>>) -> NodeKey {
-    Arc::as_ptr(node) as *const () as NodeKey
+    crate::node::NodeId::of(node)
 }
 
 /// Lowering accumulator for vips — node-keyed handle map (symmetric to the GPU
@@ -117,11 +118,6 @@ impl Default for VipsBuilder {
 }
 
 impl VipsBuilder {
-    /// Materializer hook: announce the node about to be lowered.
-    pub fn enter(&mut self, node: NodeKey, wu: WorkUnit) {
-        self.current = Some(node);
-        self.current_wu = Some(wu);
-    }
     /// Look up an already-lowered upstream input's handle. Post-order
     /// lowering guarantees it is present.
     pub fn input(&self, src: &Arc<Node<VipsBackend>>) -> VipsHandle {
@@ -148,31 +144,22 @@ impl Backend for VipsBackend {
     type Ctx = ();
     type Payload = VipsHandle;
     type Builder = VipsBuilder;
+}
 
-    fn materialize(
-        _ctx: &Arc<Self::Ctx>,
-        root: &Arc<Node<Self>>,
-        wu: &WorkUnit,
-    ) -> Result<Buffer<Self>, Error> {
+impl Builder<VipsBackend> for VipsBuilder {
+    fn new(_ctx: Arc<()>) -> Self {
+        Self::default()
+    }
 
-        // 1. Demand walk (inverse map): every live node's resolved WorkUnit for
-        //    *this* request. Pruned inputs (demand -> None) never enter the map.
-        let mut walk = crate::node::GraphWalk::new(root);
-        walk.demand(wu);
+    fn enter(&mut self, node: NodeKey, _inputs: &[NodeKey], wu: &WorkUnit) {
+        self.current = Some(node);
+        self.current_wu = Some(wu.clone());
+    }
 
-        // 2. Lower walk: each live node injects its VIPS config at its resolved WorkUnit.
-        let mut builder = VipsBuilder::default();
-        walk.lower(|node, n_wu| {
-            let k = Arc::as_ptr(node) as *const () as usize;
-            builder.enter(k, n_wu.clone());
-            node.lower(&mut builder);
-        });
-
-        let handle = builder
-            .take(node_key(root))
+    fn finish(mut self, root: NodeKey, spec: Arc<dyn AnyKind>, _root_wu: &WorkUnit) -> Result<Buffer<VipsBackend>, Error> {
+        let handle = self
+            .take(root)
             .ok_or_else(|| Error::Vips("root node produced no handle".into()))?;
-
-        let spec = root.output_kind();
 
         Ok(Buffer {
             payload: Arc::new(handle),

@@ -3,7 +3,6 @@ pub mod buffer;
 pub mod view;
 pub mod emit;
 pub mod compile;
-pub mod materialize;
 pub mod slang;
 
 pub use context::*;
@@ -12,62 +11,31 @@ pub use view::*;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::backend::Builder;
 use crate::error::Error;
-use crate::kind::Kind;
-use crate::node::Node;
-use crate::work_unit::WorkUnit;
+use crate::kind::{AnyKind, Kind};
+use crate::node::NodeId;
+use crate::work_unit::{Region, WorkUnit, WorkUnitFor};
 
 pub struct GpuBackend;
 
-/// Where a kernel step reads one of its arguments from.
+/// Which producer a [`StepInput`] reads from, before any adapter wrapping.
 #[derive(Clone, Copy, Debug)]
-pub enum StepInput {
+pub enum BaseInput {
     /// A source leaf's decoded buffer (`in_{i}`, a `CodecRegion`).
     Source(usize),
     /// A prior step's working temp (`work_{j}`, read as an `RWRegion`).
     Step(usize),
-    /// A source leaf's decoded buffer, read through one swizzled component
-    /// and broadcast `float4(v,v,v,1)` via `SwizzleView`. Produced by
-    /// `GpuBuilder::alias` (e.g. a "free" `ExtractBand` on a freshly-opened
-    /// image, with no prior kernel step to alias).
-    SwizzleSource(usize, u32),
-    /// A prior step's working temp, read through one swizzled component
-    /// (`work_{j}[channel]`, broadcast `float4(v,v,v,1)` via `SwizzleView`).
-    /// Produced by `GpuBuilder::alias` (e.g. a "free" `ExtractBand`).
-    SwizzleStep(usize, u32),
-    RemapSource(usize, RemapKind, RemapParams),
-    RemapStep(usize, RemapKind, RemapParams),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RemapKind {
-    Identity = 0,
-    FlipH = 1,
-    FlipV = 2,
-    Rot180 = 3,
-    Scale = 4,
-    Tile = 5,
-    Translate = 6,
-    Rot90 = 7,
-    Rot270 = 8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RemapParams {
-    pub out_w: u32,
-    pub out_h: u32,
-    pub sx: f32,
-    pub sy: f32,
-    pub in_w: u32,
-    pub in_h: u32,
-    pub tx: i32,
-    pub ty: i32,
-}
-
-impl Default for RemapParams {
-    fn default() -> Self {
-        Self { out_w: 0, out_h: 0, sx: 1.0, sy: 1.0, in_w: 0, in_h: 0, tx: 0, ty: 0 }
-    }
+/// Where a kernel step reads one of its arguments from: a base producer,
+/// optionally wrapped in a zero-cost [`ViewAdapter`] (swizzle, remap, …).
+/// Produced by [`GpuBuilder::adapt`] for "free" view-only nodes (e.g.
+/// `ExtractBand`, `Flip`) that add no kernel step of their own.
+#[derive(Clone, Debug)]
+pub struct StepInput {
+    pub base: BaseInput,
+    pub adapter: Option<ViewAdapter>,
 }
 
 /// Element type of a step's working temp buffer (`work_{s}`) — a data-driven
@@ -82,37 +50,22 @@ pub struct TempElem {
     /// Slang element type for the `work_{k}` buffer declaration (e.g. `"float4"`).
     pub buffer_ty: &'static str,
     /// Wrapper struct name for a plain (whole-value) read of this temp
-    /// (e.g. `"RWRegion"`). Also the `R` of `SwizzleView<R>` for
-    /// `StepInput::SwizzleStep` — `SwizzleView` is generic over any
-    /// `IRegion`, so no separate swizzle-wrapper name is needed.
+    /// (e.g. `"RWRegion"`). Also the `R` of any generic `IRegion`-wrapping
+    /// [`ViewAdapter`] applied to this temp.
     pub region_wrapper: &'static str,
-    /// Field accessor per component (e.g. `["x","y","z","w"]`).
-    pub components: &'static [&'static str],
-    /// Broadcast template for the final encode when the DAG root is an
-    /// `alias`; `{v}` is replaced with the scalar expression (e.g.
-    /// `"float4({v}, {v}, {v}, 1.0)"`).
-    pub broadcast: &'static str,
+    /// Bytes per element, used to size the `work_{k}` buffer as
+    /// `domain_w * domain_h * byte_size`.
+    pub byte_size: u64,
 }
 
 impl TempElem {
     /// The image working-pixel temp: `RWStructuredBuffer<float4>`, read via
-    /// `RWRegion` (plain) or `SwizzleView<RWRegion>` (single component,
-    /// broadcast `float4(v,v,v,1)`).
+    /// `RWRegion`.
     pub const F4: TempElem = TempElem {
         buffer_ty: "float4",
         region_wrapper: "RWRegion",
-        components: &["x", "y", "z", "w"],
-        broadcast: "float4({v}, {v}, {v}, 1.0)",
+        byte_size: 16,
     };
-
-    /// Field accessor for swizzled component `c` of this temp's value.
-    pub fn component(&self, c: u32) -> &'static str {
-        self.components[c as usize]
-    }
-    /// Broadcast a scalar expression back into this temp's full shape.
-    pub fn broadcast_expr(&self, scalar_expr: &str) -> String {
-        self.broadcast.replace("{v}", scalar_expr)
-    }
 }
 
 impl Default for TempElem {
@@ -126,6 +79,8 @@ impl Default for TempElem {
 /// (a diamond) is computed once and read by index — exactly the old engine's
 /// per-node-temp model.
 pub struct Step {
+    /// Slang module defining `kernel` (e.g. `"ops.invert"`), imported by the emitter.
+    pub module: &'static str,
     pub kernel: &'static str,
     pub inputs: Vec<StepInput>,
     pub params: Vec<String>,
@@ -143,18 +98,17 @@ pub struct GpuBuilder {
     pub source_buffers: Vec<Arc<crate::backend::gpu::buffer::GpuBuffer>>,
     pub params: ParamBlock,
 
-    /// node-pointer → source slot index (set when a Source leaf lowers).
-    source_of: HashMap<usize, usize>,
-    /// node-pointer → its final step index (set as an op's kernels lower).
-    last_step_of: HashMap<usize, usize>,
-    /// node-pointer → (base input, swizzle component), set by `alias`. A
-    /// downstream consumer resolving this node as an input gets
-    /// `SwizzleSource`/`SwizzleStep` instead of `Source`/`Step`.
-    alias_swizzles: HashMap<usize, (StepInput, u32)>,
-    alias_remaps: HashMap<usize, (StepInput, RemapKind, RemapParams)>,
+    /// node id → source slot index (set when a Source leaf lowers).
+    source_of: HashMap<NodeId, usize>,
+    /// node id → its final step index (set as an op's kernels lower).
+    last_step_of: HashMap<NodeId, usize>,
+    /// node id → its resolved `StepInput`, set by `adapt`. A downstream
+    /// consumer resolving this node as an input gets this adapted view
+    /// instead of a plain `Source`/`Step`.
+    alias_adapters: HashMap<NodeId, StepInput>,
     /// The node currently lowering, and its resolved input edges — so the
     /// node's *first* kernel reads its graph inputs and later kernels chain.
-    cur_node: Option<usize>,
+    cur_node: Option<NodeId>,
     cur_inputs: Vec<StepInput>,
     cur_started: bool,
 
@@ -164,15 +118,25 @@ pub struct GpuBuilder {
     /// before `kernel`, matching the existing convention everywhere.
     pending_params: Vec<String>,
 
-    /// Set by `alias` when the *current* (possibly terminal) node is a pure
-    /// swizzle of its input. If this node turns out to be the root, the
-    /// emitter broadcasts this component through the final encode instead of
-    /// the full working pixel. Cleared at the start of every `enter`.
-    output_swizzle: Option<u32>,
+    /// Set by `adapt` when the *current* (possibly terminal) node is a pure
+    /// view-adapted alias of its input. If this node turns out to be the
+    /// root, the emitter reads/encodes through this adapter directly instead
+    /// of the full working pixel. Cleared at the start of every `enter`.
+    cur_output_adapter: Option<StepInput>,
+
+    /// Count of distinct adapters resolved so far this pass — used to assign
+    /// each adapter a unique `ChainParams` field prefix (`a{n}_...`).
+    adapter_count: usize,
 
     ctx: Arc<GpuContext>,
     error: Option<Error>,
     current_wu: Option<WorkUnit>,
+
+    /// The dispatch domain (`numthreads` grid, in pixels/elements) — set
+    /// explicitly via [`GpuBuilder::dispatch`], or defaulted from the root's
+    /// `Region` WorkUnit by [`GpuBuilder::output`] when not set. `None` only
+    /// for an Atomic output whose op never set it (falls back to `(1, 1)`).
+    dispatch: Option<(u32, u32)>,
 }
 
 impl GpuBuilder {
@@ -185,52 +149,49 @@ impl GpuBuilder {
             params: ParamBlock::default(),
             source_of: HashMap::new(),
             last_step_of: HashMap::new(),
-            alias_swizzles: HashMap::new(),
-            alias_remaps: HashMap::new(),
+            alias_adapters: HashMap::new(),
             cur_node: None,
             cur_inputs: Vec::new(),
             cur_started: false,
             pending_params: Vec::new(),
-            output_swizzle: None,
+            cur_output_adapter: None,
+            adapter_count: 0,
             ctx,
             error: None,
             current_wu: None,
+            dispatch: None,
         }
     }
 
-    /// Materializer hook: announce the node about to be lowered — its pointer
+    /// Explicitly set the dispatch domain (in pixels/elements). Reduction ops
+    /// (histogram, vectorscope) call this with their *input* image's dims —
+    /// their own output is `Atomic`-shaped, so `output()` can't derive it.
+    pub fn dispatch(&mut self, dims: (u32, u32)) -> &mut Self {
+        self.dispatch = Some(dims);
+        self
+    }
+
+    /// Materializer hook: announce the node about to be lowered — its
     /// identity, the identities of its input nodes (resolved to source slots or
     /// prior steps), and its resolved WorkUnit.
-    pub fn enter(&mut self, node_key: usize, input_keys: &[usize], wu: WorkUnit) {
-        self.current_wu = Some(wu);
+    pub fn enter(&mut self, node_key: NodeId, input_keys: &[NodeId], wu: &WorkUnit) {
+        self.current_wu = Some(wu.clone());
         self.cur_node = Some(node_key);
         self.cur_started = false;
-        self.output_swizzle = None;
+        self.cur_output_adapter = None;
         self.cur_inputs = input_keys
             .iter()
             .map(|k| {
-                if let Some(&(base, c)) = self.alias_swizzles.get(k) {
-                    match base {
-                        StepInput::Source(i) => StepInput::SwizzleSource(i, c),
-                        StepInput::Step(j) => StepInput::SwizzleStep(j, c),
-                        // Aliasing an alias: the broadcast value is uniform
-                        // across components, so the inner swizzle is reused
-                        sw @ (StepInput::SwizzleSource(..) | StepInput::SwizzleStep(..) | StepInput::RemapSource(..) | StepInput::RemapStep(..)) => sw,
-                    }
-                } else if let Some(&(base, kind, params)) = self.alias_remaps.get(k) {
-                    match base {
-                        StepInput::Source(i) => StepInput::RemapSource(i, kind, params),
-                        StepInput::Step(j) => StepInput::RemapStep(j, kind, params),
-                        sw => sw, // ignoring nested aliases for now
-                    }
+                if let Some(adapted) = self.alias_adapters.get(k) {
+                    adapted.clone()
                 } else if let Some(&si) = self.source_of.get(k) {
-                    StepInput::Source(si)
+                    StepInput { base: BaseInput::Source(si), adapter: None }
                 } else if let Some(&st) = self.last_step_of.get(k) {
-                    StepInput::Step(st)
+                    StepInput { base: BaseInput::Step(st), adapter: None }
                 } else {
                     // Pruned/absent input reached a consumer — shouldn't happen
                     // for a live node; fall back to source 0 to stay total.
-                    StepInput::Source(0)
+                    StepInput { base: BaseInput::Source(0), adapter: None }
                 }
             })
             .collect();
@@ -251,14 +212,20 @@ impl GpuBuilder {
         self.current_wu.as_ref().expect("GpuBuilder::wu called outside a lower()")
     }
 
-    /// Register a **source input**: decode `View`, geometry, fetched buffer.
+    /// Register a **source input**: decode `View`, slot params, fetched buffer.
     /// Called by a Source leaf's `lower`; binds this node to a source slot.
-    pub fn input(&mut self, view: View, region: RegionParams, buf: Arc<crate::backend::gpu::buffer::GpuBuffer>) -> &mut Self {
+    /// `slot_params` field names may contain the literal `"{slot}"`, which is
+    /// replaced with this input's assigned slot index (e.g. `"region_in_{slot}"`
+    /// → `"region_in_0"`).
+    pub fn input(&mut self, view: View, slot_params: ParamBlock, buf: Arc<crate::backend::gpu::buffer::GpuBuffer>) -> &mut Self {
         let slot = self.input_views.len();
         if let Some(k) = self.cur_node {
             self.source_of.insert(k, slot);
         }
-        region.push_into(&mut self.params, &format!("region_in_{slot}"));
+        for (name, ty) in &slot_params.fields {
+            self.params.fields.push((name.replace("{slot}", &slot.to_string()), ty));
+        }
+        self.params.bytes.extend_from_slice(&slot_params.bytes);
         self.input_views.push(view);
         self.source_buffers.push(buf);
         self
@@ -267,15 +234,21 @@ impl GpuBuilder {
     /// Add a kernel step to the current node. Its first kernel reads the node's
     /// graph inputs; any later kernel (intra-node multistep) reads the step
     /// before it. The step's output temp is its own index.
-    pub fn kernel(&mut self, entry: &'static str) -> &mut Self {
+    pub fn kernel(&mut self, module: &'static str, entry: &'static str) -> &mut Self {
+        self.kernel_with_temp(module, entry, TempElem::F4)
+    }
+
+    /// Like [`GpuBuilder::kernel`], but with a non-default working temp element
+    /// (e.g. a reduction step writing `uint` bins instead of `float4` pixels).
+    pub fn kernel_with_temp(&mut self, module: &'static str, entry: &'static str, temp_elem: TempElem) -> &mut Self {
         let inputs = if !self.cur_started {
             self.cur_started = true;
             self.cur_inputs.clone()
         } else {
-            vec![StepInput::Step(self.steps.len() - 1)]
+            vec![StepInput { base: BaseInput::Step(self.steps.len() - 1), adapter: None }]
         };
         let params = std::mem::take(&mut self.pending_params);
-        self.steps.push(Step { kernel: entry, inputs, params, temp_elem: TempElem::F4 });
+        self.steps.push(Step { module, kernel: entry, inputs, params, temp_elem });
         let idx = self.steps.len() - 1;
         if let Some(k) = self.cur_node {
             self.last_step_of.insert(k, idx);
@@ -284,57 +257,79 @@ impl GpuBuilder {
     }
 
     /// Make the current node a **zero-cost view** of its single input: no
-    /// kernel step is added. The node's value becomes its input's value
-    /// (a source decode or a prior step's temp), read through component
-    /// `channel` (0=x/r .. 3=w/a) and broadcast as `float4(v,v,v,1)` — the
-    /// same shape a Gray codec decode produces. A downstream consumer of this
-    /// node gets `StepInput::SwizzleSource`/`SwizzleStep`; if this node is
-    /// the DAG root, the final encode broadcasts `channel` instead of the
-    /// full working pixel (see `output_swizzle`).
+    /// kernel step is added. The node's value becomes its input's value (a
+    /// source decode or a prior step's temp) wrapped in `adapter` (swizzle,
+    /// remap, …). A downstream consumer of this node gets this adapted
+    /// `StepInput`; if this node is the DAG root, the emitter reads/encodes
+    /// through the adapter directly (see `cur_output_adapter`).
     ///
-    /// Used by `ExtractBand` — extracting a band is then free: it never adds
-    /// a pass, it just changes how the *next* kernel (or the encoder) reads
-    /// the value that's already there. Works whether the input is a fresh
-    /// source decode or a prior step's temp.
-    pub fn alias(&mut self, channel: u32) -> &mut Self {
-        let Some(&input) = self.cur_inputs.first() else {
-            self.fail(Error::Backend("GpuBuilder::alias: node has no input to alias".into()));
+    /// Used by `ExtractBand`/`Flip`/etc. — the view is then free: it never
+    /// adds a pass, it just changes how the *next* kernel (or the encoder)
+    /// reads the value that's already there. Works whether the input is a
+    /// fresh source decode or a prior step's temp.
+    ///
+    /// If the current input is *already* adapted (chained view-only nodes),
+    /// the existing adapter wins — nesting adapters isn't supported, the
+    /// first one applied takes precedence.
+    pub fn adapt(&mut self, adapter: ViewAdapter) -> &mut Self {
+        let Some(input) = self.cur_inputs.first().cloned() else {
+            self.fail(Error::Backend("GpuBuilder::adapt: node has no input to adapt".into()));
             return self;
         };
-        if let Some(k) = self.cur_node {
-            self.alias_swizzles.insert(k, (input, channel));
-        }
-        self.output_swizzle = Some(channel);
-        self
-    }
-
-    pub fn remap(&mut self, kind: RemapKind, params: RemapParams) -> &mut Self {
-        let Some(&input) = self.cur_inputs.first() else {
-            self.fail(Error::Backend("GpuBuilder::remap: node has no input to remap".into()));
-            return self;
+        let final_input = if input.adapter.is_some() {
+            input
+        } else {
+            let n = self.adapter_count;
+            self.adapter_count += 1;
+            let prefix = format!("a{n}");
+            let fields: Vec<(String, &'static str)> = adapter
+                .params
+                .fields
+                .iter()
+                .map(|(name, ty)| (name.replace("{p}", &prefix), *ty))
+                .collect();
+            self.params.fields.extend(fields.iter().cloned());
+            self.params.bytes.extend_from_slice(&adapter.params.bytes);
+            let resolved = ViewAdapter {
+                wrapper: adapter.wrapper,
+                ctor: adapter.ctor.replace("{p}", &prefix).into(),
+                params: ParamBlock { fields, bytes: adapter.params.bytes },
+                module: adapter.module,
+            };
+            StepInput { base: input.base, adapter: Some(resolved) }
         };
         if let Some(k) = self.cur_node {
-            self.alias_remaps.insert(k, (input, kind, params));
+            self.alias_adapters.insert(k, final_input.clone());
         }
+        self.cur_output_adapter = Some(final_input);
         self
     }
 
     /// A scalar param for the current step. Namespaced by step index so two
     /// steps (or two nodes) using the same name never collide in `ChainParams`.
-    pub fn param<T: bytemuck::Pod>(&mut self, name: &str, value: T) -> &mut Self {
+    pub fn param<T: SlangScalar>(&mut self, name: &str, value: T) -> &mut Self {
         let idx = self.steps.len() - 1;
         let field = format!("s{idx}_{name}");
-        self.params.fields.push((field.clone(), "scalar"));
+        self.params.fields.push((field.clone(), T::SLANG_TY));
         self.params.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self.steps[idx].params.push(field);
         self
     }
 
     /// Register the output, as described by its **Kind** (`GpuView::output`).
+    /// Merges the wrap's own `params` (e.g. a reduction's `bin_count`, or an
+    /// image's `region_out`) into the shared `ChainParams`. If no dispatch
+    /// domain was set explicitly (via [`GpuBuilder::dispatch`]), defaults it
+    /// from the root's `Region` WorkUnit — for image ops the dispatch domain
+    /// and the output rect are the same rectangle.
     pub fn output(&mut self, wrap: OutputWrap) -> &mut Self {
-        if let Some(WorkUnit::Region(r)) = &self.current_wu {
-            RegionParams::tight(r.w, r.h).push_into(&mut self.params, "region_out");
+        if self.dispatch.is_none() {
+            if let Some(r) = Region::typed(self.wu()) {
+                self.dispatch = Some((r.w.max(0) as u32, r.h.max(0) as u32));
+            }
         }
+        self.params.fields.extend(wrap.params.fields.iter().cloned());
+        self.params.bytes.extend_from_slice(&wrap.params.bytes);
         self.output = Some(wrap);
         self
     }
@@ -348,18 +343,9 @@ impl GpuBuilder {
         self
     }
 
-    /// Merge a `ParamBlock` into `ChainParams` without queuing its fields as
-    /// trailing kernel-call args. For fields consumed only by the output
-    /// wrapper's ctor (e.g. a reduction's `bin_count`), not by the kernel body.
-    pub fn output_params(&mut self, block: ParamBlock) -> &mut Self {
-        self.params.fields.extend(block.fields);
-        self.params.bytes.extend_from_slice(&block.bytes);
-        self
-    }
-
     /// Does the output use the codec sandwich (image) vs a direct write?
     pub fn needs_scratch(&self) -> bool {
-        matches!(&self.output, Some(w) if w.arg_buffer == OutBuffer::Scratch)
+        matches!(&self.output, Some(w) if w.dest == OutBuffer::Scratch)
     }
 
     /// `float4` working temps to bind: one per step that writes a temp. With a
@@ -379,26 +365,42 @@ impl GpuBuilder {
 pub trait GpuView: Kind {
     /// Wrapper a kernel reads this Kind through at an input slot (decodes).
     fn input(&self) -> View;
-    /// How an output of this Kind is written (see [`OutputWrap`]).
-    fn output(&self) -> OutputWrap;
-    /// Extra wrapper params beyond the universal per-slot `BufferRegion`
-    /// (e.g. a histogram's `bin_count`). Default: none.
-    fn params(&self, _wu: &WorkUnit) -> ParamBlock {
-        ParamBlock::empty()
-    }
+    /// How an output of this Kind is written (see [`OutputWrap`]). `wu` is the
+    /// resolved output WorkUnit — Region-shaped Kinds (images) use it to size
+    /// their `region_out` geometry.
+    fn output(&self, wu: &WorkUnit) -> OutputWrap;
 }
 
 impl crate::backend::Backend for GpuBackend {
     type Ctx = GpuContext;
     type Payload = GpuBuffer;
     type Builder = GpuBuilder;
+}
 
-    fn materialize(
-        ctx: &Arc<Self::Ctx>,
-        root: &Arc<Node<Self>>,
-        wu: &WorkUnit,
-    ) -> Result<crate::buffer::Buffer<Self>, Error> {
-        let materializer = materialize::Materializer { ctx, root };
-        materializer.execute(wu)
+impl Builder<GpuBackend> for GpuBuilder {
+    fn new(ctx: Arc<GpuContext>) -> Self {
+        Self::new(ctx)
+    }
+
+    fn enter(&mut self, node: NodeId, inputs: &[NodeId], wu: &WorkUnit) {
+        GpuBuilder::enter(self, node, inputs, wu)
+    }
+
+    fn finish(mut self, _root: NodeId, spec: Arc<dyn AnyKind>, root_wu: &WorkUnit) -> Result<crate::buffer::Buffer<GpuBackend>, Error> {
+        if let Some(e) = self.take_error() {
+            return Err(e);
+        }
+
+        let dims = self.dispatch.unwrap_or((1, 1));
+        RegionParams::tight(dims.0 as i32, dims.1 as i32).push_into(&mut self.params, "domain");
+
+        let slang = emit::emit_slang(&self, self.ctx.wg_dim);
+        let hash = emit::hash_slang(&slang);
+        let pass = compile::compile(self.ctx.as_ref(), &self, slang, hash)?;
+
+        let out_bytes = spec.byte_size(root_wu);
+        let payload = compile::dispatch(self.ctx.as_ref(), &pass, &self, out_bytes, dims)?;
+
+        Ok(crate::buffer::Buffer { payload, spec })
     }
 }

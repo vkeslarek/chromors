@@ -123,9 +123,9 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
 
 impl crate::operation::Lower<crate::backend::gpu::GpuBackend> for Opacity<crate::backend::gpu::GpuBackend> {
     fn lower(&self, cx: &mut crate::backend::gpu::GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new().param("amount", "float", self.amount));
-        cx.kernel("opacity_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new().param("amount", self.amount));
+        cx.kernel("ops.opacity", "opacity_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

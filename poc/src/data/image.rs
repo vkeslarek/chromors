@@ -17,7 +17,7 @@ use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
 use crate::pixel::format::PixelFormat;
-use crate::work_unit::{Region, Shape, WorkUnit};
+use crate::work_unit::{Region, WorkUnit, WorkUnitFor};
 
 // ── Kind ──────────────────────────────────────────────────────────────────────
 
@@ -50,9 +50,6 @@ impl AnyKind for ImageKind {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    fn shape(&self) -> Shape {
-        Shape::Region
-    }
     fn byte_size(&self, wu: &WorkUnit) -> u64 {
         let bpp = self.format.bytes_per_pixel() as u64;
         match wu {
@@ -80,7 +77,7 @@ impl GpuView for ImageKind {
         View::new(
             "uint",
             format!("CodecRegion<{}, {}>", self.codec(), self.layout()),
-            "{ {buf}, {region} }",
+            "{ {buf}, {params}[0].region_in_{slot} }",
         )
     }
 
@@ -88,17 +85,17 @@ impl GpuView for ImageKind {
     /// `RWRegion` scratch; afterwards an `RWCodecRegion` encodes it back into
     /// the pixel-format target. Both this encode and the `input` decode are the
     /// image's own concern — the emitter and ops know nothing of codecs.
-    fn output(&self) -> OutputWrap {
+    fn output(&self, wu: &WorkUnit) -> OutputWrap {
+        let r = Region::typed(wu).expect("ImageKind::output: Region-shaped WorkUnit");
         OutputWrap {
-            arg_type: "RWRegion".into(),
-            arg_ctor: "{ {buf}, {region} }".into(),
-            arg_buffer: OutBuffer::Scratch,
-            buffer_type: "uint".into(),
+            arg: View::new("uint", "RWRegion", "{ {buf}, {region} }"),
+            dest: OutBuffer::Scratch,
             encode: Some(View::new(
                 "Atomic<uint>",
                 format!("RWCodecRegion<{}, {}>", self.codec(), self.layout()),
                 "{ {buf}, {region} }",
             )),
+            params: RegionParams::tight(r.w, r.h).into_block("region_out"),
         }
     }
 }
@@ -166,13 +163,7 @@ pub type Image2D<B> = Data<ImageKind, B>;
 impl Image2D<VipsBackend> {
     pub fn open(path: &str) -> Result<Self, crate::error::Error> {
         let source = Arc::new(FileImageSource::new(path)?);
-        let root = Arc::new(crate::node::Node::Source(source.clone()));
-        Ok(crate::node::Data {
-            root,
-            spec: <FileImageSource as Source<VipsBackend>>::spec(&source),
-            ctx: Arc::new(()),
-            _m: std::marker::PhantomData,
-        })
+        Ok(crate::node::Data::from_source(source, Arc::new(())))
     }
 }
 
@@ -344,13 +335,7 @@ impl Image2D<crate::backend::raw::RawBackend> {
         params: crate::backend::raw::RawDecodeParams,
     ) -> Result<Self, crate::error::Error> {
         let source = Arc::new(RawFileImageSource::new(path, params)?);
-        let root = Arc::new(crate::node::Node::Source(source.clone()));
-        Ok(crate::node::Data {
-            root,
-            spec: <RawFileImageSource as Source<crate::backend::raw::RawBackend>>::spec(&source),
-            ctx: Arc::new(()),
-            _m: std::marker::PhantomData,
-        })
+        Ok(crate::node::Data::from_source(source, Arc::new(())))
     }
 }
 
@@ -434,7 +419,7 @@ impl Source<GpuBackend> for VipsImageSource {
             Ok(buf) => {
                 // The fetched buffer is the full image, tightly packed.
                 let geom = RegionParams::tight(self.spec().width, self.spec().height);
-                cx.input(self.spec().input(), geom, buf.payload);
+                cx.input(self.spec().input(), geom.into_block("region_in_{slot}"), buf.payload);
             }
             Err(e) => cx.fail(e),
         }
@@ -442,8 +427,7 @@ impl Source<GpuBackend> for VipsImageSource {
 
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         // Identity is based on the Vips pipeline root.
-        let k = Arc::as_ptr(&self.vips_img.root) as *const () as usize;
-        state.write_usize(k);
+        state.write_usize(crate::node::NodeId::of(&self.vips_img.root).0);
     }
 }
 
@@ -492,7 +476,7 @@ impl Source<GpuBackend> for GpuConstantSource {
         match self.fetch(cx.ctx().as_ref(), region) {
             Ok(buf) => {
                 let geom = crate::backend::gpu::view::RegionParams::tight(self.spec.width, self.spec.height);
-                cx.input(self.spec.input(), geom, buf.payload);
+                cx.input(self.spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
             }
             Err(e) => cx.fail(e),
         }
@@ -522,12 +506,7 @@ impl Image2D<GpuBackend> {
             spec: spec.clone(),
             data: data.to_vec(),
         };
-        Self {
-            root: Arc::new(crate::node::Node::Source(Arc::new(src))),
-            ctx,
-            spec,
-            _m: std::marker::PhantomData,
-        }
+        crate::node::Data::from_source(Arc::new(src), ctx)
     }
 }
 
@@ -623,8 +602,7 @@ impl Source<VipsBackend> for RawImageSource {
     }
 
     fn dyn_hash(&self, state: &mut dyn std::hash::Hasher) {
-        let k = Arc::as_ptr(&self.raw_img.root) as *const () as usize;
-        state.write_usize(k);
+        state.write_usize(crate::node::NodeId::of(&self.raw_img.root).0);
     }
 }
 

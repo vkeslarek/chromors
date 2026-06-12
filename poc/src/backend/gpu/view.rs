@@ -1,24 +1,8 @@
 //! GPU/Slang lowering vocabulary. None of this is backend-agnostic — it's the
-//! shader-side view of a buffer (`View`/`Binding`), the std430 params blob
-//! (`ParamBlock`), fused scratch (`TempSpec`), and the three shader slots
-//! (`Role`). Lives under `backend::gpu` so the agnostic core never sees it.
+//! shader-side view of a buffer (`View`), the std430 params blob
+//! (`ParamBlock`), and fused scratch (`TempElem`). Lives under `backend::gpu`
+//! so the agnostic core never sees it.
 use std::borrow::Cow;
-
-/// The three kinds of buffer a kernel touches: an `Input` it reads, an
-/// `Output` it writes, a `Temporary` scratch it both reads and writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    Input,
-    Output,
-    Temporary,
-}
-
-/// Bind group and binding slot for a View.
-#[derive(Debug, Clone)]
-pub struct Binding {
-    pub group: u32,
-    pub binding: u32,
-}
 
 /// A Slang-side view of a raw buffer. Carries three things the emitter needs:
 ///
@@ -42,7 +26,6 @@ pub struct View {
     pub buffer_type: Cow<'static, str>,
     pub slang: Cow<'static, str>,
     pub ctor: Cow<'static, str>,
-    pub binding: Binding,
 }
 
 impl View {
@@ -57,7 +40,6 @@ impl View {
             buffer_type: buffer_type.into(),
             slang: slang.into(),
             ctor: ctor.into(),
-            binding: Binding { group: 0, binding: 0 },
         }
     }
 
@@ -70,6 +52,32 @@ impl View {
             .replace("{params}", params_var)
             .replace("{region}", region_expr)
     }
+
+    /// Expand the `ctor` template for an **input** slot, replacing `{buf}`
+    /// (buffer var), `{params}` (ChainParams var), and `{slot}` (this input's
+    /// slot index, e.g. `region_in_0`).
+    pub fn input_expr(&self, buf_var: &str, slot: usize) -> String {
+        self.ctor
+            .replace("{buf}", buf_var)
+            .replace("{params}", "params")
+            .replace("{slot}", &slot.to_string())
+    }
+}
+
+/// A Rust scalar type with a known Slang/std430 element type. Lets
+/// `ParamBlock::param`/`GpuBuilder::param` derive the declared field type
+/// from `T` instead of a separately-passed (and easily mismatched) string.
+pub trait SlangScalar: bytemuck::Pod {
+    const SLANG_TY: &'static str;
+}
+impl SlangScalar for f32 {
+    const SLANG_TY: &'static str = "float";
+}
+impl SlangScalar for u32 {
+    const SLANG_TY: &'static str = "uint";
+}
+impl SlangScalar for i32 {
+    const SLANG_TY: &'static str = "int";
 }
 
 /// One std430 buffer containing geometry params (from Kind) and scalar configs (from Operation).
@@ -83,25 +91,54 @@ impl ParamBlock {
     pub fn new() -> Self {
         Self { fields: vec![], bytes: vec![] }
     }
-    
-    pub fn param<T: bytemuck::Pod>(mut self, name: &str, slang_type: &'static str, value: T) -> Self {
-        self.fields.push((name.to_string(), slang_type));
+
+    pub fn param<T: SlangScalar>(mut self, name: &str, value: T) -> Self {
+        self.fields.push((name.to_string(), T::SLANG_TY));
         self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self
     }
 
-    pub fn empty() -> Self {
-        Self::new()
-    }
     /// A helper to emit a basic scalar parameter.
-    pub fn scalar<T: bytemuck::Pod>(name: &str, slang_type: &'static str, value: T) -> Self {
-        Self::new().param(name, slang_type, value)
+    pub fn scalar<T: SlangScalar>(name: &str, value: T) -> Self {
+        Self::new().param(name, value)
     }
+
+    /// A field of an arbitrary std430 struct type (e.g. `"RemapGeo"`), for
+    /// adapter geometry that isn't a single scalar.
+    pub fn field<T: bytemuck::Pod>(mut self, name: &str, ty: &'static str, value: T) -> Self {
+        self.fields.push((name.to_string(), ty));
+        self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
+        self
+    }
+}
+
+/// A zero-cost Slang view interposed between a producer (a source decode or a
+/// prior step's working temp) and a consumer — no kernel step, no buffer. The
+/// core only stores and splices these strings; the semantics (swizzle, remap,
+/// …) live in the constructor function and the Slang struct it names.
+///
+/// `wrapper`/`ctor` carry three placeholders the builder/emitter expand:
+/// - `{inner}` (wrapper only) — the wrapped `IRegion`'s Slang type.
+/// - `{value}` (ctor only) — the wrapped value's variable name.
+/// - `{params}` — the `ChainParams` instance name.
+/// - `{p}` — this adapter's unique param-field prefix, assigned by
+///   [`super::GpuBuilder::adapt`] (so two adapters' fields never collide).
+#[derive(Debug, Clone)]
+pub struct ViewAdapter {
+    /// Wrapper type template, e.g. `"SwizzleView<{inner}>"`, `"RemapView<{inner}>"`.
+    pub wrapper: Cow<'static, str>,
+    /// Ctor expression template, e.g. `"{ {value}, {params}[0].{p}_channel }"`.
+    pub ctor: Cow<'static, str>,
+    /// Adapter params (field names contain `{p}`, substituted by `adapt`).
+    pub params: ParamBlock,
+    /// Slang module defining the wrapper struct (currently always `lib.region`,
+    /// which the emitter imports unconditionally).
+    pub module: &'static str,
 }
 
 /// The `BufferRegion { stride, x, y, w, h }` geometry of one buffer slot —
 /// the std430 struct every Slang region wrapper indexes with. Emitter-owned
-/// (universal to all `Shape::Region` data), named per slot (`region_in_{i}` /
+/// (universal to all Region-shaped data), named per slot (`region_in_{i}` /
 /// `region_out`) so slots never collide.
 #[derive(Debug, Clone, Copy)]
 pub struct RegionParams {
@@ -126,6 +163,15 @@ impl RegionParams {
             block.bytes.extend_from_slice(&v.to_le_bytes());
         }
     }
+
+    /// A fresh `ParamBlock` containing just this region under `name`. Used by
+    /// `GpuView::output`/`input` to hand the geometry to `GpuBuilder` without
+    /// it knowing it's a `BufferRegion`.
+    pub fn into_block(self, name: &str) -> ParamBlock {
+        let mut block = ParamBlock::new();
+        self.push_into(&mut block, name);
+        block
+    }
 }
 
 /// Which buffer a kernel's output argument binds to.
@@ -145,19 +191,19 @@ pub enum OutBuffer {
 /// fragments this carries.
 #[derive(Debug, Clone)]
 pub struct OutputWrap {
-    /// Slang type of the kernel's output argument (`"RWRegion"`, `"HistogramOut"`).
-    pub arg_type: Cow<'static, str>,
-    /// Constructor for that argument, with `{buf}`/`{params}`/`{region}` holes.
-    pub arg_ctor: Cow<'static, str>,
+    /// Type + ctor + raw element type of the kernel's output argument
+    /// (`arg.slang`/`arg.ctor`/`arg.buffer_type`, e.g. `"RWRegion"` /
+    /// `"HistogramOut"`). `arg.buffer_type` is the `target_buffer` element
+    /// type when `encode` is `None`; when `Some`, the encode view's
+    /// `buffer_type` (the codec sandwich's scratch type) is used instead.
+    pub arg: View,
     /// Where the argument's buffer comes from.
-    pub arg_buffer: OutBuffer,
-    /// Raw element type for the `target_buffer` declaration (e.g. `"uint"` for
-    /// a `HistogramOut` wrapper around `RWStructuredBuffer<uint>`). Only used
-    /// when `encode` is `None` — when `Some`, the encode view's `buffer_type`
-    /// (the codec sandwich's scratch type) is used instead.
-    pub buffer_type: Cow<'static, str>,
+    pub dest: OutBuffer,
     /// Optional post-kernel step that lands the working result in the target —
     /// the image codec sandwich closes here. `None` ⇒ the kernel wrote the
     /// target directly.
     pub encode: Option<View>,
+    /// Kind-owned output geometry/config (e.g. a histogram's `bin_count`),
+    /// merged into `ChainParams` by `GpuBuilder::output`.
+    pub params: ParamBlock,
 }

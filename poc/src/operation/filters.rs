@@ -351,9 +351,9 @@ impl Lower<GpuBackend> for BlurH {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
-        cx.param_block(ParamBlock::scalar("sigma", "float", self.sigma / scale));
-        cx.kernel("blur_h_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::scalar("sigma", self.sigma / scale));
+        cx.kernel("ops.gaussian_blur", "blur_h_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -385,9 +385,9 @@ impl Lower<GpuBackend> for BlurV {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
-        cx.param_block(ParamBlock::scalar("sigma", "float", self.sigma / scale));
-        cx.kernel("blur_v_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::scalar("sigma", self.sigma / scale));
+        cx.kernel("ops.gaussian_blur", "blur_v_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

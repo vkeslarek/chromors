@@ -637,26 +637,26 @@ impl Lower<VipsBackend> for Saturation<VipsBackend> {
 
 impl Lower<GpuBackend> for Saturation<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("amount", "float", self.amount));
-        cx.kernel("saturation_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::new().param("amount", self.amount));
+        cx.kernel("ops.saturation", "saturation_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Cast<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         // Cast is just a codec change in output_spec.
-        cx.kernel("passthrough_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.passthrough", "passthrough_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Msb<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         // Warning: MSB is currently implemented as an 8-bit scale extraction.
-        cx.param_block(ParamBlock::new().param("band", "int", self.band.unwrap_or(-1)));
-        cx.kernel("msb_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::new().param("band", self.band.unwrap_or(-1)));
+        cx.kernel("ops.unary", "msb_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -664,53 +664,53 @@ impl Lower<GpuBackend> for Exposure<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let gain = 2.0f32.powf(self.stops);
         cx.param_block(ParamBlock::new()
-            .param("gain", "float", gain)
-            .param("preserve", "float", self.preserve)
+            .param("gain", gain)
+            .param("preserve", self.preserve)
         );
-        cx.kernel("exposure_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.exposure", "exposure_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Brightness<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("gain", "float", self.value)
-            .param("preserve", "float", 0.0f32)
+            .param("gain", self.value)
+            .param("preserve", 0.0f32)
         );
-        cx.kernel("exposure_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.exposure", "exposure_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Maplut<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("lut_width", "uint", self.lut.spec.width as u32)
-            .param("band", "int", self.band.unwrap_or(-1))
+            .param("lut_width", self.lut.spec.width as u32)
+            .param("band", self.band.unwrap_or(-1))
         );
-        cx.kernel("maplut_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.data_driven", "maplut_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Recomb<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("n", "uint", self.input.spec.format.channel_count() as u32)
+            .param("n", self.input.spec.format.channel_count() as u32)
         );
-        cx.kernel("recomb_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.data_driven", "recomb_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Ifthenelse<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("blend", "uint", self.blend.unwrap_or(false) as u32)
+            .param("blend", self.blend.unwrap_or(false) as u32)
         );
-        cx.kernel("ifthenelse_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.data_driven", "ifthenelse_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -718,14 +718,14 @@ impl Lower<GpuBackend> for Case<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let n = self.cases.len();
         match n {
-            0 => cx.kernel("passthrough_kernel"), // Fallback for 0 cases
-            1 => cx.kernel("case1_kernel"),
-            2 => cx.kernel("case2_kernel"),
-            3 => cx.kernel("case3_kernel"),
-            4 => cx.kernel("case4_kernel"),
-            _ => cx.kernel("case5_kernel"), // Hard cap fallback
+            0 => cx.kernel("ops.passthrough", "passthrough_kernel"), // Fallback for 0 cases
+            1 => cx.kernel("ops.data_driven", "case1_kernel"),
+            2 => cx.kernel("ops.data_driven", "case2_kernel"),
+            3 => cx.kernel("ops.data_driven", "case3_kernel"),
+            4 => cx.kernel("ops.data_driven", "case4_kernel"),
+            _ => cx.kernel("ops.data_driven", "case5_kernel"), // Hard cap fallback
         };
-        cx.output(self.output_spec().output());
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

@@ -3,7 +3,7 @@ use std::hash::Hasher;
 use crate::backend::Backend;
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
 use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
-use crate::backend::gpu::view::ParamBlock;
+use crate::backend::gpu::view::{ParamBlock, ViewAdapter};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation, OperationBoolean};
 use crate::work_unit::{Region, WorkUnit};
@@ -161,6 +161,18 @@ impl Lower<VipsBackend> for Bandmean<VipsBackend> {
     }
 }
 
+/// Wraps a node's value in `SwizzleView<{inner}>` — reads through one
+/// component (0=x/r .. 3=w/a), broadcast `float4(v,v,v,1)`. Used by
+/// `ExtractBand` for a single-band extract: zero-cost, no kernel pass.
+pub fn swizzle_adapter(channel: u32) -> ViewAdapter {
+    ViewAdapter {
+        wrapper: "SwizzleView<{inner}>".into(),
+        ctor: "{ {value}, {params}[0].{p}_channel }".into(),
+        params: ParamBlock::scalar("{p}_channel", channel),
+        module: "lib.region",
+    }
+}
+
 // ── ExtractBand ───────────────────────────────────────────────────────────────
 
 pub struct ExtractBand<B: Backend> {
@@ -252,35 +264,35 @@ impl Lower<GpuBackend> for Bandbool<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(
             ParamBlock::new()
-                .param("boolean", "uint", self.boolean.into_vips() as u32)
-                .param("bands", "uint", self.bands),
+                .param("boolean", self.boolean.into_vips() as u32)
+                .param("bands", self.bands),
         );
-        cx.kernel("bandbool_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.bands", "bandbool_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Bandfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("factor", "uint", self.factor));
-        cx.kernel("bandfold_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::new().param("factor", self.factor));
+        cx.kernel("ops.bands", "bandfold_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Bandunfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("factor", "uint", self.factor));
-        cx.kernel("bandunfold_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::new().param("factor", self.factor));
+        cx.kernel("ops.bands", "bandunfold_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Bandmean<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("bands", "uint", self.bands));
-        cx.kernel("bandmean_kernel");
-        cx.output(self.output_spec().output());
+        cx.param_block(ParamBlock::new().param("bands", self.bands));
+        cx.kernel("ops.bands", "bandmean_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -290,18 +302,18 @@ impl Lower<GpuBackend> for ExtractBand<GpuBackend> {
             // Single-band extract is free: alias the input through the
             // selected component instead of adding a kernel pass.
             None | Some(1) => {
-                cx.alias(self.band as u32);
+                cx.adapt(swizzle_adapter(self.band as u32));
             }
             Some(count) => {
                 cx.param_block(
                     ParamBlock::new()
-                        .param("band", "uint", self.band as u32)
-                        .param("count", "uint", count as u32),
+                        .param("band", self.band as u32)
+                        .param("count", count as u32),
                 );
-                cx.kernel("extract_band_range_kernel");
+                cx.kernel("ops.bands", "extract_band_range_kernel");
             }
         }
-        cx.output(self.output_spec().output());
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -320,11 +332,11 @@ impl Lower<GpuBackend> for Bandjoin<GpuBackend> {
         // broadcasts r=g=b=value), so every source contributes channel 0.
         let mut params = ParamBlock::new();
         for i in 0..n {
-            params = params.param(&format!("ch{i}"), "uint", 0u32);
+            params = params.param(&format!("ch{i}"), 0u32);
         }
         cx.param_block(params);
-        cx.kernel(kernel);
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.bands", kernel);
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

@@ -1,11 +1,22 @@
 use std::sync::Arc;
-use std::marker::PhantomData;
 use crate::kind::{Kind, AnyKind};
 use crate::operation::{AnyOperation, Operation, Input, AnyInput};
-use crate::io::{AnySource, Target};
-use crate::backend::Backend;
+use crate::io::{AnySource, Source, Target};
+use crate::backend::{Backend, Builder};
 use crate::buffer::Buffer;
 use crate::error::Error;
+
+/// Pointer-identity key for a DAG node, shared by `GraphWalk` and every
+/// backend builder's node-keyed maps. An immutable `Arc` DAG never moves its
+/// nodes, so the address is a stable identity for the lifetime of the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId(pub usize);
+
+impl NodeId {
+    pub fn of<B: Backend>(node: &Arc<Node<B>>) -> Self {
+        Self(Arc::as_ptr(node) as *const () as usize)
+    }
+}
 
 /// An immutable, structurally shared directed acyclic graph node.
 /// Pointer chasing is used to navigate the tree. There is no central Graph struct.
@@ -51,7 +62,6 @@ pub struct Data<K: Kind, B: Backend> {
     pub root: Arc<Node<B>>,
     pub ctx: Arc<B::Ctx>,
     pub spec: Arc<K>,
-    pub _m: PhantomData<(K, B)>,
 }
 
 impl<K: Kind, B: Backend> Clone for Data<K, B> {
@@ -60,7 +70,6 @@ impl<K: Kind, B: Backend> Clone for Data<K, B> {
             root: Arc::clone(&self.root),
             ctx: Arc::clone(&self.ctx),
             spec: Arc::clone(&self.spec),
-            _m: PhantomData,
         }
     }
 }
@@ -75,22 +84,13 @@ impl<K: Kind, B: Backend> Data<K, B> {
     /// `Target<Out = Buffer<B>>` that never downloads.
     pub(crate) fn materialize(&self, wu: K::WorkUnit) -> Result<Buffer<B>, Error> {
         use crate::work_unit::WorkUnitFor;
-        B::materialize(&self.ctx, &self.root, &wu.erase())
+        materialize::<B>(&self.ctx, &self.root, &wu.erase())
     }
 
     /// Read-only access to this handle's backend context (e.g. a Source
     /// adapter that materializes an upstream pipeline of the *same* backend).
     pub fn ctx(&self) -> &Arc<B::Ctx> {
         &self.ctx
-    }
-
-    /// The single public terminal: evaluate `wu` and hand the result to a
-    /// `Target`. A host target downloads + decodes (`Out = Vec<…>`); a disk
-    /// target writes a file (`Out = ()`); the viewport target clones the GPU
-    /// `Buffer` (`Out = Buffer`, no download).
-    pub fn extract<T: Target<K, B>>(&self, t: &T, wu: K::WorkUnit) -> Result<T::Out, Error> {
-        let buf = self.materialize(wu.clone())?;
-        t.extract(&buf, &wu, &self.ctx)
     }
 
     /// Convert this pipeline tip into a typed `Input` edge for a downstream op.
@@ -109,14 +109,21 @@ impl<K: Kind, B: Backend> Data<K, B> {
             root: Arc::new(Node::Op(Arc::new(op))),
             ctx: Arc::clone(&self.ctx),
             spec,
-            _m: PhantomData,
         }
     }
 
     /// Evaluates the subgraph up to this node and extracts the result via `target`.
-    pub fn pull<T: crate::io::Target<K, B>>(&self, target: &T, wu: K::WorkUnit) -> Result<T::Out, crate::error::Error> {
+    pub fn pull<T: Target<K, B>>(&self, target: &T, wu: K::WorkUnit) -> Result<T::Out, Error> {
         let buf = self.materialize(wu.clone())?;
         target.extract(&buf, &wu, &self.ctx)
+    }
+}
+
+impl<K: Kind, B: Backend> Data<K, B> {
+    /// Build a fresh pipeline tip from a graph leaf.
+    pub fn from_source<S: Source<B, Kind = K>>(source: Arc<S>, ctx: Arc<B::Ctx>) -> Self {
+        let spec = source.spec();
+        Self { root: Arc::new(Node::Source(source)), ctx, spec }
     }
 }
 
@@ -126,8 +133,8 @@ use std::collections::{HashMap, HashSet};
 /// It owns the transient maps and sets needed to execute a pass over the graph.
 pub struct GraphWalk<'a, B: Backend> {
     pub root: &'a Arc<Node<B>>,
-    pub demands: HashMap<usize, crate::work_unit::WorkUnit>,
-    pub lowered: HashSet<usize>,
+    pub demands: HashMap<NodeId, crate::work_unit::WorkUnit>,
+    pub lowered: HashSet<NodeId>,
 }
 
 impl<'a, B: Backend> GraphWalk<'a, B> {
@@ -141,18 +148,40 @@ impl<'a, B: Backend> GraphWalk<'a, B> {
 
     /// Inverse map. From the root demand, propagate each consumer's `demand()`
     /// upstream; a node reached by several paths accumulates the `union` (bounding
-    /// box) in its entry; `None` prunes a whole input subgraph.
+    /// box) in its entry; `None` prunes a whole input subgraph. Children are only
+    /// re-pushed when a revisit actually grows the node's accumulated demand —
+    /// otherwise dense diamonds would re-walk their whole upstream subgraph once
+    /// per path.
     pub fn demand(&mut self, root_wu: &crate::work_unit::WorkUnit) {
+        use std::collections::hash_map::Entry;
+
         let mut stack = vec![(self.root.clone(), root_wu.clone())];
 
         while let Some((node, wu)) = stack.pop() {
-            let k = Arc::as_ptr(&node) as *const () as usize;
-            self.demands
-                .entry(k)
-                .and_modify(|e| *e = e.union(&wu))
-                .or_insert_with(|| wu.clone());
+            let k = NodeId::of(&node);
+            let grown = match self.demands.entry(k) {
+                Entry::Occupied(mut e) => {
+                    let union = e.get().union(&wu);
+                    let grown = union != *e.get();
+                    e.insert(union);
+                    grown
+                }
+                Entry::Vacant(e) => {
+                    e.insert(wu.clone());
+                    true
+                }
+            };
+            if !grown {
+                continue;
+            }
 
-            for (input, child) in node.inputs().iter().zip(node.demand_erased(&wu)) {
+            let demands = node.demand_erased(&wu);
+            debug_assert_eq!(
+                demands.len(),
+                node.inputs().len(),
+                "Operation::demand must return one entry per input"
+            );
+            for (input, child) in node.inputs().iter().zip(demands) {
                 if let Some(child_wu) = child {
                     stack.push((input.src().clone(), child_wu));
                 } // None => pruned this region
@@ -174,7 +203,7 @@ impl<'a, B: Backend> GraphWalk<'a, B> {
     where
         F: FnMut(&Arc<Node<B>>, &crate::work_unit::WorkUnit),
     {
-        let k = Arc::as_ptr(node) as *const () as usize;
+        let k = NodeId::of(node);
         let Some(wu) = self.demands.get(&k).cloned() else { return }; // pruned
         if !self.lowered.insert(k) {
             return; // diamond: lower once
@@ -185,4 +214,23 @@ impl<'a, B: Backend> GraphWalk<'a, B> {
         }
         enter_and_lower(node, &wu);
     }
+}
+
+/// The whole-graph evaluation pass: demand walk, then lower walk into a
+/// fresh `B::Builder`, finished into the root's `Buffer<B>`.
+pub(crate) fn materialize<B: Backend>(
+    ctx: &Arc<B::Ctx>,
+    root: &Arc<Node<B>>,
+    wu: &crate::work_unit::WorkUnit,
+) -> Result<Buffer<B>, Error> {
+    let mut walk = GraphWalk::new(root);
+    walk.demand(wu);
+
+    let mut builder = B::Builder::new(Arc::clone(ctx));
+    walk.lower(|node, node_wu| {
+        let inputs: Vec<NodeId> = node.inputs().iter().map(|i| NodeId::of(i.src())).collect();
+        builder.enter(NodeId::of(node), &inputs, node_wu);
+        node.lower(&mut builder);
+    });
+    builder.finish(NodeId::of(root), root.output_kind(), wu)
 }

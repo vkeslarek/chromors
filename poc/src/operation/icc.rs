@@ -179,10 +179,10 @@ impl Lower<VipsBackend> for Gamma<VipsBackend> {
 impl Lower<GpuBackend> for Gamma<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new()
-            .param("exponent", "float", self.exponent.unwrap_or(1.0) as f32)
+            .param("exponent", self.exponent.unwrap_or(1.0) as f32)
         );
-        cx.kernel("gamma_kernel");
-        cx.output(self.output_spec().output());
+        cx.kernel("ops.gamma", "gamma_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

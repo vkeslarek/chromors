@@ -3,6 +3,7 @@ use crate::error::Error;
 use super::{GpuContext, GpuBuilder};
 use super::context::CachedPipelines;
 use super::buffer::GpuBuffer;
+use super::emit::{self, Slot};
 use wgpu;
 
 pub struct DispatchPass {
@@ -75,63 +76,27 @@ pub fn compile(ctx: &GpuContext, builder: &GpuBuilder, slang: String, hash: u64)
         source: wgpu::util::make_spirv(&spirv),
     });
 
-    let mut bgl_entries = Vec::new();
-    let mut binding_idx = 0;
-
-    // Output buffer
-    bgl_entries.push(wgpu::BindGroupLayoutEntry {
-        binding: binding_idx,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    });
-    binding_idx += 1;
-
-    // Params buffer
-    bgl_entries.push(wgpu::BindGroupLayoutEntry {
-        binding: binding_idx,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    });
-    binding_idx += 1;
-
-    // Working-space scratch buffers (sandwich ping-pong) — image outputs only.
-    for _ in 0..builder.work_buffer_count() {
-        bgl_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: binding_idx,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        });
-        binding_idx += 1;
-    }
-
-    for _ in &builder.input_views {
-        bgl_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: binding_idx,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        });
-        binding_idx += 1;
-    }
+    // Binding layout follows `emit::slots()` exactly — target/work buffers are
+    // read-write, params/source buffers are read-only.
+    let bgl_entries: Vec<wgpu::BindGroupLayoutEntry> = emit::slots(builder)
+        .enumerate()
+        .map(|(binding, slot)| {
+            let read_only = match slot {
+                Slot::Target | Slot::Work(_, _) => false,
+                Slot::Params | Slot::Source(_, _) => true,
+            };
+            wgpu::BindGroupLayoutEntry {
+                binding: binding as u32,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        })
+        .collect();
 
     let bgl0 = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("bgl_targets"),
@@ -198,53 +163,43 @@ pub fn dispatch(ctx: &GpuContext, pass: &DispatchPass, builder: &GpuBuilder, out
 
     use wgpu::util::DeviceExt;
 
-    let mut bg_entries = Vec::new();
-    let mut binding_idx = 0;
-
-    bg_entries.push(wgpu::BindGroupEntry {
-        binding: binding_idx,
-        resource: out_buffer.as_entire_binding(),
-    });
-    binding_idx += 1;
-
     let params_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("params"),
         contents: &builder.params.bytes,
         usage: wgpu::BufferUsages::STORAGE, // Matches Storage { read_only: true }
     });
-    bg_entries.push(wgpu::BindGroupEntry {
-        binding: binding_idx,
-        resource: params_buf.as_entire_binding(),
-    });
-    binding_idx += 1;
 
-    // Working scratch buffers (float4, output-sized) — image outputs only.
-    let work_len = (dims.0 as u64 * dims.1 as u64 * 16).max(16);
-    let work_buffers: Vec<Arc<wgpu::Buffer>> = (0..builder.work_buffer_count())
-        .map(|k| {
-            Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("work_{k}")),
-                size: work_len,
-                usage: wgpu::BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }))
+    // Working scratch buffers, one per `Slot::Work`, sized by each step's
+    // `TempElem::byte_size`.
+    let work_buffers: Vec<Arc<wgpu::Buffer>> = emit::slots(builder)
+        .filter_map(|slot| match slot {
+            Slot::Work(k, elem) => {
+                let work_len = (dims.0 as u64 * dims.1 as u64 * elem.byte_size).max(16);
+                Some(Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("work_{k}")),
+                    size: work_len,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                })))
+            }
+            _ => None,
         })
         .collect();
-    for work in &work_buffers {
-        bg_entries.push(wgpu::BindGroupEntry {
-            binding: binding_idx,
-            resource: work.as_entire_binding(),
-        });
-        binding_idx += 1;
-    }
 
-    for (i, _) in builder.input_views.iter().enumerate() {
-        bg_entries.push(wgpu::BindGroupEntry {
-            binding: binding_idx,
-            resource: builder.source_buffers[i].buffer.as_entire_binding(),
-        });
-        binding_idx += 1;
-    }
+    let mut work_iter = work_buffers.iter();
+    let bg_entries: Vec<wgpu::BindGroupEntry> = emit::slots(builder)
+        .enumerate()
+        .map(|(binding, slot)| {
+            let binding = binding as u32;
+            let resource = match slot {
+                Slot::Target => out_buffer.as_entire_binding(),
+                Slot::Params => params_buf.as_entire_binding(),
+                Slot::Work(_, _) => work_iter.next().unwrap().as_entire_binding(),
+                Slot::Source(i, _) => builder.source_buffers[i].buffer.as_entire_binding(),
+            };
+            wgpu::BindGroupEntry { binding, resource }
+        })
+        .collect();
 
     let bg0 = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg0"),

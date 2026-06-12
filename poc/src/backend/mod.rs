@@ -5,7 +5,8 @@ pub mod raw;
 use std::sync::Arc;
 use crate::error::Error;
 use crate::work_unit::WorkUnit;
-use crate::node::Node;
+use crate::kind::AnyKind;
+use crate::node::NodeId;
 use crate::buffer::Buffer;
 
 /// A Backend is the engine that runs a DAG.
@@ -13,17 +14,17 @@ use crate::buffer::Buffer;
 pub trait Backend: Sized + Send + Sync + 'static {
     type Ctx: Send + Sync;
     type Payload: Send + Sync;
-    type Builder;
+    type Builder: Builder<Self>;
+}
 
-    /// Walk the agnostic DAG, lower each node into a `Builder`, run it, return
-    /// the result. GPU: emit one fused Slang module + dispatch. Vips: build a
-    /// libvips demand-driven pipeline + sink the region. The output Kind is
-    /// carried by the root `Node` (and the returned `Buffer`'s `spec`), so it
-    /// is not a type parameter here.
-    ///
-    /// `ctx` is an `&Arc` (not `&Self::Ctx`) so a backend can clone it into its
-    /// builder — a GPU source's `lower` fetches+uploads with it, keeping the
-    /// materializer free of any `Node::Source` special-case.
-    fn materialize(ctx: &Arc<Self::Ctx>, root: &Arc<Node<Self>>, wu: &WorkUnit)
-        -> Result<Buffer<Self>, Error>;
+/// What a backend accumulates during the lower walk and how it finishes.
+/// The core (`node::materialize`) owns the walk; a backend only says what
+/// happens *per node* (`enter`, then `node.lower(&mut builder)`) and *at the
+/// end* (`finish`).
+pub trait Builder<B: Backend>: Sized {
+    fn new(ctx: Arc<B::Ctx>) -> Self;
+    /// Announce the node about to lower: its id, its input ids, its resolved unit.
+    fn enter(&mut self, node: NodeId, inputs: &[NodeId], wu: &WorkUnit);
+    /// Run the pass and produce the root's buffer.
+    fn finish(self, root: NodeId, spec: Arc<dyn AnyKind>, root_wu: &WorkUnit) -> Result<Buffer<B>, Error>;
 }

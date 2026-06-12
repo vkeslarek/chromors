@@ -1,8 +1,106 @@
-use super::{GpuBuilder, StepInput, TempElem};
+use super::{BaseInput, GpuBuilder, StepInput, TempElem, View};
 use super::view::OutBuffer;
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+
+/// Core Slang libraries imported unconditionally by every fused pass.
+const CORE_MODULES: &[&str] = &["lib.region", "lib.io", "lib.codecs", "lib.pixel"];
+
+/// One binding-group-0 entry, in emission/binding order. The single source of
+/// truth for the fused pass's binding layout — used by `emit_slang` (variable
+/// declarations), `compile::compile` (BGL `read_only` per entry), and
+/// `compile::dispatch` (bind-group entries + work-buffer sizing).
+pub enum Slot<'a> {
+    /// Binding 0: the output buffer (codec sandwich target or direct wrapper).
+    Target,
+    /// Binding 1: the `ChainParams` SSBO.
+    Params,
+    /// One `work_{k}` temp per step that writes one (see `GpuBuilder::work_buffer_count`).
+    Work(usize, &'a TempElem),
+    /// One `src_{i}` decode buffer per source input.
+    Source(usize, &'a View),
+}
+
+/// Iterate this pass's binding-group-0 slots in declaration/binding order.
+pub fn slots(builder: &GpuBuilder) -> impl Iterator<Item = Slot<'_>> {
+    let n_work = builder.work_buffer_count();
+    std::iter::once(Slot::Target)
+        .chain(std::iter::once(Slot::Params))
+        .chain((0..n_work).map(move |k| Slot::Work(k, &builder.steps[k].temp_elem)))
+        .chain(builder.input_views.iter().enumerate().map(|(i, v)| Slot::Source(i, v)))
+}
+
+/// Collect the distinct `ops.*` modules referenced by this pass's steps and
+/// any view adapters they (or the output) read through — deduped against
+/// [`CORE_MODULES`], which every pass imports unconditionally.
+fn referenced_modules(builder: &GpuBuilder) -> Vec<&'static str> {
+    let mut seen = HashSet::new();
+    let mut modules = Vec::new();
+    let push = |m: &'static str, seen: &mut HashSet<&'static str>, modules: &mut Vec<&'static str>| {
+        if !CORE_MODULES.contains(&m) && seen.insert(m) {
+            modules.push(m);
+        }
+    };
+    for step in &builder.steps {
+        push(step.module, &mut seen, &mut modules);
+        for inp in &step.inputs {
+            if let Some(a) = &inp.adapter {
+                push(a.module, &mut seen, &mut modules);
+            }
+        }
+    }
+    if let Some(a) = &builder.cur_output_adapter
+        && let Some(adapter) = &a.adapter
+    {
+        push(adapter.module, &mut seen, &mut modules);
+    }
+    for inp in &builder.cur_inputs {
+        if let Some(a) = &inp.adapter {
+            push(a.module, &mut seen, &mut modules);
+        }
+    }
+    modules
+}
+
+/// Resolve one `StepInput` to a Slang read expression, declaring any
+/// intermediate variables it needs. Returns `(decl_lines, expr)`: `decl_lines`
+/// are `    Type var = init;\n` statements to emit before use; `expr` is the
+/// variable name (or `in_{i}`) to read from.
+///
+/// - `BaseInput::Source(i)` with no adapter → `in_{i}` directly, no decl.
+/// - `BaseInput::Step(j)` with no adapter → declares `{wrapper} {var} = { work_{j}, params[0].domain };`.
+/// - With an adapter → declares the base (as above if `Step`), then wraps it
+///   in the adapter's `wrapper`/`ctor` templates (`{inner}` ← base's Slang
+///   type, `{value}` ← base's variable, `{params}` ← `"params"`).
+fn read_expr(builder: &GpuBuilder, input: &StepInput, var: &str) -> (String, String) {
+    match &input.adapter {
+        None => match input.base {
+            BaseInput::Source(i) => (String::new(), format!("in_{i}")),
+            BaseInput::Step(j) => {
+                let wrapper = builder.steps[j].temp_elem.region_wrapper;
+                let decl = format!("    {wrapper} {var} = {{ work_{j}, params[0].domain }};\n");
+                (decl, var.to_string())
+            }
+        },
+        Some(adapter) => {
+            let (base_slang, base_var, mut decl) = match input.base {
+                BaseInput::Source(i) => (builder.input_views[i].slang.to_string(), format!("in_{i}"), String::new()),
+                BaseInput::Step(j) => {
+                    let wrapper = builder.steps[j].temp_elem.region_wrapper;
+                    let base_var = format!("{var}_base");
+                    let decl = format!("    {wrapper} {base_var} = {{ work_{j}, params[0].domain }};\n");
+                    (wrapper.to_string(), base_var, decl)
+                }
+            };
+            let wrapper_ty = adapter.wrapper.replace("{inner}", &base_slang);
+            let ctor = adapter.ctor.replace("{value}", &base_var).replace("{params}", "params");
+            decl.push_str(&format!("    {wrapper_ty} {var} = {ctor};\n"));
+            (decl, var.to_string())
+        }
+    }
+}
 
 /// Emit one fused Slang compute shader from the builder state collected during
 /// the lower walk. Fully generic — no datatype/op-specific branches. Each input
@@ -24,43 +122,24 @@ use std::collections::hash_map::DefaultHasher;
 /// ```
 pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     let output = builder.output.as_ref().expect("a fused pass needs an output");
-    let scratch = output.arg_buffer == OutBuffer::Scratch;
-    let n_work = builder.work_buffer_count();
+    let scratch = output.dest == OutBuffer::Scratch;
 
     let mut s = String::with_capacity(2048);
 
-    s.push_str("import lib.region;\n");
-    s.push_str("import lib.io;\n");
-    s.push_str("import lib.codecs;\n");
-    s.push_str("import lib.pixel;\n");
-    // POC: import every ops module the builder might reference. A production
-    // emitter would carry each kernel's module path on `KernelCall`.
-    s.push_str("import ops.invert;\n");
-    s.push_str("import ops.gaussian_blur;\n");
-    s.push_str("import ops.histogram;\n");
-    s.push_str("import ops.arithmetic;\n");
-    s.push_str("import ops.bands;\n");
-    s.push_str("import ops.composite;\n");
-    s.push_str("import ops.convolution;\n");
-    s.push_str("import ops.exposure;\n");
-    s.push_str("import ops.gamma;\n");
-    s.push_str("import ops.passthrough;\n");
-    s.push_str("import ops.vectorscope;\n");
-    s.push_str("import ops.opacity;\n");
-    s.push_str("import ops.saturation;\n");
-    s.push_str("import ops.shrink;\n");
-    s.push_str("import ops.unary;\n");
-    s.push_str("import ops.data_driven;\n");
-    s.push_str("import ops.resample;\n");
-    s.push_str("import ops.geometry_extended;\n\n");
+    for m in CORE_MODULES {
+        writeln!(s, "import {m};").unwrap();
+    }
+    for m in referenced_modules(builder) {
+        writeln!(s, "import {m};").unwrap();
+    }
+    s.push('\n');
 
     // ── ChainParams (one SSBO: per-slot BufferRegions + op scalars) ──────────
     s.push_str("struct ChainParams {\n");
     let mut seen = HashSet::new();
     for (name, ty) in &builder.params.fields {
         if seen.insert(name.clone()) {
-            let slang_ty = if *ty == "scalar" { "float" } else { ty };
-            s.push_str(&format!("    {slang_ty} {name};\n"));
+            writeln!(s, "    {ty} {name};").unwrap();
         }
     }
     s.push_str("};\n\n");
@@ -69,38 +148,36 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     // The target's element type: the encode wrapper's (sandwich) or the direct
     // out-arg wrapper's.
     let target_elem = output.encode.as_ref().map(|e| e.buffer_type.as_ref())
-        .unwrap_or(output.buffer_type.as_ref());
-    let mut binding = 0u32;
-    s.push_str(&format!("[[vk::binding({binding}, 0)]] RWStructuredBuffer<{target_elem}> target_buffer;\n"));
-    binding += 1;
-    s.push_str(&format!("[[vk::binding({binding}, 0)]] StructuredBuffer<ChainParams> params;\n"));
-    binding += 1;
-    for k in 0..n_work {
-        let elem = builder.steps[k].temp_elem.buffer_ty;
-        s.push_str(&format!("[[vk::binding({binding}, 0)]] RWStructuredBuffer<{elem}> work_{k};\n"));
-        binding += 1;
-    }
-    for (i, view) in builder.input_views.iter().enumerate() {
-        s.push_str(&format!("[[vk::binding({binding}, 0)]] StructuredBuffer<{}> src_{i};\n", view.buffer_type));
-        binding += 1;
+        .unwrap_or(output.arg.buffer_type.as_ref());
+    for (binding, slot) in slots(builder).enumerate() {
+        match slot {
+            Slot::Target => writeln!(s, "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{target_elem}> target_buffer;").unwrap(),
+            Slot::Params => writeln!(s, "[[vk::binding({binding}, 0)]] StructuredBuffer<ChainParams> params;").unwrap(),
+            Slot::Work(k, elem) => writeln!(s, "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{}> work_{k};", elem.buffer_ty).unwrap(),
+            Slot::Source(i, view) => writeln!(s, "[[vk::binding({binding}, 0)]] StructuredBuffer<{}> src_{i};", view.buffer_type).unwrap(),
+        }
     }
 
     // ── main ─────────────────────────────────────────────────────────────────
-    s.push_str(&format!("\n[shader(\"compute\")]\n[numthreads({wg_dim}, {wg_dim}, 1)]\n"));
+    writeln!(s, "\n[shader(\"compute\")]\n[numthreads({wg_dim}, {wg_dim}, 1)]").unwrap();
     s.push_str("void main(uint3 dispatchThreadID : SV_DispatchThreadID) {\n");
-    s.push_str("    uint2 idx = dispatchThreadID.xy;\n\n");
+    s.push_str("    uint2 idx = dispatchThreadID.xy;\n");
+    // Workgroup-aligned dispatch overshoots the domain when w/h aren't
+    // multiples of the workgroup size; without this guard those extra
+    // threads still run kernels (e.g. histogram's InterlockedAdd) on
+    // out-of-range reads.
+    s.push_str("    if (idx.x >= params[0].domain.width || idx.y >= params[0].domain.height) { return; }\n\n");
 
     // Source inputs: each decodes from its codec buffer via the source View.
-    // Steps reference these (`in_{i}`) by their `StepInput::Source` slot.
+    // Steps reference these (`in_{i}`) by their `BaseInput::Source` slot.
     for (i, view) in builder.input_views.iter().enumerate() {
-        let region = format!("params[0].region_in_{i}");
-        let init = view.init_expr(&format!("src_{i}"), "params", &region);
-        s.push_str(&format!("    {} in_{i} = {};\n", view.slang, init));
+        let init = view.input_expr(&format!("src_{i}"), i);
+        writeln!(s, "    {} in_{i} = {init};", view.slang).unwrap();
     }
     s.push('\n');
 
     // Steps in topo order. Each step `s` writes its own temp `work_{s}`; a later
-    // step (or a downstream node) reads it via `StepInput::Step(s)`. A node
+    // step (or a downstream node) reads it via `BaseInput::Step(s)`. A node
     // reachable by several consumers was lowered once, so its temp is read by
     // index — diamonds need no special handling here.
     let n_steps = builder.steps.len();
@@ -108,58 +185,10 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         // Resolve this step's read arguments.
         let mut read_args: Vec<String> = Vec::with_capacity(step.inputs.len());
         for (k, inp) in step.inputs.iter().enumerate() {
-            match inp {
-                StepInput::Source(i) => read_args.push(format!("in_{i}")),
-                StepInput::Step(j) => {
-                    // Prior step's temp is RW-bound → wrap in its region
-                    // wrapper (an `IRegion`, so kernels accept it).
-                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
-                    let var = format!("r_{s_i}_{k}");
-                    s.push_str(&format!(
-                        "    {wrapper} {var} = {{ work_{j}, params[0].region_out }};\n"
-                    ));
-                    read_args.push(var);
-                }
-                StepInput::SwizzleSource(i, c) => {
-                    // A "free" alias of a source decode (e.g. ExtractBand
-                    // directly on a freshly-opened image): read one component
-                    // of `in_{i}` through `SwizzleView`.
-                    let var = format!("r_{s_i}_{k}");
-                    s.push_str(&format!(
-                        "    SwizzleView<{}> {var} = {{ in_{i}, {c}u }};\n",
-                        builder.input_views[*i].slang
-                    ));
-                    read_args.push(var);
-                }
-                StepInput::SwizzleStep(j, c) => {
-                    // A "free" alias (e.g. ExtractBand): read one component
-                    // of a prior step's temp through `SwizzleView`.
-                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
-                    let var = format!("r_{s_i}_{k}");
-                    s.push_str(&format!(
-                        "    SwizzleView<{wrapper}> {var} = {{ {{ work_{j}, params[0].region_out }}, {c}u }};\n"
-                    ));
-                    read_args.push(var);
-                }
-                StepInput::RemapSource(i, kind, rp) => {
-                    let var = format!("r_{s_i}_{k}");
-                    let inner_view = &builder.input_views[*i];
-                    s.push_str(&format!(
-                        "    RemapView<{}> {var} = {{ in_{i}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
-                        inner_view.slang, *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
-                    ));
-                    read_args.push(var);
-                }
-                StepInput::RemapStep(j, kind, rp) => {
-                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
-                    let var = format!("r_{s_i}_{k}");
-                    s.push_str(&format!(
-                        "    RemapView<{wrapper}> {var} = {{ {{ work_{j}, params[0].region_out }}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
-                        *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
-                    ));
-                    read_args.push(var);
-                }
-            }
+            let var = format!("r_{s_i}_{k}");
+            let (decl, expr) = read_expr(builder, inp, &var);
+            s.push_str(&decl);
+            read_args.push(expr);
         }
 
         // This step's output: its own temp, unless it's the final step of a
@@ -168,16 +197,11 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         let direct_final = is_last && !scratch;
         let out_var = format!("out_{s_i}");
         if direct_final {
-            let init = output.arg_ctor
-                .replace("{buf}", "target_buffer")
-                .replace("{params}", "params")
-                .replace("{region}", "params[0].region_out");
-            s.push_str(&format!("    {} {out_var} = {init};\n", output.arg_type));
+            let init = output.arg.init_expr("target_buffer", "params", "params[0].region_out");
+            writeln!(s, "    {} {out_var} = {init};", output.arg.slang).unwrap();
         } else {
             let wrapper = step.temp_elem.region_wrapper;
-            s.push_str(&format!(
-                "    {wrapper} {out_var} = {{ work_{s_i}, params[0].region_out }};\n"
-            ));
+            writeln!(s, "    {wrapper} {out_var} = {{ work_{s_i}, params[0].domain }};").unwrap();
         }
 
         let mut args: Vec<String> = Vec::with_capacity(2 + read_args.len() + step.params.len());
@@ -187,54 +211,39 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         for p in &step.params {
             args.push(format!("params[0].{p}"));
         }
-        s.push_str(&format!("    {}({});\n\n", step.kernel, args.join(", ")));
+        writeln!(s, "    {}({});\n", step.kernel, args.join(", ")).unwrap();
 
         // Codec sandwich close on the final step (image outputs only): encode
         // the final working temp into the target.
         if is_last && let Some(encode) = &output.encode {
             let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
-            s.push_str(&format!("    {} enc = {};\n", encode.slang, init));
-            if let Some(c) = builder.output_swizzle {
-                // The DAG root is a pure alias: broadcast the swizzled
-                // component back into this temp's full shape before encode.
-                let comp = step.temp_elem.component(c);
-                let scalar = format!("{out_var}.read(idx).{comp}");
-                let broadcast = step.temp_elem.broadcast_expr(&scalar);
-                s.push_str(&format!("    enc.write(idx, {broadcast});\n"));
+            writeln!(s, "    {} enc = {init};", encode.slang).unwrap();
+            if let Some(adapted) = &builder.cur_output_adapter {
+                // The DAG root is a pure view adapter (e.g. swizzle/remap) of
+                // the final working temp: encode through the adapter instead
+                // of the temp's raw value.
+                let (decl, expr) = read_expr(builder, adapted, "out_adapt");
+                s.push_str(&decl);
+                writeln!(s, "    enc.write(idx, {expr}.read(idx));").unwrap();
             } else {
-                s.push_str(&format!("    enc.write(idx, {out_var}.read(idx));\n"));
+                writeln!(s, "    enc.write(idx, {out_var}.read(idx));").unwrap();
             }
         }
     }
 
-    // A pure alias of a source with zero kernel steps (e.g. `extract_band`
-    // applied directly to a freshly-opened image — no other ops in the
+    // A pure alias of a source with zero kernel steps (e.g. `extract_band` or
+    // `flip` applied directly to a freshly-opened image — no other ops in the
     // chain). The per-step loop above never ran, so encode straight from the
-    // resolved source read here.
+    // resolved (and possibly adapted) source read here.
     if n_steps == 0 {
         if let Some(encode) = &output.encode {
             let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
-            s.push_str(&format!("    {} enc = {};\n", encode.slang, init));
-            match (builder.cur_inputs.first(), builder.output_swizzle) {
-                (Some(StepInput::SwizzleSource(i, c)), Some(_)) => {
-                    let comp = TempElem::F4.component(*c);
-                    let scalar = format!("in_{i}.read(idx).{comp}");
-                    let broadcast = TempElem::F4.broadcast_expr(&scalar);
-                    s.push_str(&format!("    enc.write(idx, {broadcast});\n"));
-                }
-                (Some(StepInput::RemapSource(i, kind, rp)), _) => {
-                    let var = format!("remap_0");
-                    let inner_view = &builder.input_views[*i];
-                    s.push_str(&format!(
-                        "    RemapView<{}> {var} = {{ in_{i}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
-                        inner_view.slang, *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
-                    ));
-                    s.push_str(&format!("    enc.write(idx, {var}.read(idx));\n"));
-                }
-                (Some(StepInput::Source(i)), _) => {
-                    s.push_str(&format!("    enc.write(idx, in_{i}.read(idx));\n"));
-                }
-                _ => {}
+            writeln!(s, "    {} enc = {init};", encode.slang).unwrap();
+            let input = builder.cur_output_adapter.clone().or_else(|| builder.cur_inputs.first().cloned());
+            if let Some(input) = input {
+                let (decl, expr) = read_expr(builder, &input, "out_adapt");
+                s.push_str(&decl);
+                writeln!(s, "    enc.write(idx, {expr}.read(idx));").unwrap();
             }
         }
     }

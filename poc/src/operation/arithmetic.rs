@@ -342,55 +342,55 @@ impl Lower<VipsBackend> for Math2<VipsBackend> {
 // ── GPU Lowering ──────────────────────────────────────────────────────────────
 
 impl Lower<GpuBackend> for Add<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("add_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "add_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Subtract<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("subtract_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "subtract_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Multiply<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("multiply_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "multiply_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Divide<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("divide_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "divide_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for MaxPair<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("max_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "max_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for MinPair<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("min_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "min_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Remainder<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("remainder_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "remainder_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Complexform<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("complexform_kernel"); cx.output(self.output_spec().output()); }
+    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "complexform_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Complex2<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { 
-        cx.param_block(ParamBlock::scalar("op", "uint", self.cmplx.into_vips() as u32));
-        cx.kernel("complex2_kernel"); 
-        cx.output(self.output_spec().output()); 
+        cx.param_block(ParamBlock::scalar("op", self.cmplx.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "complex2_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
     }
 }
 impl Lower<GpuBackend> for Math<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { 
-        cx.param_block(ParamBlock::scalar("op", "uint", self.math.into_vips() as u32));
-        cx.kernel("math_kernel"); 
-        cx.output(self.output_spec().output()); 
+        cx.param_block(ParamBlock::scalar("op", self.math.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "math_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
     }
 }
 impl Lower<GpuBackend> for Round<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { 
-        cx.param_block(ParamBlock::scalar("op", "uint", self.round.into_vips() as u32));
-        cx.kernel("round_kernel"); 
-        cx.output(self.output_spec().output()); 
+        cx.param_block(ParamBlock::scalar("op", self.round.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "round_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
     }
 }
 impl Lower<GpuBackend> for Math2<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { 
-        cx.param_block(ParamBlock::scalar("op", "uint", self.math2.into_vips() as u32));
-        cx.kernel("math2_kernel"); 
-        cx.output(self.output_spec().output()); 
+        cx.param_block(ParamBlock::scalar("op", self.math2.into_vips() as u32));
+        cx.kernel("ops.arithmetic", "math2_kernel"); 
+        cx.output(self.output_spec().output(cx.wu())); 
     }
 }
 

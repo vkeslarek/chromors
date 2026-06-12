@@ -1,14 +1,3 @@
-/// The natural division or shape of a Kind's data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shape {
-    /// A 2D rect (e.g. an image).
-    Region,
-    /// A 1D range (e.g. an array slice).
-    Range,
-    /// An indivisible unit (e.g. a point set, a histogram).
-    Atomic,
-}
-
 /// The Level of Detail for operations, used to scale parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lod(pub u32);
@@ -76,7 +65,7 @@ impl Range {
 pub struct Atomic;
 
 /// The erased slice enum, used wherever the graph crosses heterogeneous node boundaries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WorkUnit {
     Region(Region),
     Range(Range),

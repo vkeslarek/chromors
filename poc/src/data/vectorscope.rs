@@ -11,7 +11,7 @@ use crate::data::image::ImageKind;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
 use crate::operation::{AnyInput, Input, Lower, Operation};
-use crate::work_unit::{Atomic, Lod, Region, Shape, WorkUnit};
+use crate::work_unit::{Atomic, Lod, Region, WorkUnit};
 
 // ── Kind ──────────────────────────────────────────────────────────────────────
 
@@ -24,9 +24,6 @@ pub struct VectorscopeKind {
 impl AnyKind for VectorscopeKind {
     fn as_any(&self) -> &dyn Any {
         self
-    }
-    fn shape(&self) -> Shape {
-        Shape::Atomic
     }
     fn byte_size(&self, _wu: &WorkUnit) -> u64 {
         (self.grid as u64 * self.grid as u64 * 4).max(16)
@@ -45,19 +42,15 @@ impl GpuView for VectorscopeKind {
         View::new("uint", "HistogramOut", "{ {buf}, {params}[0].bin_count }")
     }
     /// Reduction output: written directly into the target (atomic), no sandwich.
-    fn output(&self) -> OutputWrap {
+    fn output(&self, _wu: &WorkUnit) -> OutputWrap {
         OutputWrap {
-            arg_type: "HistogramOut".into(),
-            arg_ctor: "{ {buf}, {params}[0].bin_count }".into(),
-            arg_buffer: OutBuffer::Target,
-            buffer_type: "uint".into(),
+            arg: View::new("uint", "HistogramOut", "{ {buf}, {params}[0].bin_count }"),
+            dest: OutBuffer::Target,
             encode: None,
+            // `bin_count` (= grid*grid) is consumed only by the output ctor's
+            // bounds check, not a kernel arg.
+            params: ParamBlock::scalar("bin_count", self.grid * self.grid),
         }
-    }
-    /// `grid_size` is a kernel arg (used for gx/gy math); `bin_count` (=
-    /// grid*grid) is consumed only by the output ctor's bounds check.
-    fn params(&self, _wu: &WorkUnit) -> ParamBlock {
-        ParamBlock::scalar("grid_size", "uint", self.grid)
     }
 }
 
@@ -90,14 +83,16 @@ impl Operation<GpuBackend> for VectorscopeOp {
 
 impl Lower<GpuBackend> for VectorscopeOp {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let wu = cx.wu().clone();
         // Inputs come from the source leaf. Reduction output: written directly.
-        // bin_count (= grid*grid) is consumed only by the output ctor, not a
-        // kernel arg; grid_size is a real kernel arg used in gx/gy math.
-        cx.output_params(ParamBlock::scalar("bin_count", "uint", self.grid * self.grid));
-        cx.param_block(self.output_spec().params(&wu));
-        cx.kernel("vectorscope_kernel");
-        cx.output(self.output_spec().output());
+        // bin_count (= grid*grid) is carried in `OutputWrap.params` (merged by
+        // `cx.output`); grid_size is a real kernel arg used in gx/gy math. The
+        // output itself is `Atomic`-shaped, so the dispatch domain must be set
+        // explicitly from the input image's dims.
+        let (w, h) = self.input.spec.dims();
+        cx.dispatch((w.max(0) as u32, h.max(0) as u32));
+        cx.param_block(ParamBlock::scalar("grid_size", self.grid));
+        cx.kernel("ops.vectorscope", "vectorscope_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
