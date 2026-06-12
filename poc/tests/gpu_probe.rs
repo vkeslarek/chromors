@@ -240,6 +240,45 @@ fn data_driven_kernels_compile_and_run() {
 }
 
 #[test]
+fn resample_kernels_compile_and_run() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let resize = gpu_img.resize(2.0, None, None, None);
+    let reduce = gpu_img.reduce(2.0, 2.0, None, None);
+    let reduce_h = gpu_img.reduce_horizontal(2.0, None, None);
+    let reduce_v = gpu_img.reduce_vertical(2.0, None, None);
+
+    for img in [&resize, &reduce, &reduce_h, &reduce_v] {
+        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        assert!(!bytes.is_empty());
+    }
+}
+
+#[test]
+fn geometry_extended_kernels_compile_and_run() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let embed = gpu_img.embed(10, 10, 200, 200, None, None);
+    let gravity = gpu_img.gravity(poc::operation::CompassDirection::Centre, 200, 200, None, None);
+    let rot45 = gpu_img.rot45(poc::operation::Angle45::D45);
+    let rotate = gpu_img.rotate(45.0, None, None, None, None, None);
+    let thumbnail = gpu_img.thumbnail(100, None, None, None, None, None, None, None, None, None, None);
+
+    for img in [&embed, &gravity, &rot45, &rotate, &thumbnail] {
+        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        assert!(!bytes.is_empty());
+    }
+}
+
+#[test]
 fn histogram_kernel_runs_and_counts_pixels() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

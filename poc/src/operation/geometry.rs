@@ -176,6 +176,52 @@ impl Lower<GpuBackend> for Replicate<GpuBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Resize<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let hscale = self.scale;
+        let vscale = self.vertical_scale.unwrap_or(self.scale);
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_hscale", "float", (1.0 / hscale) as f32)
+            .param("inv_vscale", "float", (1.0 / vscale) as f32)
+        );
+        cx.kernel("resize_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Reduce<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_hscale", "float", self.horizontal as f32)
+            .param("inv_vscale", "float", self.vertical as f32)
+        );
+        cx.kernel("resize_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for ReduceHorizontal<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_hscale", "float", self.shrink as f32)
+            .param("inv_vscale", "float", 1.0f32)
+        );
+        cx.kernel("resize_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for ReduceVertical<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_hscale", "float", 1.0f32)
+            .param("inv_vscale", "float", self.shrink as f32)
+        );
+        cx.kernel("resize_kernel");
+        cx.output(self.output_spec().output());
+    }
+}
+
 pub struct Embed<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub x: i32,
@@ -224,6 +270,26 @@ impl Lower<VipsBackend> for Embed<VipsBackend> {
         if let Some(bg) = self.background { op.set_array_double("background", &bg); }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Embed<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
+        let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("ox", "int", self.x)
+            .param("oy", "int", self.y)
+            .param("in_w", "uint", in_spec.width as u32)
+            .param("in_h", "uint", in_spec.height as u32)
+            .param("extend_mode", "uint", extend_mode as u32)
+            .param("bg_r", "float", bg[0] as f32)
+            .param("bg_g", "float", bg[1] as f32)
+            .param("bg_b", "float", bg[2] as f32)
+        );
+        cx.kernel("embed_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 
@@ -348,6 +414,48 @@ impl Lower<VipsBackend> for Rot45<VipsBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Rot45<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        let out_spec = self.output_spec();
+        let angle_deg = match self.angle {
+            Angle45::D45 => 45.0,
+            Angle45::D135 => 135.0,
+            Angle45::D225 => 225.0,
+            Angle45::D315 => 315.0,
+            Angle45::D0 => 0.0,
+            Angle45::D90 => 90.0,
+            Angle45::D180 => 180.0,
+            Angle45::D270 => 270.0,
+        };
+        let th = angle_deg * std::f64::consts::PI / 180.0;
+        let cos_th = th.cos() as f32;
+        let sin_th = th.sin() as f32;
+        let c_in_x = in_spec.width as f32 / 2.0;
+        let c_in_y = in_spec.height as f32 / 2.0;
+        let c_out_x = out_spec.width as f32 / 2.0;
+        let c_out_y = out_spec.height as f32 / 2.0;
+
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_r00", "float", cos_th)
+            .param("inv_r01", "float", sin_th)
+            .param("inv_r10", "float", -sin_th)
+            .param("inv_r11", "float", cos_th)
+            .param("cx", "float", c_in_x)
+            .param("cy", "float", c_in_y)
+            .param("ox", "float", c_out_x)
+            .param("oy", "float", c_out_y)
+            .param("bg_r", "float", 0.0f32)
+            .param("bg_g", "float", 0.0f32)
+            .param("bg_b", "float", 0.0f32)
+            .param("in_w", "uint", in_spec.width as u32)
+            .param("in_h", "uint", in_spec.height as u32)
+        );
+        cx.kernel("rotate_kernel");
+        cx.output(out_spec.output());
+    }
+}
+
 pub struct Rotate<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub angle: f64,
@@ -386,6 +494,39 @@ impl Lower<VipsBackend> for Rotate<VipsBackend> {
         if let Some(v) = self.offset_output_y { op.set_double("ody", v); }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Rotate<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        let out_spec = self.output_spec();
+        let th = self.angle * std::f64::consts::PI / 180.0;
+        let cos_th = th.cos() as f32;
+        let sin_th = th.sin() as f32;
+        let c_in_x = self.offset_input_x.unwrap_or(in_spec.width as f64 / 2.0) as f32;
+        let c_in_y = self.offset_input_y.unwrap_or(in_spec.height as f64 / 2.0) as f32;
+        let c_out_x = self.offset_output_x.unwrap_or(out_spec.width as f64 / 2.0) as f32;
+        let c_out_y = self.offset_output_y.unwrap_or(out_spec.height as f64 / 2.0) as f32;
+        let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
+
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_r00", "float", cos_th)
+            .param("inv_r01", "float", sin_th)
+            .param("inv_r10", "float", -sin_th)
+            .param("inv_r11", "float", cos_th)
+            .param("cx", "float", c_in_x)
+            .param("cy", "float", c_in_y)
+            .param("ox", "float", c_out_x)
+            .param("oy", "float", c_out_y)
+            .param("bg_r", "float", bg[0] as f32)
+            .param("bg_g", "float", bg[1] as f32)
+            .param("bg_b", "float", bg[2] as f32)
+            .param("in_w", "uint", in_spec.width as u32)
+            .param("in_h", "uint", in_spec.height as u32)
+        );
+        cx.kernel("rotate_kernel");
+        cx.output(out_spec.output());
     }
 }
 
@@ -486,6 +627,41 @@ impl Lower<VipsBackend> for Gravity<VipsBackend> {
         if let Some(bg) = self.background { op.set_array_double("background", &bg); }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Gravity<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        let old_w = in_spec.width;
+        let old_h = in_spec.height;
+        let new_w = self.width;
+        let new_h = self.height;
+        let (ox, oy) = match self.direction {
+            CompassDirection::Centre => ((new_w - old_w) / 2, (new_h - old_h) / 2),
+            CompassDirection::North => ((new_w - old_w) / 2, 0),
+            CompassDirection::South => ((new_w - old_w) / 2, new_h - old_h),
+            CompassDirection::East => (new_w - old_w, (new_h - old_h) / 2),
+            CompassDirection::West => (0, (new_h - old_h) / 2),
+            CompassDirection::NorthEast => (new_w - old_w, 0),
+            CompassDirection::NorthWest => (0, 0),
+            CompassDirection::SouthEast => (new_w - old_w, new_h - old_h),
+            CompassDirection::SouthWest => (0, new_h - old_h),
+        };
+        let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
+        let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("ox", "int", ox)
+            .param("oy", "int", oy)
+            .param("in_w", "uint", in_spec.width as u32)
+            .param("in_h", "uint", in_spec.height as u32)
+            .param("extend_mode", "uint", extend_mode as u32)
+            .param("bg_r", "float", bg[0] as f32)
+            .param("bg_g", "float", bg[1] as f32)
+            .param("bg_b", "float", bg[2] as f32)
+        );
+        cx.kernel("embed_kernel");
+        cx.output(self.output_spec().output());
     }
 }
 
@@ -605,6 +781,21 @@ impl Lower<VipsBackend> for Thumbnail<VipsBackend> {
         if let Some(v) = self.fail_on { op.set_int("fail_on", v); }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Thumbnail<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        let out_spec = self.output_spec();
+        let inv_hscale = in_spec.width as f32 / out_spec.width as f32;
+        let inv_vscale = in_spec.height as f32 / out_spec.height as f32;
+        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
+            .param("inv_hscale", "float", inv_hscale)
+            .param("inv_vscale", "float", inv_vscale)
+        );
+        cx.kernel("resize_kernel");
+        cx.output(out_spec.output());
     }
 }
 
