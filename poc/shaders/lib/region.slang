@@ -87,6 +87,75 @@ struct RWRegion : IRegion {
     }
 }
 
+// ── Band-view wrapper ───────────────────────────────────────────────────────
+//
+// Zero-cost "extract band" view: wraps ANY `IRegion` (a source decode or a
+// prior step's temp), reads one component of its `float4`, and broadcasts it
+// the same way a Gray codec decode would (`float4(v, v, v, 1)`), so a
+// downstream kernel — or the Gray codec's luma-based encode
+// (`0.2126 r + 0.7152 g + 0.0722 b == v` when r=g=b=v) — sees a normal
+// one-band working pixel. No extra kernel pass: `ExtractBand` just aliases
+// its input through this view (see `GpuBuilder::alias`).
+struct SwizzleView<R: IRegion> : IRegion {
+    R inner;
+    uint channel;
+
+    float4 read(uint2 idx) {
+        float v = inner.read(idx)[channel];
+        return float4(v, v, v, 1.0);
+    }
+
+    float4 read_clamped(int2 idx) {
+        float v = inner.read_clamped(idx)[channel];
+        return float4(v, v, v, 1.0);
+    }
+}
+
+// ── Coordinate-remap view ─────────────────────────────────────────────────────
+enum RemapKind : uint {
+    Identity   = 0u,
+    FlipH      = 1u,
+    FlipV      = 2u,
+    Rot180     = 3u,
+    Scale      = 4u,
+    Tile       = 5u,
+    Translate  = 6u,
+    Rot90      = 7u,
+    Rot270     = 8u,
+};
+
+struct RemapView<R: IRegion> : IRegion {
+    R inner;
+    uint kind;
+    uint out_w, out_h;
+    float sx, sy;
+    uint in_w, in_h;
+    int tx, ty;
+
+    int2 remap(int2 idx) {
+        switch (kind) {
+            case 1u /*FlipH*/: return int2(int(out_w) - 1 - idx.x, idx.y);
+            case 2u /*FlipV*/: return int2(idx.x, int(out_h) - 1 - idx.y);
+            case 3u /*Rot180*/: return int2(int(out_w) - 1 - idx.x, int(out_h) - 1 - idx.y);
+            case 4u /*Scale*/: return int2(int(float(idx.x) * sx), int(float(idx.y) * sy));
+            case 5u /*Tile*/: return int2(idx.x % int(in_w), idx.y % int(in_h));
+            case 6u /*Translate*/: return int2(idx.x + tx, idx.y + ty);
+            case 7u /*Rot90*/: return int2(idx.y, int(out_w) - 1 - idx.x);
+            case 8u /*Rot270*/: return int2(int(out_h) - 1 - idx.y, idx.x);
+            default: return idx;
+        }
+    }
+
+    float4 read(uint2 idx) {
+        int2 r = remap(int2(idx));
+        return inner.read_clamped(r);
+    }
+
+    float4 read_clamped(int2 idx) {
+        return inner.read_clamped(remap(idx));
+    }
+}
+
 // ── Non-image buffer wrappers ─────────────────────────────────────────────────
 
 struct ComplexRegion {

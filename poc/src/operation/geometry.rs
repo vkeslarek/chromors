@@ -93,7 +93,85 @@ impl Lower<VipsBackend> for Crop<VipsBackend> {
 
 impl Lower<GpuBackend> for Crop<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.kernel("passthrough_kernel");
+        cx.remap(crate::backend::gpu::RemapKind::Translate, crate::backend::gpu::RemapParams {
+            tx: self.left,
+            ty: self.top,
+            ..Default::default()
+        });
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for ExtractArea<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.remap(crate::backend::gpu::RemapKind::Translate, crate::backend::gpu::RemapParams {
+            tx: self.left,
+            ty: self.top,
+            ..Default::default()
+        });
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Flip<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let kind = match self.direction {
+            Direction::Horizontal => crate::backend::gpu::RemapKind::FlipH,
+            Direction::Vertical => crate::backend::gpu::RemapKind::FlipV,
+        };
+        let out_spec = self.output_spec();
+        cx.remap(kind, crate::backend::gpu::RemapParams {
+            out_w: out_spec.width as u32,
+            out_h: out_spec.height as u32,
+            ..Default::default()
+        });
+        cx.output(out_spec.output());
+    }
+}
+
+impl Lower<GpuBackend> for Rot90<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let out_spec = self.output_spec();
+        match self.angle {
+            Angle::D0 => { cx.remap(crate::backend::gpu::RemapKind::Identity, Default::default()); }
+            Angle::D90 => { cx.remap(crate::backend::gpu::RemapKind::Rot90, crate::backend::gpu::RemapParams { out_w: out_spec.width as u32, ..Default::default() }); }
+            Angle::D180 => { cx.remap(crate::backend::gpu::RemapKind::Rot180, crate::backend::gpu::RemapParams { out_w: out_spec.width as u32, out_h: out_spec.height as u32, ..Default::default() }); }
+            Angle::D270 => { cx.remap(crate::backend::gpu::RemapKind::Rot270, crate::backend::gpu::RemapParams { out_h: out_spec.height as u32, ..Default::default() }); }
+        }
+        cx.output(out_spec.output());
+    }
+}
+
+impl Lower<GpuBackend> for Subsample<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.remap(crate::backend::gpu::RemapKind::Scale, crate::backend::gpu::RemapParams {
+            sx: self.horizontal as f32,
+            sy: self.vertical as f32,
+            ..Default::default()
+        });
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Zoom<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.remap(crate::backend::gpu::RemapKind::Scale, crate::backend::gpu::RemapParams {
+            sx: 1.0 / (self.horizontal as f32),
+            sy: 1.0 / (self.vertical as f32),
+            ..Default::default()
+        });
+        cx.output(self.output_spec().output());
+    }
+}
+
+impl Lower<GpuBackend> for Replicate<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        cx.remap(crate::backend::gpu::RemapKind::Tile, crate::backend::gpu::RemapParams {
+            in_w: in_spec.width as u32,
+            in_h: in_spec.height as u32,
+            ..Default::default()
+        });
         cx.output(self.output_spec().output());
     }
 }

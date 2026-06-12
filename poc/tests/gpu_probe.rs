@@ -180,6 +180,37 @@ fn newly_imported_kernel_modules_compile_and_run() {
     let bytes = msb_img.pull(&RamImageTarget, rect).unwrap();
     println!("msb -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
+
+    // geometry ops (RemapView testing)
+    let flip_img = gpu_img.flip(poc::operation::geometry::Direction::Horizontal);
+    let rect = Region { x: 0, y: 0, w: flip_img.width(), h: flip_img.height(), lod: Lod(0) };
+    let bytes = flip_img.pull(&RamImageTarget, rect).unwrap();
+    println!("flip -> {} bytes", bytes.len());
+    assert!(!bytes.is_empty());
+
+    let rot_img = gpu_img.rot90(poc::operation::geometry::Angle::D90);
+    let rect = Region { x: 0, y: 0, w: rot_img.width(), h: rot_img.height(), lod: Lod(0) };
+    let bytes = rot_img.pull(&RamImageTarget, rect).unwrap();
+    println!("rot90 -> {} bytes", bytes.len());
+    assert!(!bytes.is_empty());
+
+    let sub_img = gpu_img.subsample(2, 2, None);
+    let rect = Region { x: 0, y: 0, w: sub_img.width(), h: sub_img.height(), lod: Lod(0) };
+    let bytes = sub_img.pull(&RamImageTarget, rect).unwrap();
+    println!("subsample -> {} bytes", bytes.len());
+    assert!(!bytes.is_empty());
+
+    let zoom_img = gpu_img.zoom(2, 2);
+    let rect = Region { x: 0, y: 0, w: zoom_img.width(), h: zoom_img.height(), lod: Lod(0) };
+    let bytes = zoom_img.pull(&RamImageTarget, rect).unwrap();
+    println!("zoom -> {} bytes", bytes.len());
+    assert!(!bytes.is_empty());
+
+    let rep_img = gpu_img.replicate(2, 2);
+    let rect = Region { x: 0, y: 0, w: rep_img.width(), h: rep_img.height(), lod: Lod(0) };
+    let bytes = rep_img.pull(&RamImageTarget, rect).unwrap();
+    println!("replicate -> {} bytes", bytes.len());
+    assert!(!bytes.is_empty());
 }
 
 #[test]

@@ -138,6 +138,24 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
                     ));
                     read_args.push(var);
                 }
+                StepInput::RemapSource(i, kind, rp) => {
+                    let var = format!("r_{s_i}_{k}");
+                    let inner_view = &builder.input_views[*i];
+                    s.push_str(&format!(
+                        "    RemapView<{}> {var} = {{ in_{i}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
+                        inner_view.slang, *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
+                    ));
+                    read_args.push(var);
+                }
+                StepInput::RemapStep(j, kind, rp) => {
+                    let wrapper = builder.steps[*j].temp_elem.region_wrapper;
+                    let var = format!("r_{s_i}_{k}");
+                    s.push_str(&format!(
+                        "    RemapView<{wrapper}> {var} = {{ {{ work_{j}, params[0].region_out }}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
+                        *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
+                    ));
+                    read_args.push(var);
+                }
             }
         }
 
@@ -200,6 +218,15 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
                     let scalar = format!("in_{i}.read(idx).{comp}");
                     let broadcast = TempElem::F4.broadcast_expr(&scalar);
                     s.push_str(&format!("    enc.write(idx, {broadcast});\n"));
+                }
+                (Some(StepInput::RemapSource(i, kind, rp)), _) => {
+                    let var = format!("remap_0");
+                    let inner_view = &builder.input_views[*i];
+                    s.push_str(&format!(
+                        "    RemapView<{}> {var} = {{ in_{i}, {}u, {}u, {}u, {:?}, {:?}, {}u, {}u, {}, {} }};\n",
+                        inner_view.slang, *kind as u32, rp.out_w, rp.out_h, rp.sx, rp.sy, rp.in_w, rp.in_h, rp.tx, rp.ty
+                    ));
+                    s.push_str(&format!("    enc.write(idx, {var}.read(idx));\n"));
                 }
                 (Some(StepInput::Source(i)), _) => {
                     s.push_str(&format!("    enc.write(idx, in_{i}.read(idx));\n"));
