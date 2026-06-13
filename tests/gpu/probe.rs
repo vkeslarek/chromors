@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use poc::backend::gpu::GpuBackend;
 use poc::data::histogram::RawTarget;
@@ -226,8 +226,8 @@ fn data_driven_kernels_compile_and_run() {
             [v, v, v, 1.0]
         })
         .collect();
-    let lut = poc::data::lut::Lut::from_values(ctx.clone(), 256, 4, &lut_data);
-    let matrix = poc::data::mask2d::Mask2D::identity(ctx.clone(), 3);
+    let lut = <poc::data::lut::Lut<GpuBackend>>::from_values(ctx.clone(), 256, 4, &lut_data);
+    let matrix = <poc::data::mask2d::Mask2D<GpuBackend>>::identity(ctx.clone(), 3);
     let cond = gpu_img.crop(0, 0, 10, 10);
     let bg = gpu_img.crop(0, 0, 10, 10);
     let t = gpu_img.crop(0, 0, 10, 10);
@@ -238,9 +238,9 @@ fn data_driven_kernels_compile_and_run() {
     let ifthenelse = cond.ifthenelse(t.as_input(), f.as_input(), Some(true));
     let case = bg.case(vec![t.as_input(), f.as_input()]);
 
-    for img in [&maplut, &recomb, &ifthenelse, &case] {
+    for img in [maplut.clone(), recomb.clone(), ifthenelse.clone(), case.clone()] {
         let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
-        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
 }
@@ -257,9 +257,9 @@ fn resample_kernels_compile_and_run() {
     let reduce_h = gpu_img.reduce_horizontal(2.0, None, None);
     let reduce_v = gpu_img.reduce_vertical(2.0, None, None);
 
-    for img in [&resize, &reduce, &reduce_h, &reduce_v] {
+    for img in [resize.clone(), reduce.clone(), reduce_h.clone(), reduce_v.clone()] {
         let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
-        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
 }
@@ -277,9 +277,9 @@ fn geometry_extended_kernels_compile_and_run() {
     let rotate = gpu_img.rotate(45.0, None, None, None, None, None);
     let thumbnail = gpu_img.thumbnail(100, None, None, None, None, None, None, None, None, None, None);
 
-    for img in [&embed, &gravity, &rot45, &rotate, &thumbnail] {
+    for img in [embed.clone(), gravity.clone(), rot45.clone(), rotate.clone(), thumbnail.clone()] {
         let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
-        let bytes = img.pull(&RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
 }
@@ -328,9 +328,9 @@ fn edge_detection_kernels_compile_and_run() {
     let prewitt = gpu_img.prewitt();
     let scharr = gpu_img.scharr();
 
-    for img in [&sobel, &prewitt, &scharr] {
+    for img in [sobel.clone(), prewitt.clone(), scharr.clone()] {
         let rect = poc::work_unit::Region { x: 0, y: 0, w: 10, h: 10, lod: poc::work_unit::Lod(0) };
-        let bytes = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
 }

@@ -5,7 +5,7 @@
 //! CutFinder in pass.rs will automatically split the chain into multiple
 //! passes with staging cuts.
 
-mod common;
+use crate::common;
 
 use poc::data::image::RamImageTarget;
 use poc::io::Target;
