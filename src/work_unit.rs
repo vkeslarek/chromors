@@ -86,6 +86,90 @@ impl WorkUnit {
             _ => self.clone(),
         }
     }
+
+    /// Split this WorkUnit into smaller tiles whose byte cost (evaluated by
+    /// `calc_bytes`) each fits under `max_bytes`.
+    ///
+    /// - **Region**: bisects along the longest axis repeatedly until every tile
+    ///   fits. A 4000×3000 image that exceeds the limit becomes e.g. four
+    ///   2000×1500 tiles.
+    /// - **Range**: bisects the interval at the midpoint repeatedly.
+    /// - **Atomic**: cannot be subdivided — returns `Err`. The caller must
+    ///   handle this (e.g. by refusing the operation or falling back to a
+    ///   smaller configuration).
+    ///
+    /// This method is pure geometry — no backend types, no GPU references.
+    pub fn split<F>(&self, max_bytes: u64, calc_bytes: F) -> Result<Vec<WorkUnit>, crate::error::Error>
+    where
+        F: Fn(&WorkUnit) -> u64,
+    {
+        if calc_bytes(self) <= max_bytes {
+            return Ok(vec![self.clone()]);
+        }
+        match self {
+            WorkUnit::Region(_) => {
+                let mut tiles = vec![self.clone()];
+                loop {
+                    let mut next = Vec::new();
+                    let mut all_fit = true;
+                    for tile in tiles {
+                        if calc_bytes(&tile) <= max_bytes {
+                            next.push(tile);
+                            continue;
+                        }
+                        all_fit = false;
+                        let WorkUnit::Region(r) = &tile else { unreachable!() };
+                        if r.w > r.h {
+                            let half = r.w / 2;
+                            next.push(WorkUnit::Region(Region {
+                                x: r.x, y: r.y, w: half, h: r.h, lod: r.lod,
+                            }));
+                            next.push(WorkUnit::Region(Region {
+                                x: r.x + half, y: r.y, w: r.w - half, h: r.h, lod: r.lod,
+                            }));
+                        } else {
+                            let half = r.h / 2;
+                            next.push(WorkUnit::Region(Region {
+                                x: r.x, y: r.y, w: r.w, h: half, lod: r.lod,
+                            }));
+                            next.push(WorkUnit::Region(Region {
+                                x: r.x, y: r.y + half, w: r.w, h: r.h - half, lod: r.lod,
+                            }));
+                        }
+                    }
+                    tiles = next;
+                    if all_fit { break; }
+                }
+                Ok(tiles)
+            }
+            WorkUnit::Range(_) => {
+                let mut tiles = vec![self.clone()];
+                loop {
+                    let mut next = Vec::new();
+                    let mut all_fit = true;
+                    for tile in tiles {
+                        if calc_bytes(&tile) <= max_bytes {
+                            next.push(tile);
+                            continue;
+                        }
+                        all_fit = false;
+                        let WorkUnit::Range(r) = &tile else { unreachable!() };
+                        let mid = r.start + (r.end - r.start) / 2;
+                        next.push(WorkUnit::Range(Range { start: r.start, end: mid }));
+                        next.push(WorkUnit::Range(Range { start: mid, end: r.end }));
+                    }
+                    tiles = next;
+                    if all_fit { break; }
+                }
+                Ok(tiles)
+            }
+            WorkUnit::Atomic => Err(crate::error::Error::InvalidWorkUnit(
+                "cannot split an Atomic WorkUnit: the operation requires more buffer space \
+                 than the hardware limit allows, and Atomic work units are indivisible"
+                    .into(),
+            )),
+        }
+    }
 }
 
 /// The typed counterpart to the erased WorkUnit. Region/Range/Atomic each implement it.

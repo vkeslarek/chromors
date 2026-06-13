@@ -4,6 +4,7 @@ pub mod view;
 pub mod emit;
 pub mod compile;
 pub mod slang;
+pub mod pass;
 
 pub use context::*;
 pub use buffer::*;
@@ -450,15 +451,30 @@ impl Builder<GpuBackend> for GpuBuilder {
             return Err(e);
         }
 
+        // ── Binding budget check (diagnostic, future CutFinder integration) ──
+        let n_bindings = pass::binding_count(
+            self.steps.len(),
+            self.source_buffers.len(),
+            self.needs_scratch(),
+        );
+        if n_bindings > self.ctx.max_storage_buffers as usize {
+            return Err(Error::Backend(format!(
+                "fused pass requires {} storage buffer bindings but the device \
+                 supports at most {} — pass splitting (CutFinder) needed but not \
+                 yet implemented for this graph shape",
+                n_bindings, self.ctx.max_storage_buffers
+            )));
+        }
+
         let dims = self.dispatch.unwrap_or((1, 1));
         RegionParams::tight(dims.0 as i32, dims.1 as i32).push_into(&mut self.params, "domain");
 
         let slang = emit::emit_slang(&self, self.ctx.wg_dim);
         let hash = emit::hash_slang(&slang);
-        let pass = compile::compile(self.ctx.as_ref(), &self, slang, hash)?;
+        let compiled = compile::compile(self.ctx.as_ref(), &self, slang, hash)?;
 
         let out_bytes = spec.byte_size(root_wu);
-        let payload = compile::dispatch(self.ctx.as_ref(), &pass, &self, out_bytes, dims)?;
+        let payload = compile::dispatch(self.ctx.as_ref(), &compiled, &self, out_bytes, dims)?;
 
         Ok(crate::buffer::Buffer { payload, spec })
     }

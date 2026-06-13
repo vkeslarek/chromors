@@ -859,6 +859,48 @@ overwriting it. The kernel does `InterlockedAdd` directly into
 `target_buffer` (one thread per input pixel, `HistogramOut` wrapper) — no
 `work_{k}` temp, no encode step.
 
+### 5.7 Pass splitting and demand tiling — `pass.rs`
+
+Two GPU-specific mechanisms ensure a fused pass stays within hardware limits.
+Both live entirely in `backend/gpu/pass.rs` — the agnostic core (`node.rs`,
+`work_unit.rs`, `Backend` trait) is untouched.
+
+#### 5.7.1 Binding budget enforcement
+
+A fused pass needs `2 + W + S` storage buffer bindings (`target` + `params` +
+`W` work temps + `S` source inputs). `pass::binding_count(n_steps, n_sources,
+needs_scratch)` computes this. `GpuBuilder::finish` calls
+`pass::exceeds_binding_limit(...)` — if the count exceeds
+`ctx.max_storage_buffers`, the pass cannot execute and returns an error.
+
+> **Future work (CutFinder):** When the binding budget is exceeded, a
+> `CutFinder` will walk the accumulated step graph **breadth-first** from the
+> root to find the widest independent frontier of steps. Steps beyond the
+> frontier are dispatched first (as independent sub-passes, in parallel via
+> rayon), their results become new source buffers, and the remaining steps
+> execute in a second pass. BFS maximizes the number of independent sub-passes
+> at each level, which maximizes rayon parallelism.
+
+#### 5.7.2 Demand tiling (buffer-size enforcement)
+
+When the output buffer exceeds the device's `max_storage_buffer_binding_size`
+(a hard Vulkan/Metal/DX12 limit, typically 128 MB–2 GB), the root `WorkUnit`
+is split into smaller tiles via the agnostic `WorkUnit::split` method (§3.2),
+each tile is materialized through a full `materialize` call in parallel (via
+rayon), and the results are stitched into one output buffer via GPU-side
+`copy_buffer_to_buffer`.
+
+`WorkUnit::split(max_bytes, calc_bytes)` (in `work_unit.rs`) is **pure
+geometry** — no GPU types. It bisects `Region` along the longest axis and
+`Range` at the midpoint, repeatedly, until every tile's byte cost (evaluated
+by the caller-provided `calc_bytes` closure) fits under `max_bytes`. `Atomic`
+work units cannot be subdivided and return `Err(InvalidWorkUnit)`.
+
+`pass::tile_and_dispatch(ctx, root, root_wu, spec, ctx_arc)` orchestrates
+the tiling: it checks whether tiling is needed, calls `WorkUnit::split`,
+dispatches tiles in parallel via `rayon::par_iter`, and stitches the
+per-tile `GpuBuffer` results into a single output buffer.
+
 ---
 
 ## 6. The libvips backend (`src/backend/vips/`)

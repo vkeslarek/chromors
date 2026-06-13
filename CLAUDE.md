@@ -232,7 +232,7 @@ vocabulary and how it becomes emitted Slang text.
 ```
 src/
   kind.rs            AnyKind, Kind                          (agnostic)
-  work_unit.rs       Shape, WorkUnit, Region/Range/Atomic, Lod, union/bounding/tile_aligned
+  work_unit.rs       Shape, WorkUnit, Region/Range/Atomic, Lod, union/bounding/tile_aligned/split
   operation/mod.rs   Operation<B>, Lower<B>, Input, AnyInput, AnyOperation (erased bridge)
   io.rs              Source<B>, Target<K,B>, AnySource (erased bridge)
   node.rs            Node<B>, Data<K,B>, GraphWalk           (immutable DAG handle + walk)
@@ -241,6 +241,7 @@ src/
   backend/gpu/       GpuBackend, GpuBuilder, GpuView, GpuContext (pipeline cache), GpuBuffer,
                      view.rs (View/ParamBlock/ViewAdapter/OutputWrap — GPU vocabulary),
                      emit.rs (builder -> Slang text) / compile.rs (cache+dispatch) / slang.rs (JIT)
+                     pass.rs (binding budget + demand tiling — GPU-specific, §5.7 of architecture.md)
   backend/vips/      VipsBackend, VipsBuilder (node-keyed handle map), VipsBand,
                      mod.rs; gobject/source/target/working = FFI + CPU custom-region plumbing
   data/              concrete datatypes: image.rs, histogram.rs, vectorscope.rs, ...
@@ -250,6 +251,7 @@ docs/
 tests/
   smoke.rs           GPU: ImageKind+Blur+ImageSource type-check end to end
   vips_smoke.rs      Vips: SAME generic traits, different Lower
+  pass_split.rs      WorkUnit::split + pass::binding_count budget enforcement
 ```
 
 ---
