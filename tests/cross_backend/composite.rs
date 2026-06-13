@@ -7,7 +7,12 @@ fn composite_matches_vips() {
     let base = common::rgba();
     let overlay = common::rgba();
 
-    let modes = [BlendMode::Over, BlendMode::In, BlendMode::Xor, BlendMode::Dest];
+    let modes = [
+        BlendMode::Over,
+        BlendMode::In,
+        BlendMode::Xor,
+        BlendMode::Dest,
+    ];
 
     for mode in modes {
         let vips_res = base.push(Composite2 {

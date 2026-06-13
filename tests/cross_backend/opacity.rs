@@ -21,7 +21,21 @@ fn opacity_matches_vips() {
 }
 
 #[test]
-#[ignore = "ScaleBandGpuOp (per-band scale) not ported to poc yet (was ScaleBandGpuOp in old chromors API)"]
 fn scale_alpha_band_matches_opacity() {
-    unimplemented!("per-band scale not ported to poc — add Operation<B>+Lower<B> for both backends first")
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // opacity(0.5) is equivalent to linear scaling the alpha band (band 3) by 0.5
+    let vips_res = vips_img.linear(vec![1.0, 1.0, 1.0, 0.5], vec![0.0]);
+    let gpu_res = gpu_img.linear(vec![1.0, 1.0, 1.0, 0.5], vec![0.0]);
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    assert_eq!(vips_bytes.len(), gpu_bytes.len());
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("scale_alpha_band (linear) RMS = {}", rms);
+    assert!(rms < 5.0, "scale_alpha_band diff too high: {}", rms);
 }

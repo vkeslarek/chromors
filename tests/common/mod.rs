@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex, Once};
 
 use bytemuck;
 use poc::backend::gpu::{GpuBackend, context::GpuContext};
-use poc::work_unit::{Region, Lod};
 use poc::backend::vips::VipsBackend;
 use poc::data::image::Image2D as GenImage;
 use poc::data::image::Image2D;
+use poc::work_unit::{Lod, Region};
 
 static INIT: Once = Once::new();
 
@@ -63,7 +63,13 @@ pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImag
 pub fn poc_materialize(img: &GenImage<GpuBackend>) -> Vec<u8> {
     use poc::io::Target;
     let (w, h) = (img.width() as i32, img.height() as i32);
-    let rect = Region { x: 0, y: 0, w, h, lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w,
+        h,
+        lod: Lod(0),
+    };
     let target = poc::data::image::RamImageTarget;
     img.pull(&target, rect).unwrap()
 }
@@ -73,7 +79,18 @@ pub fn vips_to_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     use poc::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = poc::data::image::RamImageTarget;
-    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    let bytes = img
+        .pull(
+            &target,
+            Region {
+                x: 0,
+                y: 0,
+                w: w as i32,
+                h: h as i32,
+                lod: Lod(0),
+            },
+        )
+        .unwrap();
     bytes.iter().map(|b| *b as f32 / 255.0).collect()
 }
 
@@ -81,7 +98,17 @@ pub fn vips_materialize(img: &Image2D<VipsBackend>) -> Vec<u8> {
     use poc::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = poc::data::image::RamImageTarget;
-    img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap()
+    img.pull(
+        &target,
+        Region {
+            x: 0,
+            y: 0,
+            w: w as i32,
+            h: h as i32,
+            lod: Lod(0),
+        },
+    )
+    .unwrap()
 }
 
 /// Convert POC f32 output (4 channels, [0,1]) to u8 `bands`-channel slice
@@ -139,7 +166,18 @@ pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     let (w, h) = (img.width(), img.height());
     let bands = img.format().channel_count() as usize;
     let target = poc::data::image::RamImageTarget;
-    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    let bytes = img
+        .pull(
+            &target,
+            Region {
+                x: 0,
+                y: 0,
+                w: w as i32,
+                h: h as i32,
+                lod: Lod(0),
+            },
+        )
+        .unwrap();
     let bps = img.format().bytes_per_pixel() as usize / img.format().channel_count() as usize;
     let pixel_count = w as usize * h as usize * bands;
     match bps {
@@ -170,7 +208,18 @@ pub fn vips_materialize_raw_u16(img: &Image2D<VipsBackend>) -> Vec<u16> {
     use poc::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = poc::data::image::RamImageTarget;
-    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    let bytes = img
+        .pull(
+            &target,
+            Region {
+                x: 0,
+                y: 0,
+                w: w as i32,
+                h: h as i32,
+                lod: Lod(0),
+            },
+        )
+        .unwrap();
     bytemuck::cast_slice::<u8, u16>(&bytes).to_vec()
 }
 
@@ -181,7 +230,18 @@ pub fn vips_materialize_raw_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     use poc::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = poc::data::image::RamImageTarget;
-    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    let bytes = img
+        .pull(
+            &target,
+            Region {
+                x: 0,
+                y: 0,
+                w: w as i32,
+                h: h as i32,
+                lod: Lod(0),
+            },
+        )
+        .unwrap();
     bytemuck::cast_slice::<u8, f32>(&bytes).to_vec()
 }
 

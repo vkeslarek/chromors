@@ -1,14 +1,14 @@
 pub mod gpu;
-pub mod vips;
 pub mod raw;
 pub mod vello;
+pub mod vips;
 
-use std::sync::Arc;
+use crate::buffer::Buffer;
 use crate::error::Error;
-use crate::work_unit::WorkUnit;
 use crate::kind::AnyKind;
 use crate::node::NodeId;
-use crate::buffer::Buffer;
+use crate::work_unit::WorkUnit;
+use std::sync::Arc;
 
 /// A Backend is the engine that runs a DAG.
 /// It owns its context, its payload (VRAM vs CPU region), and how nodes are lowered.
@@ -40,5 +40,10 @@ pub trait Builder<B: Backend>: Sized {
     /// Announce the node about to lower: its id, its input ids, its resolved unit.
     fn enter(&mut self, node: NodeId, inputs: &[NodeId], wu: &WorkUnit);
     /// Run the pass and produce the root's buffer.
-    fn finish(self, root: NodeId, spec: Arc<dyn AnyKind>, root_wu: &WorkUnit) -> Result<Buffer<B>, Error>;
+    fn finish(
+        self,
+        root: NodeId,
+        spec: Arc<dyn AnyKind>,
+        root_wu: &WorkUnit,
+    ) -> Result<Buffer<B>, Error>;
 }

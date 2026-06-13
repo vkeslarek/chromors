@@ -1,13 +1,13 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::ParamBlock;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
+use crate::operation::geometry::Direction;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
-use crate::operation::geometry::Direction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Align {
@@ -220,10 +220,11 @@ impl Lower<VipsBackend> for Insert<VipsBackend> {
 
 impl Lower<GpuBackend> for Composite2<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new()
-            .param("mode", self.mode.into_vips() as u32)
-            .param("x", self.x.unwrap_or(0))
-            .param("y", self.y.unwrap_or(0))
+        cx.param_block(
+            ParamBlock::new()
+                .param("mode", self.mode.into_vips() as u32)
+                .param("x", self.x.unwrap_or(0))
+                .param("y", self.y.unwrap_or(0)),
         );
         cx.kernel("ops.composite", "compose_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -232,10 +233,11 @@ impl Lower<GpuBackend> for Composite2<GpuBackend> {
 
 impl Lower<GpuBackend> for Join<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new()
-            .param("direction", self.direction.into_vips())
-            .param("shim", self.shim.unwrap_or(0))
-            .param("align", self.align.map(|a| a.into_vips()).unwrap_or(0))
+        cx.param_block(
+            ParamBlock::new()
+                .param("direction", self.direction.into_vips())
+                .param("shim", self.shim.unwrap_or(0))
+                .param("align", self.align.map(|a| a.into_vips()).unwrap_or(0)),
         );
         cx.kernel("ops.composite", "join_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -244,10 +246,7 @@ impl Lower<GpuBackend> for Join<GpuBackend> {
 
 impl Lower<GpuBackend> for Insert<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new()
-            .param("x", self.x)
-            .param("y", self.y)
-        );
+        cx.param_block(ParamBlock::new().param("x", self.x).param("y", self.y));
         cx.kernel("ops.composite", "insert_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }

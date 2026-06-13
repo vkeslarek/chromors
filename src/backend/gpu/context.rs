@@ -1,9 +1,9 @@
+use crate::error::Error;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, RwLock};
 use wgpu;
-use crate::error::Error;
 
 const DEFAULT_PIPELINE_CACHE_SIZE: usize = 256;
 
@@ -51,12 +51,12 @@ impl GpuContext {
             })
             .await
             .map_err(|e| Error::Backend(format!("no GPU adapter: {:?}", e)))?;
-            
+
         let limits = adapter.limits();
         let max_storage_buffers = limits.max_storage_buffers_per_shader_stage;
         let max_invocations = limits.max_compute_invocations_per_workgroup;
         let wg_dim = if max_invocations >= 1024 { 32 } else { 16 };
-        
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("fused-backend"),
@@ -65,7 +65,7 @@ impl GpuContext {
             })
             .await
             .map_err(|e| Error::Backend(format!("GPU device error: {:?}", e)))?;
-            
+
         let device: Arc<wgpu::Device> = Arc::new(device);
         let queue: Arc<wgpu::Queue> = Arc::new(queue);
 

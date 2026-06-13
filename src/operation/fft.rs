@@ -12,9 +12,14 @@ pub struct ForwardFft<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for ForwardFft<B> where ForwardFft<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ForwardFft<B>
+where
+    ForwardFft<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         // FFT needs the whole image to work properly, but typically we'll demand the whole thing.
         vec![Some(WorkUnit::Region(out.clone()))]
@@ -25,7 +30,9 @@ impl<B: Backend> Operation<B> for ForwardFft<B> where ForwardFft<B>: Lower<B> {
     // a structural limitation in the pixel format enum, not fixable by a
     // dimension tweak. Dims stay the same as input (vips keeps them by
     // default), so dims here are correct; only the format is wrong.
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -45,16 +52,23 @@ pub struct InverseFft<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for InverseFft<B> where InverseFft<B>: Lower<B> {
+impl<B: Backend> Operation<B> for InverseFft<B>
+where
+    InverseFft<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
     // TODO: vips_invfft's input is complex-valued (see ForwardFft); the
     // output is real-valued but `PixelFormat` can't represent the complex
     // *input* this op consumes. Dims stay the same as input.
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -74,9 +88,14 @@ pub struct Spectrum<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Spectrum<B> where Spectrum<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Spectrum<B>
+where
+    Spectrum<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
@@ -104,13 +123,14 @@ impl Lower<VipsBackend> for Spectrum<VipsBackend> {
     }
 }
 
-
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     ForwardFft<B>: crate::operation::Lower<B>,
 {
     pub fn forward_fft(&self) -> Self {
-        self.push(ForwardFft { input: self.as_input() })
+        self.push(ForwardFft {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -119,7 +139,9 @@ where
     InverseFft<B>: crate::operation::Lower<B>,
 {
     pub fn inverse_fft(&self) -> Self {
-        self.push(InverseFft { input: self.as_input() })
+        self.push(InverseFft {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -128,6 +150,8 @@ where
     Spectrum<B>: crate::operation::Lower<B>,
 {
     pub fn spectrum(&self) -> Self {
-        self.push(Spectrum { input: self.as_input() })
+        self.push(Spectrum {
+            input: self.as_input(),
+        })
     }
 }

@@ -117,7 +117,10 @@ fn convf_matches_vips() {
     // read the raw bytes as f32 directly; values stay in the 0..255 pixel
     // domain (same as the GPU's u8 output after re-encoding).
     let vips_f32 = common::vips_materialize_raw_f32(&vips_res);
-    let vips_bytes: Vec<u8> = vips_f32.iter().map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8).collect();
+    let vips_bytes: Vec<u8> = vips_f32
+        .iter()
+        .map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8)
+        .collect();
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
@@ -166,7 +169,10 @@ fn convsep_matches_vips() {
     // vips convsep widens to float but leaves format() stale at u8, so read
     // the raw bytes as f32 directly (values stay in the 0..255 pixel domain).
     let vips_f32 = common::vips_materialize_raw_f32(&vips_res);
-    let vips_bytes: Vec<u8> = vips_f32.iter().map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8).collect();
+    let vips_bytes: Vec<u8> = vips_f32
+        .iter()
+        .map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8)
+        .collect();
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
@@ -220,7 +226,10 @@ fn convolution_matches_vips() {
     // format() stale at u8, so read the raw bytes as f32 directly (values
     // stay in the 0..255 pixel domain).
     let vips_f32 = common::vips_materialize_raw_f32(&vips_res);
-    let vips_bytes: Vec<u8> = vips_f32.iter().map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8).collect();
+    let vips_bytes: Vec<u8> = vips_f32
+        .iter()
+        .map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8)
+        .collect();
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
@@ -265,7 +274,10 @@ fn compass_matches_vips() {
     // vips compass (like convf/convolution) widens to float but leaves
     // format() stale at u8, so read the raw bytes as f32 directly.
     let vips_f32 = common::vips_materialize_raw_f32(&vips_res);
-    let vips_bytes: Vec<u8> = vips_f32.iter().map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8).collect();
+    let vips_bytes: Vec<u8> = vips_f32
+        .iter()
+        .map(|&v| (v + 0.5f32).clamp(0.0, 255.0) as u8)
+        .collect();
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);

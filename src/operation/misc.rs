@@ -5,7 +5,7 @@ use crate::backend::gpu::view::ParamBlock;
 use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{IntoVipsBandFormat, IntoVipsEnum, VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
-use crate::operation::{AnyInput, Input, Lower, Operation};
+use crate::operation::{AnyInput, Input, Lower, Operation, OperationBoolean, OperationRelational};
 use crate::pixel::PixelFormat;
 use crate::work_unit::{Region, WorkUnit};
 
@@ -1200,6 +1200,273 @@ where
         self.push(Saturation {
             input: self.as_input(),
             amount,
+        })
+    }
+}
+
+// ── Boolean and Relational operations ────────────────────────────────────────
+
+pub struct Boolean<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+    pub boolean_op: OperationBoolean,
+}
+impl<B: Backend> Operation<B> for Boolean<B>
+where
+    Boolean<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.left, &self.right]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone())); 2]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.left.spec).clone()
+    }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.boolean_op.into_vips());
+    }
+}
+impl Lower<VipsBackend> for Boolean<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"boolean\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        op.set_int("boolean", self.boolean_op.into_vips());
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+impl Lower<GpuBackend> for Boolean<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::scalar("op", self.boolean_op.into_vips() as u32));
+        cx.kernel("ops.misc", "boolean_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+pub struct Relational<B: Backend> {
+    pub left: Input<ImageKind, B>,
+    pub right: Input<ImageKind, B>,
+    pub relational: OperationRelational,
+}
+impl<B: Backend> Operation<B> for Relational<B>
+where
+    Relational<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.left, &self.right]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone())); 2]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.left.spec).clone()
+    }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.relational.into_vips());
+    }
+}
+impl Lower<VipsBackend> for Relational<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let left_handle = cx.input(self.left.src());
+        let right_handle = cx.input(self.right.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"relational\0").unwrap();
+        op.set_image("left", left_handle.ptr);
+        op.set_image("right", right_handle.ptr);
+        op.set_int("relational", self.relational.into_vips());
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+impl Lower<GpuBackend> for Relational<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::scalar("op", self.relational.into_vips() as u32));
+        cx.kernel("ops.misc", "relational_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+pub struct BooleanConst<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub boolean_op: OperationBoolean,
+    pub c: Vec<f64>,
+}
+impl<B: Backend> Operation<B> for BooleanConst<B>
+where
+    BooleanConst<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.boolean_op.into_vips());
+        for &v in &self.c {
+            state.write(&v.to_le_bytes());
+        }
+    }
+}
+impl Lower<VipsBackend> for BooleanConst<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"boolean_const\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_int("boolean", self.boolean_op.into_vips());
+        op.set_array_double("c", &self.c);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+impl Lower<GpuBackend> for BooleanConst<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let mut c_arr = [0.0f32; 4];
+        let c_len = self.c.len();
+        let src_max = self.input.spec.format.component_max_f64() as f32;
+        for i in 0..4 {
+            c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
+        }
+        cx.param_block(
+            ParamBlock::new()
+                .param("boolean_op", self.boolean_op.into_vips() as u32)
+                .param("src_max", src_max)
+                .param("c0", c_arr[0])
+                .param("c1", c_arr[1])
+                .param("c2", c_arr[2])
+                .param("c3", c_arr[3]),
+        );
+        cx.kernel("ops.misc", "boolean_const_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+pub struct RelationalConst<B: Backend> {
+    pub input: Input<ImageKind, B>,
+    pub relational: OperationRelational,
+    pub c: Vec<f64>,
+}
+impl<B: Backend> Operation<B> for RelationalConst<B>
+where
+    RelationalConst<B>: Lower<B>,
+{
+    type Output = ImageKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.relational.into_vips());
+        for &v in &self.c {
+            state.write(&v.to_le_bytes());
+        }
+    }
+}
+impl Lower<VipsBackend> for RelationalConst<VipsBackend> {
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let input_handle = cx.input(self.input.src());
+        let mut op =
+            crate::backend::vips::gobject::VipsGObject::new(b"relational_const\0").unwrap();
+        op.set_image("in", input_handle.ptr);
+        op.set_int("relational", self.relational.into_vips());
+        op.set_array_double("c", &self.c);
+        let out_handle = op.run().unwrap();
+        cx.emit(out_handle);
+    }
+}
+impl Lower<GpuBackend> for RelationalConst<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let mut c_arr = [0.0f32; 4];
+        let c_len = self.c.len();
+        let src_max = self.input.spec.format.component_max_f64() as f32;
+        for i in 0..4 {
+            c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
+        }
+        cx.param_block(
+            ParamBlock::new()
+                .param("relational", self.relational.into_vips() as u32)
+                .param("src_max", src_max)
+                .param("c0", c_arr[0])
+                .param("c1", c_arr[1])
+                .param("c2", c_arr[2])
+                .param("c3", c_arr[3]),
+        );
+        cx.kernel("ops.misc", "relational_const_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Boolean<B>: crate::operation::Lower<B>,
+{
+    pub fn boolean(
+        &self,
+        right: &crate::data::image::Image2D<B>,
+        boolean_op: OperationBoolean,
+    ) -> Self {
+        self.push(Boolean {
+            left: self.as_input(),
+            right: right.as_input(),
+            boolean_op,
+        })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Relational<B>: crate::operation::Lower<B>,
+{
+    pub fn relational(
+        &self,
+        right: &crate::data::image::Image2D<B>,
+        relational: OperationRelational,
+    ) -> Self {
+        self.push(Relational {
+            left: self.as_input(),
+            right: right.as_input(),
+            relational,
+        })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    BooleanConst<B>: crate::operation::Lower<B>,
+{
+    pub fn boolean_const(&self, boolean_op: OperationBoolean, c: Vec<f64>) -> Self {
+        self.push(BooleanConst {
+            input: self.as_input(),
+            boolean_op,
+            c,
+        })
+    }
+}
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    RelationalConst<B>: crate::operation::Lower<B>,
+{
+    pub fn relational_const(&self, relational: OperationRelational, c: Vec<f64>) -> Self {
+        self.push(RelationalConst {
+            input: self.as_input(),
+            relational,
+            c,
         })
     }
 }

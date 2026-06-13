@@ -27,7 +27,7 @@ use std::slice;
 
 use super::FromVipsBandFormat;
 use crate::error::Error;
-use crate::ffi as ffi;
+use crate::ffi;
 
 // glib's data-with-destructor attach — not in the generated bindings, declared
 // here (links against the already-linked glib).
@@ -226,4 +226,3 @@ unsafe extern "C" fn sink_stop<S: VipsCustomSink>(
     *g = total;
     0
 }
-

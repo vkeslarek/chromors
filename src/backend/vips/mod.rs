@@ -1,18 +1,18 @@
-pub mod gobject;
 pub mod custom;
+pub mod gobject;
 
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ptr;
 use std::sync::Arc;
 
-use crate::error::Error;
-use crate::ffi;
-use crate::node::Node;
-use crate::work_unit::WorkUnit;
-use crate::kind::AnyKind;
 use crate::backend::{Backend, Builder};
 use crate::buffer::Buffer;
+use crate::error::Error;
+use crate::ffi;
+use crate::kind::AnyKind;
+use crate::node::Node;
+use crate::work_unit::WorkUnit;
 
 pub(crate) fn null() -> *const std::ffi::c_void {
     ptr::null()
@@ -120,7 +120,11 @@ pub struct VipsBuilder {
 
 impl Default for VipsBuilder {
     fn default() -> Self {
-        Self { outputs: HashMap::new(), current: None, current_wu: None }
+        Self {
+            outputs: HashMap::new(),
+            current: None,
+            current_wu: None,
+        }
     }
 }
 
@@ -143,7 +147,9 @@ impl VipsBuilder {
     }
     /// The resolved WorkUnit of the node being lowered.
     pub fn wu(&self) -> &WorkUnit {
-        self.current_wu.as_ref().expect("VipsBuilder::wu called outside a lower()")
+        self.current_wu
+            .as_ref()
+            .expect("VipsBuilder::wu called outside a lower()")
     }
 }
 
@@ -163,7 +169,12 @@ impl Builder<VipsBackend> for VipsBuilder {
         self.current_wu = Some(wu.clone());
     }
 
-    fn finish(mut self, root: NodeKey, spec: Arc<dyn AnyKind>, _root_wu: &WorkUnit) -> Result<Buffer<VipsBackend>, Error> {
+    fn finish(
+        mut self,
+        root: NodeKey,
+        spec: Arc<dyn AnyKind>,
+        _root_wu: &WorkUnit,
+    ) -> Result<Buffer<VipsBackend>, Error> {
         let handle = self
             .take(root)
             .ok_or_else(|| Error::Vips("root node produced no handle".into()))?;

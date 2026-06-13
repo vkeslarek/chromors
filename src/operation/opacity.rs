@@ -1,8 +1,8 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::backend::gpu::GpuView;
+use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -12,9 +12,14 @@ pub struct Opacity<B: Backend> {
     pub amount: f32,
 }
 
-impl<B: Backend> Operation<B> for Opacity<B> where Opacity<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Opacity<B>
+where
+    Opacity<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
@@ -35,36 +40,34 @@ impl<B: Backend> Operation<B> for Opacity<B> where Opacity<B>: Lower<B> {
 impl Lower<VipsBackend> for Opacity<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        
+
         let mut ptr = input_handle.ptr;
         let bands = unsafe { crate::ffi::vips_image_get_bands(ptr) };
         let format = unsafe { crate::ffi::vips_image_get_format(ptr) };
 
         // 1. If no alpha, bandjoin max val
         if bands == 1 || bands == 3 {
-            let max_val: f64 = if format == crate::ffi::VipsBandFormat_VIPS_FORMAT_USHORT || 
-                                  format == crate::ffi::VipsBandFormat_VIPS_FORMAT_SHORT {
+            let max_val: f64 = if format == crate::ffi::VipsBandFormat_VIPS_FORMAT_USHORT
+                || format == crate::ffi::VipsBandFormat_VIPS_FORMAT_SHORT
+            {
                 65535.0
             } else {
                 255.0
             };
-            
+
             let mut out: *mut crate::ffi::VipsImage = std::ptr::null_mut();
             let arr = [max_val];
             let ret = unsafe {
-                crate::ffi::vips_bandjoin_const(
-                    ptr,
-                    &mut out,
-                    arr.as_ptr() as *mut f64,
-                    1
-                )
+                crate::ffi::vips_bandjoin_const(ptr, &mut out, arr.as_ptr() as *mut f64, 1)
             };
-            if ret != 0 { panic!("vips_bandjoin_const failed"); }
+            if ret != 0 {
+                panic!("vips_bandjoin_const failed");
+            }
             ptr = out;
         }
 
         let bands = unsafe { crate::ffi::vips_image_get_bands(ptr) };
-        
+
         if bands < 2 {
             let mut op = crate::backend::vips::gobject::VipsGObject::new(b"linear\0").unwrap();
             op.set_image("in", ptr);
@@ -76,14 +79,16 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         }
 
         // 2. Extract RGB
-        let mut op_rgb = crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
+        let mut op_rgb =
+            crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
         op_rgb.set_image("in", ptr);
         op_rgb.set_int("band", 0);
         op_rgb.set_int("n", bands - 1);
         let rgb_handle = op_rgb.run().unwrap();
 
         // 3. Extract Alpha
-        let mut op_alpha = crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
+        let mut op_alpha =
+            crate::backend::vips::gobject::VipsGObject::new(b"extract_band\0").unwrap();
         op_alpha.set_image("in", ptr);
         op_alpha.set_int("band", bands - 1);
         op_alpha.set_int("n", 1);
@@ -95,7 +100,9 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
         op_lin.set_array_double("a", &[self.amount as f64]);
         op_lin.set_array_double("b", &[0.0]);
         let uchar = format == crate::ffi::VipsBandFormat_VIPS_FORMAT_UCHAR;
-        if uchar { op_lin.set_bool("uchar", true); }
+        if uchar {
+            op_lin.set_bool("uchar", true);
+        }
         let scaled_alpha_handle = op_lin.run().unwrap();
 
         // 5. Cast back
@@ -112,16 +119,20 @@ impl Lower<VipsBackend> for Opacity<VipsBackend> {
                 ptrs.as_ptr() as *mut *mut crate::ffi::VipsImage,
                 &mut out,
                 2,
-                crate::backend::vips::null()
+                crate::backend::vips::null(),
             )
         };
-        if ret != 0 { panic!("vips_bandjoin failed"); }
+        if ret != 0 {
+            panic!("vips_bandjoin failed");
+        }
 
         cx.emit(crate::backend::vips::VipsHandle { ptr: out });
     }
 }
 
-impl crate::operation::Lower<crate::backend::gpu::GpuBackend> for Opacity<crate::backend::gpu::GpuBackend> {
+impl crate::operation::Lower<crate::backend::gpu::GpuBackend>
+    for Opacity<crate::backend::gpu::GpuBackend>
+{
     fn lower(&self, cx: &mut crate::backend::gpu::GpuBuilder) {
         cx.param_block(crate::backend::gpu::view::ParamBlock::new().param("amount", self.amount));
         cx.kernel("ops.opacity", "opacity_kernel");
@@ -129,12 +140,14 @@ impl crate::operation::Lower<crate::backend::gpu::GpuBackend> for Opacity<crate:
     }
 }
 
-
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Opacity<B>: crate::operation::Lower<B>,
 {
     pub fn opacity(&self, amount: f32) -> Self {
-        self.push(Opacity { input: self.as_input(), amount })
+        self.push(Opacity {
+            input: self.as_input(),
+            amount,
+        })
     }
 }

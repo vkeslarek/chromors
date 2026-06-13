@@ -240,9 +240,15 @@ impl PixelFormat {
     }
 
     /// Returns the equivalent format with an alpha channel.
-        pub fn to_f32(self) -> Self {
+    pub fn to_f32(self) -> Self {
         match self.channel_count() {
-            1 => if self.has_alpha() { PixelFormat::GrayAF32 } else { PixelFormat::GrayF32 },
+            1 => {
+                if self.has_alpha() {
+                    PixelFormat::GrayAF32
+                } else {
+                    PixelFormat::GrayF32
+                }
+            }
             2 => PixelFormat::GrayAF32,
             3 => PixelFormat::RgbF32,
             4 => PixelFormat::RgbaF32,

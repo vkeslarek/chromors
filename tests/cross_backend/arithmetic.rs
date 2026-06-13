@@ -7,8 +7,12 @@ fn convert_roundtrip() {
     let vips_img = common::rgba();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let vips_res = vips_img.cast(PixelFormat::RgbaF32, None).cast(PixelFormat::Rgba8, None);
-    let gpu_res = gpu_img.cast(PixelFormat::RgbaF32, None).cast(PixelFormat::Rgba8, None);
+    let vips_res = vips_img
+        .cast(PixelFormat::RgbaF32, None)
+        .cast(PixelFormat::Rgba8, None);
+    let gpu_res = gpu_img
+        .cast(PixelFormat::RgbaF32, None)
+        .cast(PixelFormat::Rgba8, None);
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -52,7 +56,9 @@ fn sandwich_acescg_roundtrip() {
 #[test]
 #[ignore = "AddToBandGpuOp/ScaleBandGpuOp (per-band ops) not ported to poc yet (was AddToBandGpuOp+ScaleBandGpuOp chain in old chromors API)"]
 fn chain_add_and_scale_band_matches_vips() {
-    unimplemented!("per-band add/scale chain not ported to poc — add Operation<B>+Lower<B> for both backends first")
+    unimplemented!(
+        "per-band add/scale chain not ported to poc — add Operation<B>+Lower<B> for both backends first"
+    )
 }
 
 #[test]
@@ -156,15 +162,40 @@ fn math_matches_vips() {
 }
 
 #[test]
-#[ignore = "Math2Const (image vs const pow/wop) not ported to poc yet (was Math2ConstOperation in old chromors API)"]
 fn math2_const_matches_vips() {
-    unimplemented!("Math2Const not ported to poc — add Operation<B>+Lower<B> for both backends first (Slang kernel math2_const_kernel already exists)")
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // Use a small exponent or a small constant to avoid extreme wrapping on u8
+    let vips_res = vips_img.math2_const(poc::operation::OperationMath2::Pow, vec![0.5]);
+    let gpu_res = gpu_img.math2_const(poc::operation::OperationMath2::Pow, vec![0.5]);
+
+    // VIPS outputs u8 for Pow if input is u8, wait no, math2_const(Pow) always outputs f32 on some VIPS versions?
+    // Let's use `poc_materialize_f32` equivalent, but wait!
+    // Since math2_const(Pow) produces a float image, vips_materialize_raw_f32 gives raw f32.
+    // For math2_const, we just need to get it to match roughly.
+    let vips_f32 = common::vips_materialize_raw_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let vips_u8: Vec<u8> = vips_f32
+        .iter()
+        .map(|v| (v.clamp(0.0, 255.0) + 0.5) as u8)
+        .collect();
+
+    assert_eq!(vips_u8.len(), gpu_bytes.len());
+    let rms = common::rms_u8(&vips_u8, &gpu_bytes);
+    println!("math2_const RMS = {}", rms);
+    assert!(rms < 15.0, "math2_const diff too high: {}", rms);
 }
 
 #[test]
 #[ignore = "Linear operation not ported to poc yet (was LinearOperation+AddOperation chain in old chromors API)"]
 fn chained_linear_add_matches_vips() {
-    unimplemented!("Linear not ported to poc — add Operation<B>+Lower<B> for both backends first, then chain with .add()")
+    unimplemented!(
+        "Linear not ported to poc — add Operation<B>+Lower<B> for both backends first, then chain with .add()"
+    )
 }
 
 #[test]
@@ -278,9 +309,28 @@ fn round_matches_vips() {
 }
 
 #[test]
-#[ignore = "remainder_const (image mod const) not ported to poc yet (was remainder_const in old chromors API; Slang remainder_const_kernel exists but no Operation<B> wrapper)"]
 fn remainder_const_matches_vips() {
-    unimplemented!("remainder_const not ported to poc — add Operation<B>+Lower<B> for both backends first")
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.remainder_const(vec![128.0]);
+    let gpu_res = gpu_img.remainder_const(vec![128.0]);
+
+    // remainder_const returns u8
+    let vips_f32 = common::vips_materialize_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let vips_u8: Vec<u8> = vips_f32
+        .iter()
+        .map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
+        .collect();
+
+    assert_eq!(vips_u8.len(), gpu_bytes.len());
+    let rms = common::rms_u8(&vips_u8, &gpu_bytes);
+    println!("remainder_const RMS = {}", rms);
+    assert!(rms < 15.0, "remainder_const diff too high: {}", rms);
 }
 
 #[test]

@@ -13,11 +13,22 @@ pub struct Sobel<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Sobel<B> where Sobel<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Sobel<B>
+where
+    Sobel<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.expanded(1)))] }
-    fn output_spec(&self) -> ImageKind { let mut spec = (*self.input.spec).clone(); spec.format = spec.format.to_f32(); spec }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.expanded(1)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.format.to_f32();
+        spec
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -27,12 +38,12 @@ impl Lower<VipsBackend> for Sobel<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"sobel\0").unwrap();
         op.set_image("in", input_handle.ptr);
         let out_handle = op.run().unwrap();
-        
+
         let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         cast_op.set_image("in", out_handle.ptr);
         cast_op.set_int("format", 6); // VIPS_FORMAT_FLOAT
         let cast_handle = cast_op.run().unwrap();
-        
+
         cx.emit(cast_handle);
     }
 }
@@ -41,11 +52,22 @@ pub struct Prewitt<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Prewitt<B> where Prewitt<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Prewitt<B>
+where
+    Prewitt<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.expanded(1)))] }
-    fn output_spec(&self) -> ImageKind { let mut spec = (*self.input.spec).clone(); spec.format = spec.format.to_f32(); spec }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.expanded(1)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.format.to_f32();
+        spec
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -55,12 +77,12 @@ impl Lower<VipsBackend> for Prewitt<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"prewitt\0").unwrap();
         op.set_image("in", input_handle.ptr);
         let out_handle = op.run().unwrap();
-        
+
         let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         cast_op.set_image("in", out_handle.ptr);
         cast_op.set_int("format", 6); // VIPS_FORMAT_FLOAT
         let cast_handle = cast_op.run().unwrap();
-        
+
         cx.emit(cast_handle);
     }
 }
@@ -69,11 +91,22 @@ pub struct Scharr<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Scharr<B> where Scharr<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Scharr<B>
+where
+    Scharr<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.expanded(1)))] }
-    fn output_spec(&self) -> ImageKind { let mut spec = (*self.input.spec).clone(); spec.format = spec.format.to_f32(); spec }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.expanded(1)))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        let mut spec = (*self.input.spec).clone();
+        spec.format = spec.format.to_f32();
+        spec
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -83,12 +116,12 @@ impl Lower<VipsBackend> for Scharr<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"scharr\0").unwrap();
         op.set_image("in", input_handle.ptr);
         let out_handle = op.run().unwrap();
-        
+
         let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         cast_op.set_image("in", out_handle.ptr);
         cast_op.set_int("format", 6); // VIPS_FORMAT_FLOAT
         let cast_handle = cast_op.run().unwrap();
-        
+
         cx.emit(cast_handle);
     }
 }
@@ -99,11 +132,20 @@ pub struct Invert<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Invert<B> where Invert<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Invert<B>
+where
+    Invert<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -142,11 +184,20 @@ pub struct Sign<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Sign<B> where Sign<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Sign<B>
+where
+    Sign<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -164,11 +215,20 @@ pub struct Abs<B: Backend> {
     pub input: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Abs<B> where Abs<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Abs<B>
+where
+    Abs<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![Some(WorkUnit::Region(out.clone()))]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
@@ -182,13 +242,14 @@ impl Lower<VipsBackend> for Abs<VipsBackend> {
     }
 }
 
-
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Sobel<B>: crate::operation::Lower<B>,
 {
     pub fn sobel(&self) -> Self {
-        self.push(Sobel { input: self.as_input() })
+        self.push(Sobel {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -197,7 +258,9 @@ where
     Prewitt<B>: crate::operation::Lower<B>,
 {
     pub fn prewitt(&self) -> Self {
-        self.push(Prewitt { input: self.as_input() })
+        self.push(Prewitt {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -206,7 +269,9 @@ where
     Scharr<B>: crate::operation::Lower<B>,
 {
     pub fn scharr(&self) -> Self {
-        self.push(Scharr { input: self.as_input() })
+        self.push(Scharr {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -215,7 +280,9 @@ where
     Invert<B>: crate::operation::Lower<B>,
 {
     pub fn invert(&self) -> Self {
-        self.push(Invert { input: self.as_input() })
+        self.push(Invert {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -224,7 +291,9 @@ where
     Sign<B>: crate::operation::Lower<B>,
 {
     pub fn sign(&self) -> Self {
-        self.push(Sign { input: self.as_input() })
+        self.push(Sign {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -233,7 +302,9 @@ where
     Abs<B>: crate::operation::Lower<B>,
 {
     pub fn abs(&self) -> Self {
-        self.push(Abs { input: self.as_input() })
+        self.push(Abs {
+            input: self.as_input(),
+        })
     }
 }
 
@@ -242,13 +313,23 @@ pub struct Hypot<B: Backend> {
     pub right: Input<ImageKind, B>,
 }
 
-impl<B: Backend> Operation<B> for Hypot<B> where Hypot<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Hypot<B>
+where
+    Hypot<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone())), Some(WorkUnit::Region(out.clone()))]
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.left, &self.right]
     }
-    fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
+        vec![
+            Some(WorkUnit::Region(out.clone())),
+            Some(WorkUnit::Region(out.clone())),
+        ]
+    }
+    fn output_spec(&self) -> ImageKind {
+        (*self.left.spec).clone()
+    }
     fn dyn_hash(&self, _state: &mut dyn std::hash::Hasher) {}
 }
 
@@ -264,68 +345,116 @@ impl crate::data::image::Image2D<GpuBackend> {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
         let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            std::sync::Arc::clone(&ctx), 3, 3,
-            &[-1.0, 0.0, 1.0, -2.0, 0.0, 2.0, -1.0, 0.0, 1.0]
+            std::sync::Arc::clone(&ctx),
+            3,
+            3,
+            &[-1.0, 0.0, 1.0, -2.0, 0.0, 2.0, -1.0, 0.0, 1.0],
         );
         let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            ctx, 3, 3,
-            &[-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0]
+            ctx,
+            3,
+            3,
+            &[-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0],
         );
-        let f_input = self.cast(crate::pixel::format::PixelFormat::to_f32(self.format()), None);
+        let f_input = self.cast(
+            crate::pixel::format::PixelFormat::to_f32(self.format()),
+            None,
+        );
         let gx = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gx.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gx.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
         let gy = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gy.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gy.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
-        gx.push(Hypot { left: gx.as_input(), right: gy.as_input() })
+        gx.push(Hypot {
+            left: gx.as_input(),
+            right: gy.as_input(),
+        })
     }
 
     pub fn prewitt(&self) -> Self {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
         let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            std::sync::Arc::clone(&ctx), 3, 3,
-            &[-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
+            std::sync::Arc::clone(&ctx),
+            3,
+            3,
+            &[-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0],
         );
         let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            ctx, 3, 3,
-            &[-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+            ctx,
+            3,
+            3,
+            &[-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         );
-        let f_input = self.cast(crate::pixel::format::PixelFormat::to_f32(self.format()), None);
+        let f_input = self.cast(
+            crate::pixel::format::PixelFormat::to_f32(self.format()),
+            None,
+        );
         let gx = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gx.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gx.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
         let gy = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gy.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gy.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
-        gx.push(Hypot { left: gx.as_input(), right: gy.as_input() })
+        gx.push(Hypot {
+            left: gx.as_input(),
+            right: gy.as_input(),
+        })
     }
 
     pub fn scharr(&self) -> Self {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
         let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            std::sync::Arc::clone(&ctx), 3, 3,
-            &[-3.0, 0.0, 3.0, -10.0, 0.0, 10.0, -3.0, 0.0, 3.0]
+            std::sync::Arc::clone(&ctx),
+            3,
+            3,
+            &[-3.0, 0.0, 3.0, -10.0, 0.0, 10.0, -3.0, 0.0, 3.0],
         );
         let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
-            ctx, 3, 3,
-            &[-3.0, -10.0, -3.0, 0.0, 0.0, 0.0, 3.0, 10.0, 3.0]
+            ctx,
+            3,
+            3,
+            &[-3.0, -10.0, -3.0, 0.0, 0.0, 0.0, 3.0, 10.0, 3.0],
         );
-        let f_input = self.cast(crate::pixel::format::PixelFormat::to_f32(self.format()), None);
+        let f_input = self.cast(
+            crate::pixel::format::PixelFormat::to_f32(self.format()),
+            None,
+        );
         let gx = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gx.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gx.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
         let gy = self.push(Convolution {
-            input: f_input.as_input(), mask: mask_gy.as_input(),
-            precision: None, layers: None, cluster: None
+            input: f_input.as_input(),
+            mask: mask_gy.as_input(),
+            precision: None,
+            layers: None,
+            cluster: None,
         });
-        gx.push(Hypot { left: gx.as_input(), right: gy.as_input() })
+        gx.push(Hypot {
+            left: gx.as_input(),
+            right: gy.as_input(),
+        })
     }
 }

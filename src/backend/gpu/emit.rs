@@ -1,9 +1,9 @@
-use super::{BaseInput, GpuBuilder, StepInput, TempElem, View};
 use super::view::OutBuffer;
+use super::{BaseInput, GpuBuilder, StepInput, TempElem, View};
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 /// Core Slang libraries imported unconditionally by every fused pass.
 const CORE_MODULES: &[&str] = &["lib.region", "lib.io", "lib.codecs", "lib.pixel"];
@@ -29,7 +29,13 @@ pub fn slots(builder: &GpuBuilder) -> impl Iterator<Item = Slot<'_>> {
     std::iter::once(Slot::Target)
         .chain(std::iter::once(Slot::Params))
         .chain((0..n_work).map(move |k| Slot::Work(k, &builder.steps[k].temp_elem)))
-        .chain(builder.input_views.iter().enumerate().map(|(i, v)| Slot::Source(i, v)))
+        .chain(
+            builder
+                .input_views
+                .iter()
+                .enumerate()
+                .map(|(i, v)| Slot::Source(i, v)),
+        )
 }
 
 /// Collect the distinct `ops.*` modules referenced by this pass's steps and
@@ -38,11 +44,12 @@ pub fn slots(builder: &GpuBuilder) -> impl Iterator<Item = Slot<'_>> {
 fn referenced_modules(builder: &GpuBuilder) -> Vec<&'static str> {
     let mut seen = HashSet::new();
     let mut modules = Vec::new();
-    let push = |m: &'static str, seen: &mut HashSet<&'static str>, modules: &mut Vec<&'static str>| {
-        if !CORE_MODULES.contains(&m) && seen.insert(m) {
-            modules.push(m);
-        }
-    };
+    let push =
+        |m: &'static str, seen: &mut HashSet<&'static str>, modules: &mut Vec<&'static str>| {
+            if !CORE_MODULES.contains(&m) && seen.insert(m) {
+                modules.push(m);
+            }
+        };
     for step in &builder.steps {
         push(step.module, &mut seen, &mut modules);
         for inp in &step.inputs {
@@ -86,16 +93,24 @@ fn read_expr(builder: &GpuBuilder, input: &StepInput, var: &str) -> (String, Str
         },
         Some(adapter) => {
             let (base_slang, base_var, mut decl) = match input.base {
-                BaseInput::Source(i) => (builder.input_views[i].slang.to_string(), format!("in_{i}"), String::new()),
+                BaseInput::Source(i) => (
+                    builder.input_views[i].slang.to_string(),
+                    format!("in_{i}"),
+                    String::new(),
+                ),
                 BaseInput::Step(j) => {
                     let wrapper = builder.steps[j].temp_elem.region_wrapper;
                     let base_var = format!("{var}_base");
-                    let decl = format!("    {wrapper} {base_var} = {{ work_{j}, params[0].domain }};\n");
+                    let decl =
+                        format!("    {wrapper} {base_var} = {{ work_{j}, params[0].domain }};\n");
                     (wrapper.to_string(), base_var, decl)
                 }
             };
             let wrapper_ty = adapter.wrapper.replace("{inner}", &base_slang);
-            let ctor = adapter.ctor.replace("{value}", &base_var).replace("{params}", "params");
+            let ctor = adapter
+                .ctor
+                .replace("{value}", &base_var)
+                .replace("{params}", "params");
             decl.push_str(&format!("    {wrapper_ty} {var} = {ctor};\n"));
             (decl, var.to_string())
         }
@@ -121,7 +136,10 @@ fn read_expr(builder: &GpuBuilder, input: &StepInput, var: &str) -> (String, Str
 ///   2+W..:    src_i      (StructuredBuffer<…>)   ← one per input view
 /// ```
 pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
-    let output = builder.output.as_ref().expect("a fused pass needs an output");
+    let output = builder
+        .output
+        .as_ref()
+        .expect("a fused pass needs an output");
     let scratch = output.dest == OutBuffer::Scratch;
 
     let mut s = String::with_capacity(2048);
@@ -147,19 +165,44 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     // ── bindings ─────────────────────────────────────────────────────────────
     // The target's element type: the encode wrapper's (sandwich) or the direct
     // out-arg wrapper's.
-    let target_elem = output.encode.as_ref().map(|e| e.buffer_type.as_ref())
+    let target_elem = output
+        .encode
+        .as_ref()
+        .map(|e| e.buffer_type.as_ref())
         .unwrap_or(output.arg.buffer_type.as_ref());
     for (binding, slot) in slots(builder).enumerate() {
         match slot {
-            Slot::Target => writeln!(s, "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{target_elem}> target_buffer;").unwrap(),
-            Slot::Params => writeln!(s, "[[vk::binding({binding}, 0)]] StructuredBuffer<ChainParams> params;").unwrap(),
-            Slot::Work(k, elem) => writeln!(s, "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{}> work_{k};", elem.buffer_ty).unwrap(),
-            Slot::Source(i, view) => writeln!(s, "[[vk::binding({binding}, 0)]] StructuredBuffer<{}> src_{i};", view.buffer_type).unwrap(),
+            Slot::Target => writeln!(
+                s,
+                "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{target_elem}> target_buffer;"
+            )
+            .unwrap(),
+            Slot::Params => writeln!(
+                s,
+                "[[vk::binding({binding}, 0)]] StructuredBuffer<ChainParams> params;"
+            )
+            .unwrap(),
+            Slot::Work(k, elem) => writeln!(
+                s,
+                "[[vk::binding({binding}, 0)]] RWStructuredBuffer<{}> work_{k};",
+                elem.buffer_ty
+            )
+            .unwrap(),
+            Slot::Source(i, view) => writeln!(
+                s,
+                "[[vk::binding({binding}, 0)]] StructuredBuffer<{}> src_{i};",
+                view.buffer_type
+            )
+            .unwrap(),
         }
     }
 
     // ── main ─────────────────────────────────────────────────────────────────
-    writeln!(s, "\n[shader(\"compute\")]\n[numthreads({wg_dim}, {wg_dim}, 1)]").unwrap();
+    writeln!(
+        s,
+        "\n[shader(\"compute\")]\n[numthreads({wg_dim}, {wg_dim}, 1)]"
+    )
+    .unwrap();
     s.push_str("void main(uint3 dispatchThreadID : SV_DispatchThreadID) {\n");
     s.push_str("    uint2 idx = dispatchThreadID.xy;\n");
     // Workgroup-aligned dispatch overshoots the domain when w/h aren't
@@ -197,11 +240,17 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         let direct_final = is_last && !scratch;
         let out_var = format!("out_{s_i}");
         if direct_final {
-            let init = output.arg.init_expr("target_buffer", "params", "params[0].region_out");
+            let init = output
+                .arg
+                .init_expr("target_buffer", "params", "params[0].region_out");
             writeln!(s, "    {} {out_var} = {init};", output.arg.slang).unwrap();
         } else {
             let wrapper = step.temp_elem.region_wrapper;
-            writeln!(s, "    {wrapper} {out_var} = {{ work_{s_i}, params[0].domain }};").unwrap();
+            writeln!(
+                s,
+                "    {wrapper} {out_var} = {{ work_{s_i}, params[0].domain }};"
+            )
+            .unwrap();
         }
 
         let mut args: Vec<String> = Vec::with_capacity(2 + read_args.len() + step.params.len());
@@ -239,7 +288,10 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         if let Some(encode) = &output.encode {
             let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
             writeln!(s, "    {} enc = {init};", encode.slang).unwrap();
-            let input = builder.cur_output_adapter.clone().or_else(|| builder.cur_inputs.first().cloned());
+            let input = builder
+                .cur_output_adapter
+                .clone()
+                .or_else(|| builder.cur_inputs.first().cloned());
             if let Some(input) = input {
                 let (decl, expr) = read_expr(builder, &input, "out_adapt");
                 s.push_str(&decl);

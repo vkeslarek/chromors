@@ -44,9 +44,9 @@ pub type VectorGraphics<B> = Data<VectorGraphicsKind, B>;
 
 // ── Interop: Vello -> Image2D ──────────────────────────────────────────────────
 
-use crate::backend::vello::{VelloBackend, VelloHandle};
 use crate::backend::gpu::GpuBackend;
 use crate::backend::gpu::GpuView;
+use crate::backend::vello::{VelloBackend, VelloHandle};
 use crate::backend::vips::VipsBackend;
 use crate::buffer::Buffer;
 use crate::color::space::ColorSpace;
@@ -94,17 +94,17 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
         _wu: &Region,
     ) -> Result<Buffer<GpuBackend>, Error> {
         use wgpu::util::DeviceExt;
-        
+
         let vello_target = VelloTarget;
         let _vello_handle = self.vector_graphics.pull(&vello_target, Atomic)?;
-        
+
         let spec: Arc<ImageKind> = <VectorGraphicsImageSource as Source<GpuBackend>>::spec(self);
         let pixel_count = (spec.width * spec.height) as usize;
         let bytes_per_pixel = spec.format.bytes_per_pixel() as usize;
         let size = pixel_count * bytes_per_pixel;
-        
+
         let vec = vec![0u8; size];
-        
+
         let wgpu_buffer = ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -114,12 +114,9 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
             });
-            
+
         Ok(Buffer {
-            payload: crate::backend::gpu::GpuBuffer::from_raw(
-                Arc::new(wgpu_buffer),
-                size as u64,
-            ),
+            payload: crate::backend::gpu::GpuBuffer::from_raw(Arc::new(wgpu_buffer), size as u64),
             spec,
         })
     }
@@ -127,14 +124,24 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
     fn lower(&self, cx: &mut crate::backend::gpu::GpuBuilder) {
         let wu = cx.wu().clone();
         let WorkUnit::Region(region) = &wu else {
-            cx.fail(Error::InvalidWorkUnit("image source expects a Region".into()));
+            cx.fail(Error::InvalidWorkUnit(
+                "image source expects a Region".into(),
+            ));
             return;
         };
-        match <VectorGraphicsImageSource as Source<GpuBackend>>::fetch(self, cx.ctx().as_ref(), region) {
+        match <VectorGraphicsImageSource as Source<GpuBackend>>::fetch(
+            self,
+            cx.ctx().as_ref(),
+            region,
+        ) {
             Ok(buf) => {
                 let spec = <VectorGraphicsImageSource as Source<GpuBackend>>::spec(self);
                 let geom = crate::backend::gpu::view::RegionParams::tight(spec.width, spec.height);
-                cx.input(spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.input(
+                    spec.input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
                 cx.output(spec.output(&wu));
             }
             Err(e) => cx.fail(e),
@@ -165,13 +172,13 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
     ) -> Result<Buffer<VipsBackend>, Error> {
         let vello_target = VelloTarget;
         let _vello_handle = self.vector_graphics.pull(&vello_target, Atomic)?;
-        
+
         let spec: Arc<ImageKind> = <VectorGraphicsImageSource as Source<VipsBackend>>::spec(self);
         let pixel_count = (spec.width * spec.height) as usize;
         let bytes_per_pixel = spec.format.bytes_per_pixel() as usize;
         let size = pixel_count * bytes_per_pixel;
         let mut vec = vec![0u8; size];
-        
+
         let ptr = unsafe {
             crate::ffi::vips_image_new_from_memory(
                 vec.as_mut_ptr() as *const std::ffi::c_void,
@@ -182,11 +189,11 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
                 crate::ffi::VipsBandFormat_VIPS_FORMAT_UCHAR,
             )
         };
-        
+
         if ptr.is_null() {
             return Err(Error::Vips(crate::backend::vips::vips_error()));
         }
-        
+
         Ok(Buffer {
             payload: Arc::new(crate::backend::vips::VipsHandle { ptr }),
             spec,
@@ -199,7 +206,8 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
             (spec.width as i32, spec.height as i32),
             crate::work_unit::Lod(0),
         );
-        let buf = <VectorGraphicsImageSource as Source<VipsBackend>>::fetch(self, &(), &region).unwrap();
+        let buf =
+            <VectorGraphicsImageSource as Source<VipsBackend>>::fetch(self, &(), &region).unwrap();
         cx.emit((*buf.payload).clone());
     }
 
@@ -210,12 +218,19 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
 
 impl VectorGraphics<VelloBackend> {
     pub fn rasterize_vips(&self) -> crate::data::image::Image2D<VipsBackend> {
-        let src = Arc::new(VectorGraphicsImageSource { vector_graphics: self.clone() });
+        let src = Arc::new(VectorGraphicsImageSource {
+            vector_graphics: self.clone(),
+        });
         crate::node::Data::from_source(src, Arc::new(()))
     }
 
-    pub fn rasterize_gpu(&self, ctx: Arc<crate::backend::gpu::GpuContext>) -> crate::data::image::Image2D<GpuBackend> {
-        let src = Arc::new(VectorGraphicsImageSource { vector_graphics: self.clone() });
+    pub fn rasterize_gpu(
+        &self,
+        ctx: Arc<crate::backend::gpu::GpuContext>,
+    ) -> crate::data::image::Image2D<GpuBackend> {
+        let src = Arc::new(VectorGraphicsImageSource {
+            vector_graphics: self.clone(),
+        });
         crate::node::Data::from_source(src, ctx)
     }
 }

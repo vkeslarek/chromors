@@ -24,7 +24,11 @@ pub struct Fft2DKind {
 
 impl Fft2DKind {
     pub fn new(width: i32, height: i32, bands: u32) -> Self {
-        Self { width, height, bands }
+        Self {
+            width,
+            height,
+            bands,
+        }
     }
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
@@ -37,7 +41,9 @@ impl AnyKind for Fft2DKind {
     }
     fn byte_size(&self, wu: &WorkUnit) -> u64 {
         match wu {
-            WorkUnit::Region(r) => (r.w.max(0) as u64) * (r.h.max(0) as u64) * self.bands.max(1) as u64 * 8,
+            WorkUnit::Region(r) => {
+                (r.w.max(0) as u64) * (r.h.max(0) as u64) * self.bands.max(1) as u64 * 8
+            }
             _ => 0,
         }
     }

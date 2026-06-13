@@ -7,8 +7,8 @@
 use std::any::Any;
 use std::hash::Hasher;
 
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, ParamBlock, View};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::VipsBand;
 use crate::data::image::ImageKind;
 use crate::kind::{AnyKind, Kind};
@@ -88,10 +88,16 @@ impl Operation<GpuBackend> for HistogramOp {
     fn demand(&self, _out: &Atomic) -> Vec<Option<WorkUnit>> {
         // One thread per input pixel ⇒ demand the whole image.
         let (w, h) = self.input.spec.dims();
-        vec![Some(WorkUnit::Region(Region::full((w, h), crate::work_unit::Lod(0))))]
+        vec![Some(WorkUnit::Region(Region::full(
+            (w, h),
+            crate::work_unit::Lod(0),
+        )))]
     }
     fn output_spec(&self) -> HistogramKind {
-        HistogramKind { bins: self.bins, bands: 1 }
+        HistogramKind {
+            bins: self.bins,
+            bands: 1,
+        }
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u32(self.bins);
@@ -109,7 +115,8 @@ impl Lower<GpuBackend> for HistogramOp {
         // set explicitly from the input image's dims.
         let (w, h) = self.input.spec.dims();
         cx.dispatch((w.max(0) as u32, h.max(0) as u32));
-        cx.kernel("ops.histogram", "histogram_kernel").param("channel", self.channel);
+        cx.kernel("ops.histogram", "histogram_kernel")
+            .param("channel", self.channel);
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -118,7 +125,11 @@ impl Lower<GpuBackend> for HistogramOp {
 
 impl crate::data::image::Image2D<GpuBackend> {
     pub fn histogram(&self, bins: u32, channel: u32) -> Histogram<GpuBackend> {
-        self.push(HistogramOp { input: self.as_input(), bins, channel })
+        self.push(HistogramOp {
+            input: self.as_input(),
+            bins,
+            channel,
+        })
     }
 }
 

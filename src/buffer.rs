@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use crate::backend::Backend;
 use crate::kind::AnyKind;
+use std::sync::Arc;
 
 /// Backend-resident payload + the Kind that tags it.
 /// Data is always resident on the backend inside the model.

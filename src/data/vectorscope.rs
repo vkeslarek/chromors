@@ -5,8 +5,8 @@
 use std::any::Any;
 use std::hash::Hasher;
 
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, ParamBlock, View};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::data::image::ImageKind;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
@@ -100,7 +100,10 @@ impl Lower<GpuBackend> for VectorscopeOp {
 
 impl crate::data::image::Image2D<GpuBackend> {
     pub fn vectorscope(&self, grid: u32) -> Vectorscope {
-        self.push(VectorscopeOp { input: self.as_input(), grid })
+        self.push(VectorscopeOp {
+            input: self.as_input(),
+            grid,
+        })
     }
 }
 

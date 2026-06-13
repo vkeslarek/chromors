@@ -216,9 +216,7 @@ impl SlangCompiler {
         }; // SLANG lock released here — spirv-opt runs in parallel
 
         // Optimise and overwrite the raw cache entry.
-        let optimized = {
-            Self::opt_spirv(spirv_bytes, hash_val)
-        };
+        let optimized = { Self::opt_spirv(spirv_bytes, hash_val) };
 
         // Atomic overwrite with optimized version.
         {

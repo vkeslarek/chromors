@@ -57,7 +57,11 @@ impl GpuView for LutKind {
     /// zero-padded) — the existing raw `Region` wrapper (`StructuredBuffer<float4>`)
     /// reads it directly, indexed `(entry, 0)` by the data-driven kernels.
     fn input(&self) -> View {
-        View::new("float4", "Region", "{ {buf}, {params}[0].region_in_{slot} }")
+        View::new(
+            "float4",
+            "Region",
+            "{ {buf}, {params}[0].region_in_{slot} }",
+        )
     }
 
     fn output(&self, wu: &WorkUnit) -> OutputWrap {
@@ -66,7 +70,13 @@ impl GpuView for LutKind {
         // mapping it to `Region { x: start, y: 0, w: end - start, h: 1 }`.
         let r = match wu {
             WorkUnit::Region(r) => r.clone(),
-            WorkUnit::Range(range) => Region { x: range.start, y: 0, w: range.end - range.start, h: 1, lod: crate::work_unit::Lod(0) },
+            WorkUnit::Range(range) => Region {
+                x: range.start,
+                y: 0,
+                w: range.end - range.start,
+                h: 1,
+                lod: crate::work_unit::Lod(0),
+            },
             WorkUnit::Atomic => panic!("LutKind::output: Atomic WorkUnit not supported"),
         };
         OutputWrap {
@@ -99,12 +109,16 @@ impl Source<GpuBackend> for GpuConstantLutSource {
 
     fn fetch(&self, ctx: &GpuContext, _wu: &Range) -> Result<Buffer<GpuBackend>, Error> {
         use wgpu::util::DeviceExt;
-        let bytes = unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4) };
-        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_constant_lut_source"),
-            contents: bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let bytes = unsafe {
+            std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4)
+        };
+        let wgpu_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_constant_lut_source"),
+                contents: bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         Ok(Buffer {
             payload: GpuBuffer::from_raw(Arc::new(wgpu_buffer), bytes.len() as u64),
@@ -114,10 +128,20 @@ impl Source<GpuBackend> for GpuConstantLutSource {
 
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
-        match self.fetch(cx.ctx().as_ref(), &Range { start: 0, end: self.spec.entries as i32 }) {
+        match self.fetch(
+            cx.ctx().as_ref(),
+            &Range {
+                start: 0,
+                end: self.spec.entries as i32,
+            },
+        ) {
             Ok(buf) => {
                 let geom = RegionParams::tight(self.spec.entries as i32, 1);
-                cx.input(self.spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.input(
+                    self.spec.input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
                 cx.output(self.spec.output(&wu));
             }
             Err(e) => cx.fail(e),
@@ -187,11 +211,22 @@ impl Source<VipsBackend> for VipsConstantLutSource {
         if ptr.is_null() {
             return Err(Error::Vips(crate::backend::vips::vips_error()));
         }
-        Ok(Buffer { payload: Arc::new(VipsHandle { ptr }), spec: self.spec.clone() })
+        Ok(Buffer {
+            payload: Arc::new(VipsHandle { ptr }),
+            spec: self.spec.clone(),
+        })
     }
 
     fn lower(&self, cx: &mut VipsBuilder) {
-        let buf = self.fetch(&(), &Range { start: 0, end: self.spec.entries as i32 }).unwrap();
+        let buf = self
+            .fetch(
+                &(),
+                &Range {
+                    start: 0,
+                    end: self.spec.entries as i32,
+                },
+            )
+            .unwrap();
         cx.emit((*buf.payload).clone());
     }
 
@@ -207,7 +242,10 @@ impl Lut<VipsBackend> {
     pub fn from_values(entries: u32, bands: u32, values: &[f32]) -> Self {
         let spec = Arc::new(LutKind::new(entries, bands));
         let data: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-        let src = VipsConstantLutSource { spec: spec.clone(), data };
+        let src = VipsConstantLutSource {
+            spec: spec.clone(),
+            data,
+        };
         Data::from_source(Arc::new(src), Arc::new(()))
     }
 }

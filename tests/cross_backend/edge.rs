@@ -112,7 +112,10 @@ fn invertlut_matches_vips() {
     let gpu_res = gpu_lut.invertlut(None);
 
     let size = 256usize;
-    let wu = Range { start: 0, end: size as i32 };
+    let wu = Range {
+        start: 0,
+        end: size as i32,
+    };
     let vips_bytes = vips_res.pull(&RawLutTarget, wu.clone()).unwrap();
     let gpu_bytes = gpu_res.pull(&RawLutTarget, wu).unwrap();
 
@@ -122,9 +125,11 @@ fn invertlut_matches_vips() {
     for i in 0..size {
         for b in 0..bands {
             let vips_off = (i * bands + b) * 8;
-            let vips_val = f64::from_le_bytes(vips_bytes[vips_off..vips_off + 8].try_into().unwrap());
+            let vips_val =
+                f64::from_le_bytes(vips_bytes[vips_off..vips_off + 8].try_into().unwrap());
             let gpu_off = (i * 4 + b) * 4;
-            let gpu_val = f32::from_le_bytes(gpu_bytes[gpu_off..gpu_off + 4].try_into().unwrap()) as f64;
+            let gpu_val =
+                f32::from_le_bytes(gpu_bytes[gpu_off..gpu_off + 4].try_into().unwrap()) as f64;
             let diff = vips_val - gpu_val;
             sum_sq += diff * diff;
             n += 1;
@@ -134,4 +139,3 @@ fn invertlut_matches_vips() {
     println!("invertlut RMS = {}", rms);
     assert!(rms < 0.01, "invertlut diff too high: {}", rms);
 }
-

@@ -1,7 +1,7 @@
+use super::context::GpuContext;
+use crate::error::Error;
 use std::sync::Arc;
 use wgpu;
-use crate::error::Error;
-use super::context::GpuContext;
 
 /// A tracked, ref-counted VRAM buffer. Carries no metadata (payload-agnostic).
 pub struct GpuBuffer {

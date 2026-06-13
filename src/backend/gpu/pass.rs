@@ -41,7 +41,11 @@ use super::{GpuBackend, GpuBuilder, GpuView};
 /// Total storage buffer bindings a fused pass needs.
 /// Layout: `target(1) + params(1) + work_buffers(W) + sources(S)`.
 pub fn binding_count(n_steps: usize, n_sources: usize, needs_scratch: bool) -> usize {
-    let work = if needs_scratch { n_steps } else { n_steps.saturating_sub(1) };
+    let work = if needs_scratch {
+        n_steps
+    } else {
+        n_steps.saturating_sub(1)
+    };
     2 + work + n_sources
 }
 
@@ -64,8 +68,12 @@ struct StubInput {
 }
 
 impl AnyInput<GpuBackend> for StubInput {
-    fn src(&self) -> &Arc<Node<GpuBackend>> { &self.node }
-    fn spec(&self) -> &dyn AnyKind { self.kind.as_ref() }
+    fn src(&self) -> &Arc<Node<GpuBackend>> {
+        &self.node
+    }
+    fn spec(&self) -> &dyn AnyKind {
+        self.kind.as_ref()
+    }
 }
 
 /// Wraps an existing node, overrides `inputs()` with rebuilt children.
@@ -77,7 +85,10 @@ struct RebuiltOp {
 
 impl AnyOperation<GpuBackend> for RebuiltOp {
     fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
-        self.inputs.iter().map(|i| i as &dyn AnyInput<GpuBackend>).collect()
+        self.inputs
+            .iter()
+            .map(|i| i as &dyn AnyInput<GpuBackend>)
+            .collect()
     }
     fn demand_erased(&self, out: &WorkUnit) -> Vec<Option<WorkUnit>> {
         self.original.demand_erased(out)
@@ -111,11 +122,7 @@ impl Source<GpuBackend> for StagingSource {
         self.spec.clone()
     }
 
-    fn fetch(
-        &self,
-        _ctx: &GpuContext,
-        _wu: &Region,
-    ) -> Result<Buffer<GpuBackend>, Error> {
+    fn fetch(&self, _ctx: &GpuContext, _wu: &Region) -> Result<Buffer<GpuBackend>, Error> {
         Ok(Buffer {
             payload: self.buffer.clone(),
             spec: self.spec.clone(),
@@ -177,7 +184,11 @@ fn analyze_dag(root: &Arc<Node<GpuBackend>>) -> DagAnalysis {
         }
     }
 
-    DagAnalysis { levels, n_sources, n_ops }
+    DagAnalysis {
+        levels,
+        n_sources,
+        n_ops,
+    }
 }
 
 /// Find nodes whose subgraphs should be pre-materialized (staging cuts).
@@ -187,10 +198,7 @@ fn analyze_dag(root: &Arc<Node<GpuBackend>>) -> DagAnalysis {
 /// at that depth and below were replaced by sources. Return the shallowest
 /// cut that brings the remaining pass under budget. BFS maximizes the width
 /// of independent sub-trees at the cut level → maximizes rayon parallelism.
-fn find_cuts(
-    root: &Arc<Node<GpuBackend>>,
-    max_bindings: u32,
-) -> Vec<Arc<Node<GpuBackend>>> {
+fn find_cuts(root: &Arc<Node<GpuBackend>>, max_bindings: u32) -> Vec<Arc<Node<GpuBackend>>> {
     let analysis = analyze_dag(root);
     let full_bindings = binding_count(analysis.n_ops, analysis.n_sources, true);
 
@@ -291,7 +299,9 @@ fn rebuild_dag(
         .into_iter()
         .zip(original_inputs.iter())
         .map(|(child, orig_input)| StubInput {
-            kind: orig_input.spec().as_any()
+            kind: orig_input
+                .spec()
+                .as_any()
                 .downcast_ref::<crate::data::image::ImageKind>()
                 .map(|k| Arc::new(k.clone()) as Arc<dyn AnyKind>)
                 .unwrap_or_else(|| child.output_kind()),

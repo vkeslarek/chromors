@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use crate::error::Error;
-use super::{GpuContext, GpuBuilder};
-use super::context::CachedPipelines;
 use super::buffer::GpuBuffer;
+use super::context::CachedPipelines;
 use super::emit::{self, Slot};
+use super::{GpuBuilder, GpuContext};
+use crate::error::Error;
+use std::sync::Arc;
 use wgpu;
 
 pub struct DispatchPass {
@@ -50,7 +50,12 @@ fn shader_fingerprint() -> u64 {
     })
 }
 
-pub fn compile(ctx: &GpuContext, builder: &GpuBuilder, slang: String, hash: u64) -> Result<DispatchPass, Error> {
+pub fn compile(
+    ctx: &GpuContext,
+    builder: &GpuBuilder,
+    slang: String,
+    hash: u64,
+) -> Result<DispatchPass, Error> {
     // Fold the shader-tree fingerprint in: the emitted `main()` text alone does
     // not change when an imported kernel's body does.
     let hash = hash ^ shader_fingerprint();
@@ -71,10 +76,12 @@ pub fn compile(ctx: &GpuContext, builder: &GpuBuilder, slang: String, hash: u64)
     let spirv = compile_spirv(&slang, hash)?;
 
     // 2. Carrega o SPIR-V no WGPU (exatamente como na engine original)
-    let module = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("jit_fused_module"),
-        source: wgpu::util::make_spirv(&spirv),
-    });
+    let module = ctx
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("jit_fused_module"),
+            source: wgpu::util::make_spirv(&spirv),
+        });
 
     // Binding layout follows `emit::slots()` exactly — target/work buffers are
     // read-write, params/source buffers are read-only.
@@ -98,28 +105,34 @@ pub fn compile(ctx: &GpuContext, builder: &GpuBuilder, slang: String, hash: u64)
         })
         .collect();
 
-    let bgl0 = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("bgl_targets"),
-        entries: &bgl_entries,
-    });
+    let bgl0 = ctx
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bgl_targets"),
+            entries: &bgl_entries,
+        });
 
-    let pl = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("pipeline_layout"),
-        bind_group_layouts: &[Some(&bgl0)],
-        immediate_size: 0,
-    });
+    let pl = ctx
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pipeline_layout"),
+            bind_group_layouts: &[Some(&bgl0)],
+            immediate_size: 0,
+        });
 
     // We assume the Slang entry point is always "main"
     let entry_point = "main";
 
-    let pipeline = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("main_compute"),
-        layout: Some(&pl),
-        module: &module,
-        entry_point: Some(entry_point),
-        compilation_options: Default::default(),
-        cache: None,
-    });
+    let pipeline = ctx
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("main_compute"),
+            layout: Some(&pl),
+            module: &module,
+            entry_point: Some(entry_point),
+            compilation_options: Default::default(),
+            cache: None,
+        });
 
     let bgls = vec![Arc::new(bgl0)];
     let pipeline = Arc::new(pipeline);
@@ -131,7 +144,11 @@ pub fn compile(ctx: &GpuContext, builder: &GpuBuilder, slang: String, hash: u64)
     });
     ctx.pipeline_cache.write().unwrap().put(hash, new_cache);
 
-    Ok(DispatchPass { bgls, pipeline, slang_text: slang })
+    Ok(DispatchPass {
+        bgls,
+        pipeline,
+        slang_text: slang,
+    })
 }
 
 /// Invoca o compilador C++ FFI para compilar o shader JIT gerado para SPIR-V
@@ -147,10 +164,18 @@ fn compile_spirv(text: &str, hash: u64) -> Result<Vec<u8>, Error> {
     let shader_dir = std::path::PathBuf::from(&manifest).join("shaders");
 
     let compiler = super::slang::SlangCompiler::new(shader_dir, out_dir);
-    compiler.compile_ir(text, hash).map_err(|e| Error::Backend(format!("Slang error: {}", e)))
+    compiler
+        .compile_ir(text, hash)
+        .map_err(|e| Error::Backend(format!("Slang error: {}", e)))
 }
 
-pub fn dispatch(ctx: &GpuContext, pass: &DispatchPass, builder: &GpuBuilder, out_bytes: u64, dims: (u32, u32)) -> Result<Arc<GpuBuffer>, Error> {
+pub fn dispatch(
+    ctx: &GpuContext,
+    pass: &DispatchPass,
+    builder: &GpuBuilder,
+    out_bytes: u64,
+    dims: (u32, u32),
+) -> Result<Arc<GpuBuffer>, Error> {
     // Output buffer holds the result, GPU-resident. Sized by the agnostic
     // `AnyKind::byte_size(wu)` resolved during the demand walk.
     let byte_len = out_bytes.max(16);
@@ -163,11 +188,13 @@ pub fn dispatch(ctx: &GpuContext, pass: &DispatchPass, builder: &GpuBuilder, out
 
     use wgpu::util::DeviceExt;
 
-    let params_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("params"),
-        contents: &builder.params.bytes,
-        usage: wgpu::BufferUsages::STORAGE, // Matches Storage { read_only: true }
-    });
+    let params_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("params"),
+            contents: &builder.params.bytes,
+            usage: wgpu::BufferUsages::STORAGE, // Matches Storage { read_only: true }
+        });
 
     // Working scratch buffers, one per `Slot::Work`, sized by each step's
     // `TempElem::byte_size`.
@@ -175,12 +202,14 @@ pub fn dispatch(ctx: &GpuContext, pass: &DispatchPass, builder: &GpuBuilder, out
         .filter_map(|slot| match slot {
             Slot::Work(k, elem) => {
                 let work_len = (dims.0 as u64 * dims.1 as u64 * elem.byte_size).max(16);
-                Some(Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some(&format!("work_{k}")),
-                    size: work_len,
-                    usage: wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: false,
-                })))
+                Some(Arc::new(ctx.device.create_buffer(
+                    &wgpu::BufferDescriptor {
+                        label: Some(&format!("work_{k}")),
+                        size: work_len,
+                        usage: wgpu::BufferUsages::STORAGE,
+                        mapped_at_creation: false,
+                    },
+                )))
             }
             _ => None,
         })
@@ -211,9 +240,16 @@ pub fn dispatch(ctx: &GpuContext, pass: &DispatchPass, builder: &GpuBuilder, out
     let gx = (dims.0 + wg - 1) / wg;
     let gy = (dims.1 + wg - 1) / wg;
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("dispatch_encoder") });
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("dispatch_encoder"),
+        });
     {
-        let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("compute_pass"), timestamp_writes: None });
+        let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("compute_pass"),
+            timestamp_writes: None,
+        });
         cp.set_pipeline(&pass.pipeline);
         cp.set_bind_group(0, &bg0, &[]);
         cp.dispatch_workgroups(gx, gy, 1);

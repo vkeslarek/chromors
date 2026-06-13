@@ -104,8 +104,14 @@ impl ImageKind {
     /// Returns the corresponding codec name for this format (`"U8Codec"`, `"U16Codec"`, `"F32Codec"`).
     fn codec(&self) -> &'static str {
         match self.format {
-            PixelFormat::RgbaF32 | PixelFormat::RgbF32 | PixelFormat::GrayF32 | PixelFormat::GrayAF32 => "F32Codec",
-            PixelFormat::Rgba16 | PixelFormat::Rgb16 | PixelFormat::Gray16 | PixelFormat::GrayA16 => "U16Codec",
+            PixelFormat::RgbaF32
+            | PixelFormat::RgbF32
+            | PixelFormat::GrayF32
+            | PixelFormat::GrayAF32 => "F32Codec",
+            PixelFormat::Rgba16
+            | PixelFormat::Rgb16
+            | PixelFormat::Gray16
+            | PixelFormat::GrayA16 => "U16Codec",
             _ => "U8Codec",
         }
     }
@@ -422,7 +428,11 @@ impl Source<GpuBackend> for VipsImageSource {
             Ok(buf) => {
                 // The fetched buffer is the full image, tightly packed.
                 let geom = RegionParams::tight(self.spec().width, self.spec().height);
-                cx.input(self.spec().input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.input(
+                    self.spec().input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
             }
             Err(e) => cx.fail(e),
         }
@@ -454,12 +464,16 @@ impl Source<GpuBackend> for GpuConstantSource {
         _wu: &Region,
     ) -> Result<Buffer<GpuBackend>, crate::error::Error> {
         use wgpu::util::DeviceExt;
-        let bytes = unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4) };
-        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_constant_source"),
-            contents: bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let bytes = unsafe {
+            std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4)
+        };
+        let wgpu_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_constant_source"),
+                contents: bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         Ok(Buffer {
             payload: crate::backend::gpu::GpuBuffer::from_raw(
@@ -480,8 +494,15 @@ impl Source<GpuBackend> for GpuConstantSource {
         };
         match self.fetch(cx.ctx().as_ref(), region) {
             Ok(buf) => {
-                let geom = crate::backend::gpu::view::RegionParams::tight(self.spec.width, self.spec.height);
-                cx.input(self.spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                let geom = crate::backend::gpu::view::RegionParams::tight(
+                    self.spec.width,
+                    self.spec.height,
+                );
+                cx.input(
+                    self.spec.input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
             }
             Err(e) => cx.fail(e),
         }

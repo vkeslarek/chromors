@@ -1,22 +1,22 @@
-pub mod context;
 pub mod buffer;
-pub mod view;
-pub mod emit;
 pub mod compile;
-pub mod slang;
+pub mod context;
+pub mod emit;
 pub mod pass;
+pub mod slang;
+pub mod view;
 
-pub use context::*;
 pub use buffer::*;
+pub use context::*;
 pub use view::*;
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use crate::backend::Builder;
 use crate::error::Error;
 use crate::kind::{AnyKind, Kind};
 use crate::node::NodeId;
 use crate::work_unit::{Region, WorkUnit, WorkUnitFor};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct GpuBackend;
 
@@ -192,7 +192,9 @@ impl GpuBuilder {
             if !names.iter().any(|n| n == &name) {
                 self.params.fields.push((name, ty));
                 self.params.field_sizes.push(size);
-                self.params.bytes.extend_from_slice(&old_bytes[offset..offset + size]);
+                self.params
+                    .bytes
+                    .extend_from_slice(&old_bytes[offset..offset + size]);
             }
             offset += size;
         }
@@ -212,13 +214,22 @@ impl GpuBuilder {
                 if let Some(adapted) = self.alias_adapters.get(k) {
                     adapted.clone()
                 } else if let Some(&si) = self.source_of.get(k) {
-                    StepInput { base: BaseInput::Source(si), adapter: None }
+                    StepInput {
+                        base: BaseInput::Source(si),
+                        adapter: None,
+                    }
                 } else if let Some(&st) = self.last_step_of.get(k) {
-                    StepInput { base: BaseInput::Step(st), adapter: None }
+                    StepInput {
+                        base: BaseInput::Step(st),
+                        adapter: None,
+                    }
                 } else {
                     // Pruned/absent input reached a consumer — shouldn't happen
                     // for a live node; fall back to source 0 to stay total.
-                    StepInput { base: BaseInput::Source(0), adapter: None }
+                    StepInput {
+                        base: BaseInput::Source(0),
+                        adapter: None,
+                    }
                 }
             })
             .collect();
@@ -236,7 +247,9 @@ impl GpuBuilder {
         self.error.take()
     }
     pub fn wu(&self) -> &WorkUnit {
-        self.current_wu.as_ref().expect("GpuBuilder::wu called outside a lower()")
+        self.current_wu
+            .as_ref()
+            .expect("GpuBuilder::wu called outside a lower()")
     }
 
     /// Register a **source input**: decode `View`, slot params, fetched buffer.
@@ -244,22 +257,34 @@ impl GpuBuilder {
     /// `slot_params` field names may contain the literal `"{slot}"`, which is
     /// replaced with this input's assigned slot index (e.g. `"region_in_{slot}"`
     /// → `"region_in_0"`).
-    pub fn input(&mut self, view: View, slot_params: ParamBlock, buf: Arc<crate::backend::gpu::buffer::GpuBuffer>) -> &mut Self {
+    pub fn input(
+        &mut self,
+        view: View,
+        slot_params: ParamBlock,
+        buf: Arc<crate::backend::gpu::buffer::GpuBuffer>,
+    ) -> &mut Self {
         let slot = self.input_views.len();
         if let Some(k) = self.cur_node {
             self.source_of.insert(k, slot);
         }
         for (name, ty) in &slot_params.fields {
-            self.params.fields.push((name.replace("{slot}", &slot.to_string()), ty));
+            self.params
+                .fields
+                .push((name.replace("{slot}", &slot.to_string()), ty));
         }
-        self.params.field_sizes.extend(slot_params.field_sizes.iter().copied());
+        self.params
+            .field_sizes
+            .extend(slot_params.field_sizes.iter().copied());
         self.params.bytes.extend_from_slice(&slot_params.bytes);
         self.input_views.push(view);
         self.source_buffers.push(buf);
         // If this leaf turns out to be the DAG root (no kernel steps at all —
         // a plain `Data::from_source(..).pull(..)`), the encoder reads its
         // decoded value directly through this slot.
-        self.cur_output_adapter = Some(StepInput { base: BaseInput::Source(slot), adapter: None });
+        self.cur_output_adapter = Some(StepInput {
+            base: BaseInput::Source(slot),
+            adapter: None,
+        });
         self
     }
 
@@ -272,15 +297,29 @@ impl GpuBuilder {
 
     /// Like [`GpuBuilder::kernel`], but with a non-default working temp element
     /// (e.g. a reduction step writing `uint` bins instead of `float4` pixels).
-    pub fn kernel_with_temp(&mut self, module: &'static str, entry: &'static str, temp_elem: TempElem) -> &mut Self {
+    pub fn kernel_with_temp(
+        &mut self,
+        module: &'static str,
+        entry: &'static str,
+        temp_elem: TempElem,
+    ) -> &mut Self {
         let inputs = if !self.cur_started {
             self.cur_started = true;
             self.cur_inputs.clone()
         } else {
-            vec![StepInput { base: BaseInput::Step(self.steps.len() - 1), adapter: None }]
+            vec![StepInput {
+                base: BaseInput::Step(self.steps.len() - 1),
+                adapter: None,
+            }]
         };
         let params = std::mem::take(&mut self.pending_params);
-        self.steps.push(Step { module, kernel: entry, inputs, params, temp_elem });
+        self.steps.push(Step {
+            module,
+            kernel: entry,
+            inputs,
+            params,
+            temp_elem,
+        });
         let idx = self.steps.len() - 1;
         if let Some(k) = self.cur_node {
             self.last_step_of.insert(k, idx);
@@ -305,7 +344,9 @@ impl GpuBuilder {
     /// first one applied takes precedence.
     pub fn adapt(&mut self, adapter: ViewAdapter) -> &mut Self {
         let Some(input) = self.cur_inputs.first().cloned() else {
-            self.fail(Error::Backend("GpuBuilder::adapt: node has no input to adapt".into()));
+            self.fail(Error::Backend(
+                "GpuBuilder::adapt: node has no input to adapt".into(),
+            ));
             return self;
         };
         let final_input = if input.adapter.is_some() {
@@ -321,15 +362,24 @@ impl GpuBuilder {
                 .map(|(name, ty)| (name.replace("{p}", &prefix), *ty))
                 .collect();
             self.params.fields.extend(fields.iter().cloned());
-            self.params.field_sizes.extend(adapter.params.field_sizes.iter().copied());
+            self.params
+                .field_sizes
+                .extend(adapter.params.field_sizes.iter().copied());
             self.params.bytes.extend_from_slice(&adapter.params.bytes);
             let resolved = ViewAdapter {
                 wrapper: adapter.wrapper,
                 ctor: adapter.ctor.replace("{p}", &prefix).into(),
-                params: ParamBlock { fields, field_sizes: adapter.params.field_sizes.clone(), bytes: adapter.params.bytes },
+                params: ParamBlock {
+                    fields,
+                    field_sizes: adapter.params.field_sizes.clone(),
+                    bytes: adapter.params.bytes,
+                },
                 module: adapter.module,
             };
-            StepInput { base: input.base, adapter: Some(resolved) }
+            StepInput {
+                base: input.base,
+                adapter: Some(resolved),
+            }
         };
         if let Some(k) = self.cur_node {
             self.alias_adapters.insert(k, final_input.clone());
@@ -363,7 +413,9 @@ impl GpuBuilder {
         let field = format!("s{idx}_{name}");
         self.params.fields.push((field.clone(), T::SLANG_TY));
         self.params.field_sizes.push(std::mem::size_of::<T>());
-        self.params.bytes.extend_from_slice(bytemuck::bytes_of(&value));
+        self.params
+            .bytes
+            .extend_from_slice(bytemuck::bytes_of(&value));
         self.steps[idx].params.push(field);
         self
     }
@@ -386,8 +438,12 @@ impl GpuBuilder {
         // — not the source's — land at that field's offset in `ChainParams`.
         let names: Vec<String> = wrap.params.fields.iter().map(|(n, _)| n.clone()).collect();
         self.remove_fields_named(&names);
-        self.params.fields.extend(wrap.params.fields.iter().cloned());
-        self.params.field_sizes.extend(wrap.params.field_sizes.iter().copied());
+        self.params
+            .fields
+            .extend(wrap.params.fields.iter().cloned());
+        self.params
+            .field_sizes
+            .extend(wrap.params.field_sizes.iter().copied());
         self.params.bytes.extend_from_slice(&wrap.params.bytes);
         self.output = Some(wrap);
         self
@@ -396,7 +452,8 @@ impl GpuBuilder {
     /// Merge a whole `ParamBlock` (e.g. a reduction's `bin_count`) into the
     /// shared `ChainParams`.
     pub fn param_block(&mut self, block: ParamBlock) -> &mut Self {
-        self.pending_params.extend(block.fields.iter().map(|(name, _)| name.clone()));
+        self.pending_params
+            .extend(block.fields.iter().map(|(name, _)| name.clone()));
         self.params.fields.extend(block.fields);
         self.params.field_sizes.extend(block.field_sizes);
         self.params.bytes.extend_from_slice(&block.bytes);
@@ -458,16 +515,28 @@ impl Builder<GpuBackend> for GpuBuilder {
         GpuBuilder::enter(self, node, inputs, wu)
     }
 
-    fn finish(mut self, _root: NodeId, spec: Arc<dyn AnyKind>, root_wu: &WorkUnit) -> Result<crate::buffer::Buffer<GpuBackend>, Error> {
+    fn finish(
+        mut self,
+        _root: NodeId,
+        spec: Arc<dyn AnyKind>,
+        root_wu: &WorkUnit,
+    ) -> Result<crate::buffer::Buffer<GpuBackend>, Error> {
         if let Some(e) = self.take_error() {
             return Err(e);
         }
 
         debug_assert!(
-            pass::binding_count(self.steps.len(), self.source_buffers.len(), self.needs_scratch())
-                <= self.ctx.max_storage_buffers as usize,
+            pass::binding_count(
+                self.steps.len(),
+                self.source_buffers.len(),
+                self.needs_scratch()
+            ) <= self.ctx.max_storage_buffers as usize,
             "CutFinder should have split this pass (need {} bindings, device has {})",
-            pass::binding_count(self.steps.len(), self.source_buffers.len(), self.needs_scratch()),
+            pass::binding_count(
+                self.steps.len(),
+                self.source_buffers.len(),
+                self.needs_scratch()
+            ),
             self.ctx.max_storage_buffers,
         );
 

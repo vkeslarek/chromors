@@ -17,7 +17,13 @@ fn extract_band_single_alias_runs() {
     let extracted = gpu_img.extract_band(1, None);
     println!("extract_band(1,None) output_spec = {:?}", extracted.spec);
 
-    let rect = Region { x: 0, y: 0, w: extracted.width(), h: extracted.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: extracted.width(),
+        h: extracted.height(),
+        lod: Lod(0),
+    };
     let bytes = extracted.pull(&RamImageTarget, rect).unwrap();
     println!("extract_band(1,None) -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
@@ -34,7 +40,13 @@ fn extract_band_range_kernel_runs() {
     let extracted = gpu_img.extract_band(0, Some(3));
     println!("extract_band(0,Some(3)) output_spec = {:?}", extracted.spec);
 
-    let rect = Region { x: 0, y: 0, w: extracted.width(), h: extracted.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: extracted.width(),
+        h: extracted.height(),
+        lod: Lod(0),
+    };
     let bytes = extracted.pull(&RamImageTarget, rect).unwrap();
     println!("extract_band(0,Some(3)) -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
@@ -51,9 +63,18 @@ fn extract_band_then_op_aliases_step() {
     // (StepInput::SwizzleStep, not SwizzleSource).
     let inverted = gpu_img.invert();
     let extracted = inverted.extract_band(2, None);
-    println!("invert().extract_band(2,None) output_spec = {:?}", extracted.spec);
+    println!(
+        "invert().extract_band(2,None) output_spec = {:?}",
+        extracted.spec
+    );
 
-    let rect = Region { x: 0, y: 0, w: extracted.width(), h: extracted.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: extracted.width(),
+        h: extracted.height(),
+        lod: Lod(0),
+    };
     let bytes = extracted.pull(&RamImageTarget, rect).unwrap();
     println!("invert().extract_band(2,None) -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
@@ -76,7 +97,13 @@ fn bandjoin_of_extracts_runs() {
     });
     println!("bandjoin4(extracts) output_spec = {:?}", joined.spec);
 
-    let rect = Region { x: 0, y: 0, w: joined.width(), h: joined.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: joined.width(),
+        h: joined.height(),
+        lod: Lod(0),
+    };
     let bytes = joined.pull(&RamImageTarget, rect).unwrap();
     println!("bandjoin4(extracts) -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
@@ -90,15 +117,31 @@ fn bandbool_and_bandmean_run() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     let bm = gpu_img.bandmean(4);
-    let rect = Region { x: 0, y: 0, w: bm.width(), h: bm.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: bm.width(),
+        h: bm.height(),
+        lod: Lod(0),
+    };
     let bytes = bm.pull(&RamImageTarget, rect).unwrap();
     println!("bandmean(4) -> {} bytes, spec = {:?}", bytes.len(), bm.spec);
     assert!(!bytes.is_empty());
 
     let bb = gpu_img.bandbool(poc::operation::OperationBoolean::And, 4);
-    let rect = Region { x: 0, y: 0, w: bb.width(), h: bb.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: bb.width(),
+        h: bb.height(),
+        lod: Lod(0),
+    };
     let bytes = bb.pull(&RamImageTarget, rect).unwrap();
-    println!("bandbool(And,4) -> {} bytes, spec = {:?}", bytes.len(), bb.spec);
+    println!(
+        "bandbool(And,4) -> {} bytes, spec = {:?}",
+        bytes.len(),
+        bb.spec
+    );
     assert!(!bytes.is_empty());
 }
 
@@ -118,7 +161,13 @@ fn bandjoin_reconstruction_close_to_original() {
         images: vec![r.as_input(), g.as_input(), b.as_input(), a.as_input()],
     });
 
-    let rect = Region { x: 0, y: 0, w: joined.width(), h: joined.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: joined.width(),
+        h: joined.height(),
+        lod: Lod(0),
+    };
     let got = joined.pull(&RamImageTarget, rect).unwrap();
 
     let want = common::vips_materialize(&vips_img);
@@ -131,7 +180,9 @@ fn bandjoin_reconstruction_close_to_original() {
     // luma(v*kr,v*kg,v*kb) != v. This is a pre-existing working-space
     // sandwich issue (see convert_roundtrip/sandwich_* caveats), not a
     // band-wrap mechanism bug -- flagged for the general review.
-    println!("bandjoin4(extracts) vs original rgba RMS = {rms} (sandwich roundtrip, not bit-exact)");
+    println!(
+        "bandjoin4(extracts) vs original rgba RMS = {rms} (sandwich roundtrip, not bit-exact)"
+    );
 }
 
 #[test]
@@ -143,71 +194,137 @@ fn newly_imported_kernel_modules_compile_and_run() {
 
     // ops.passthrough (crop -> passthrough_kernel)
     let cropped = gpu_img.crop(10, 10, 50, 50);
-    let rect = Region { x: 0, y: 0, w: cropped.width(), h: cropped.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: cropped.width(),
+        h: cropped.height(),
+        lod: Lod(0),
+    };
     let bytes = cropped.pull(&RamImageTarget, rect).unwrap();
     println!("crop -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     // ops.exposure (exposure_kernel)
     let exposed = gpu_img.exposure(1.0, 0.0);
-    let rect = Region { x: 0, y: 0, w: exposed.width(), h: exposed.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: exposed.width(),
+        h: exposed.height(),
+        lod: Lod(0),
+    };
     let bytes = exposed.pull(&RamImageTarget, rect).unwrap();
     println!("exposure -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     // ops.gamma (gamma_kernel)
     let gammaed = gpu_img.gamma(Some(2.2));
-    let rect = Region { x: 0, y: 0, w: gammaed.width(), h: gammaed.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: gammaed.width(),
+        h: gammaed.height(),
+        lod: Lod(0),
+    };
     let bytes = gammaed.pull(&RamImageTarget, rect).unwrap();
     println!("gamma -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     // ops.unary (abs_kernel, sign_kernel, msb_kernel)
     let abs_img = gpu_img.abs();
-    let rect = Region { x: 0, y: 0, w: abs_img.width(), h: abs_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: abs_img.width(),
+        h: abs_img.height(),
+        lod: Lod(0),
+    };
     let bytes = abs_img.pull(&RamImageTarget, rect).unwrap();
     println!("abs -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let sign_img = gpu_img.sign();
-    let rect = Region { x: 0, y: 0, w: sign_img.width(), h: sign_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: sign_img.width(),
+        h: sign_img.height(),
+        lod: Lod(0),
+    };
     let bytes = sign_img.pull(&RamImageTarget, rect).unwrap();
     println!("sign -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let msb_img = gpu_img.msb(None);
-    let rect = Region { x: 0, y: 0, w: msb_img.width(), h: msb_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: msb_img.width(),
+        h: msb_img.height(),
+        lod: Lod(0),
+    };
     let bytes = msb_img.pull(&RamImageTarget, rect).unwrap();
     println!("msb -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     // geometry ops (RemapView testing)
     let flip_img = gpu_img.flip(poc::operation::geometry::Direction::Horizontal);
-    let rect = Region { x: 0, y: 0, w: flip_img.width(), h: flip_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: flip_img.width(),
+        h: flip_img.height(),
+        lod: Lod(0),
+    };
     let bytes = flip_img.pull(&RamImageTarget, rect).unwrap();
     println!("flip -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let rot_img = gpu_img.rot90(poc::operation::geometry::Angle::D90);
-    let rect = Region { x: 0, y: 0, w: rot_img.width(), h: rot_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: rot_img.width(),
+        h: rot_img.height(),
+        lod: Lod(0),
+    };
     let bytes = rot_img.pull(&RamImageTarget, rect).unwrap();
     println!("rot90 -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let sub_img = gpu_img.subsample(2, 2, None);
-    let rect = Region { x: 0, y: 0, w: sub_img.width(), h: sub_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: sub_img.width(),
+        h: sub_img.height(),
+        lod: Lod(0),
+    };
     let bytes = sub_img.pull(&RamImageTarget, rect).unwrap();
     println!("subsample -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let zoom_img = gpu_img.zoom(2, 2);
-    let rect = Region { x: 0, y: 0, w: zoom_img.width(), h: zoom_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: zoom_img.width(),
+        h: zoom_img.height(),
+        lod: Lod(0),
+    };
     let bytes = zoom_img.pull(&RamImageTarget, rect).unwrap();
     println!("zoom -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
     let rep_img = gpu_img.replicate(2, 2);
-    let rect = Region { x: 0, y: 0, w: rep_img.width(), h: rep_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: rep_img.width(),
+        h: rep_img.height(),
+        lod: Lod(0),
+    };
     let bytes = rep_img.pull(&RamImageTarget, rect).unwrap();
     println!("replicate -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
@@ -238,8 +355,19 @@ fn data_driven_kernels_compile_and_run() {
     let ifthenelse = cond.ifthenelse(t.as_input(), f.as_input(), Some(true));
     let case = bg.case(vec![t.as_input(), f.as_input()]);
 
-    for img in [maplut.clone(), recomb.clone(), ifthenelse.clone(), case.clone()] {
-        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+    for img in [
+        maplut.clone(),
+        recomb.clone(),
+        ifthenelse.clone(),
+        case.clone(),
+    ] {
+        let rect = Region {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+            lod: Lod(0),
+        };
         let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
@@ -257,8 +385,19 @@ fn resample_kernels_compile_and_run() {
     let reduce_h = gpu_img.reduce_horizontal(2.0, None, None);
     let reduce_v = gpu_img.reduce_vertical(2.0, None, None);
 
-    for img in [resize.clone(), reduce.clone(), reduce_h.clone(), reduce_v.clone()] {
-        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+    for img in [
+        resize.clone(),
+        reduce.clone(),
+        reduce_h.clone(),
+        reduce_v.clone(),
+    ] {
+        let rect = Region {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+            lod: Lod(0),
+        };
         let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
@@ -272,13 +411,33 @@ fn geometry_extended_kernels_compile_and_run() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     let embed = gpu_img.embed(10, 10, 200, 200, None, None);
-    let gravity = gpu_img.gravity(poc::operation::CompassDirection::Centre, 200, 200, None, None);
+    let gravity = gpu_img.gravity(
+        poc::operation::CompassDirection::Centre,
+        200,
+        200,
+        None,
+        None,
+    );
     let rot45 = gpu_img.rot45(poc::operation::Angle45::D45);
     let rotate = gpu_img.rotate(45.0, None, None, None, None, None);
-    let thumbnail = gpu_img.thumbnail(100, None, None, None, None, None, None, None, None, None, None);
+    let thumbnail = gpu_img.thumbnail(
+        100, None, None, None, None, None, None, None, None, None, None,
+    );
 
-    for img in [embed.clone(), gravity.clone(), rot45.clone(), rotate.clone(), thumbnail.clone()] {
-        let rect = Region { x: 0, y: 0, w: 10, h: 10, lod: Lod(0) };
+    for img in [
+        embed.clone(),
+        gravity.clone(),
+        rot45.clone(),
+        rotate.clone(),
+        thumbnail.clone(),
+    ] {
+        let rect = Region {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+            lod: Lod(0),
+        };
         let bytes: Vec<u8> = img.pull(&RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
@@ -295,7 +454,10 @@ fn histogram_kernel_runs_and_counts_pixels() {
     let bytes = hist.pull(&RawTarget, Atomic).unwrap();
     let bins: &[u32] = bytemuck::cast_slice(&bytes);
     let total: u64 = bins.iter().map(|&b| b as u64).sum();
-    println!("histogram(256,channel=0) -> {} bins, total = {total}", bins.len());
+    println!(
+        "histogram(256,channel=0) -> {} bins, total = {total}",
+        bins.len()
+    );
     assert_eq!(bins.len(), 256);
     assert_eq!(total, (gpu_img.width() as u64) * (gpu_img.height() as u64));
 }
@@ -312,7 +474,10 @@ fn vectorscope_kernel_runs_and_writes_grid() {
     let bytes = vs.pull(&RawTarget, Atomic).unwrap();
     let bins: &[u32] = bytemuck::cast_slice(&bytes);
     let total: u64 = bins.iter().map(|&b| b as u64).sum();
-    println!("vectorscope(grid={grid}) -> {} cells, total = {total}", bins.len());
+    println!(
+        "vectorscope(grid={grid}) -> {} cells, total = {total}",
+        bins.len()
+    );
     assert_eq!(bins.len(), (grid * grid) as usize);
     assert_eq!(total, (gpu_img.width() as u64) * (gpu_img.height() as u64));
 }
@@ -329,7 +494,13 @@ fn edge_detection_kernels_compile_and_run() {
     let scharr = gpu_img.scharr();
 
     for img in [sobel.clone(), prewitt.clone(), scharr.clone()] {
-        let rect = poc::work_unit::Region { x: 0, y: 0, w: 10, h: 10, lod: poc::work_unit::Lod(0) };
+        let rect = poc::work_unit::Region {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+            lod: poc::work_unit::Lod(0),
+        };
         let bytes: Vec<u8> = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
@@ -385,23 +556,41 @@ fn reinterpret_cast_is_transparent_to_compute() {
     let vips_img = common::rgba();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: gpu_img.width(),
+        h: gpu_img.height(),
+        lod: Lod(0),
+    };
 
     // Plain path: invert directly on the image.
-    let plain = gpu_img.invert().pull(&RamImageTarget, rect.clone()).unwrap();
+    let plain = gpu_img
+        .invert()
+        .pull(&RamImageTarget, rect.clone())
+        .unwrap();
 
     // Cast → invert → cast back → cast to image again, same byte rect.
     let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
-        gpu_img.reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 42 });
+        gpu_img.reinterpret_with(TaggedImageKind {
+            image: (*gpu_img.spec).clone(),
+            tag: 42,
+        });
     let roundtrip = tagged
         .reinterpret::<GenImageKind>()
         .invert()
-        .reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 7 })
+        .reinterpret_with(TaggedImageKind {
+            image: (*gpu_img.spec).clone(),
+            tag: 7,
+        })
         .reinterpret::<GenImageKind>()
         .pull(&RamImageTarget, rect)
         .unwrap();
 
-    assert_eq!(plain, roundtrip, "Reinterpret casts must be byte-transparent to compute");
+    assert_eq!(
+        plain, roundtrip,
+        "Reinterpret casts must be byte-transparent to compute"
+    );
 }
 
 #[test]
@@ -412,7 +601,13 @@ fn bare_source_root_pulls() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     // Zero ops: the Source leaf is the DAG root, zero kernel steps.
-    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: gpu_img.width(),
+        h: gpu_img.height(),
+        lod: Lod(0),
+    };
     let bytes = gpu_img.pull(&RamImageTarget, rect).unwrap();
     assert!(!bytes.is_empty());
 }
@@ -425,14 +620,29 @@ fn reinterpret_root_cast_pulls() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
-        gpu_img.reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 1 });
+        gpu_img.reinterpret_with(TaggedImageKind {
+            image: (*gpu_img.spec).clone(),
+            tag: 1,
+        });
 
-    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: gpu_img.width(),
+        h: gpu_img.height(),
+        lod: Lod(0),
+    };
 
     let direct = gpu_img.pull(&RamImageTarget, rect.clone()).unwrap();
     // Root = Reinterpret(Tagged->Image), input = Reinterpret(Image->Tagged), input = Source.
     // Zero kernel steps anywhere in the graph.
-    let via_cast = tagged.reinterpret::<GenImageKind>().pull(&RamImageTarget, rect).unwrap();
+    let via_cast = tagged
+        .reinterpret::<GenImageKind>()
+        .pull(&RamImageTarget, rect)
+        .unwrap();
 
-    assert_eq!(direct, via_cast, "root Reinterpret cast must read through to its input unchanged");
+    assert_eq!(
+        direct, via_cast,
+        "root Reinterpret cast must read through to its input unchanged"
+    );
 }

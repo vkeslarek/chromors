@@ -62,7 +62,13 @@ impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
         config: &ExportConfig,
     ) -> Result<(), crate::error::Error> {
         let (w, h) = (self.width() as i32, self.height() as i32);
-        let wu = crate::work_unit::Region { x: 0, y: 0, w, h, lod: crate::work_unit::Lod(0) };
+        let wu = crate::work_unit::Region {
+            x: 0,
+            y: 0,
+            w,
+            h,
+            lod: crate::work_unit::Lod(0),
+        };
         let mat = self.materialize(wu)?;
         let options = config.to_vips_options();
         let full = format!("{filename}{options}");

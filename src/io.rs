@@ -1,10 +1,10 @@
-use std::hash::Hasher;
-use std::sync::Arc;
-use crate::kind::{AnyKind, Kind};
+use crate::backend::Backend;
 use crate::buffer::Buffer;
 use crate::error::Error;
-use crate::backend::Backend;
+use crate::kind::{AnyKind, Kind};
 use crate::work_unit::{WorkUnit, WorkUnitFor};
+use std::hash::Hasher;
+use std::sync::Arc;
 
 /// Object-safe surface the materializer drives at a Source leaf without knowing
 /// the concrete Kind. A blanket impl bridges every typed `Source<B>`.

@@ -61,7 +61,11 @@ impl GpuView for Mask2DKind {
     /// Raw read, no codec: `MaskRegion` reads `f32` and broadcasts `(v,v,v,1)`
     /// like the existing Gray wrappers — kernels keep their `IRegion` inputs.
     fn input(&self) -> View {
-        View::new("float", "MaskRegion", "{ {buf}, {params}[0].region_in_{slot} }")
+        View::new(
+            "float",
+            "MaskRegion",
+            "{ {buf}, {params}[0].region_in_{slot} }",
+        )
     }
 
     /// Raw `f32` write, no encode step — the kernel writes the target buffer
@@ -105,12 +109,16 @@ impl Source<GpuBackend> for GpuConstantMaskSource {
 
     fn fetch(&self, ctx: &GpuContext, _wu: &Region) -> Result<Buffer<GpuBackend>, Error> {
         use wgpu::util::DeviceExt;
-        let bytes = unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4) };
-        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_constant_mask_source"),
-            contents: bytes,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let bytes = unsafe {
+            std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4)
+        };
+        let wgpu_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_constant_mask_source"),
+                contents: bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
 
         Ok(Buffer {
             payload: GpuBuffer::from_raw(Arc::new(wgpu_buffer), bytes.len() as u64),
@@ -121,13 +129,19 @@ impl Source<GpuBackend> for GpuConstantMaskSource {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let WorkUnit::Region(region) = &wu else {
-            cx.fail(Error::InvalidWorkUnit("mask source expects a Region".into()));
+            cx.fail(Error::InvalidWorkUnit(
+                "mask source expects a Region".into(),
+            ));
             return;
         };
         match self.fetch(cx.ctx().as_ref(), region) {
             Ok(buf) => {
                 let geom = RegionParams::tight(self.spec.width, self.spec.height);
-                cx.input(self.spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.input(
+                    self.spec.input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
                 cx.output(self.spec.output(&wu));
             }
             Err(e) => cx.fail(e),
@@ -145,7 +159,10 @@ impl Mask2D<GpuBackend> {
     /// A mask holding `values` (row-major, `width * height` entries).
     pub fn from_values(ctx: Arc<GpuContext>, width: i32, height: i32, values: &[f32]) -> Self {
         let spec = Arc::new(Mask2DKind::new(width, height));
-        let src = GpuConstantMaskSource { spec: spec.clone(), data: values.to_vec() };
+        let src = GpuConstantMaskSource {
+            spec: spec.clone(),
+            data: values.to_vec(),
+        };
         Data::from_source(Arc::new(src), ctx)
     }
 
@@ -201,11 +218,17 @@ impl Source<VipsBackend> for VipsConstantMaskSource {
             crate::ffi::vips_image_set_double(ptr, scale.as_ptr(), self.scale);
             crate::ffi::vips_image_set_double(ptr, offset.as_ptr(), self.offset);
         }
-        Ok(Buffer { payload: Arc::new(VipsHandle { ptr }), spec: self.spec.clone() })
+        Ok(Buffer {
+            payload: Arc::new(VipsHandle { ptr }),
+            spec: self.spec.clone(),
+        })
     }
 
     fn lower(&self, cx: &mut VipsBuilder) {
-        let region = Region::full((self.spec.width, self.spec.height), crate::work_unit::Lod(0));
+        let region = Region::full(
+            (self.spec.width, self.spec.height),
+            crate::work_unit::Lod(0),
+        );
         let buf = self.fetch(&(), &region).unwrap();
         cx.emit((*buf.payload).clone());
     }
@@ -228,10 +251,21 @@ impl Mask2D<VipsBackend> {
     /// vips mask image (read by `vips_conv`/`conva`/`compass`/`morph` to
     /// normalise the convolution result: `result = sum(src*weight) / scale +
     /// offset`).
-    pub fn from_values_scaled(width: i32, height: i32, values: &[f32], scale: f64, offset: f64) -> Self {
+    pub fn from_values_scaled(
+        width: i32,
+        height: i32,
+        values: &[f32],
+        scale: f64,
+        offset: f64,
+    ) -> Self {
         let spec = Arc::new(Mask2DKind::new(width, height));
         let data: Vec<f64> = values.iter().map(|&v| v as f64).collect();
-        let src = VipsConstantMaskSource { spec: spec.clone(), data, scale, offset };
+        let src = VipsConstantMaskSource {
+            spec: spec.clone(),
+            data,
+            scale,
+            offset,
+        };
         Data::from_source(Arc::new(src), Arc::new(()))
     }
 

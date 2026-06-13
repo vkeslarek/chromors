@@ -145,3 +145,40 @@ public void math2_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right,
     output.write(idx, float4(ra, a.a));
 }
 
+
+
+public void linear_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float a0, float a1, float a2, float a3, float b0, float b1, float b2, float b3)
+{
+    float4 c = input.read(idx);
+    output.write(idx, c * float4(a0, a1, a2, a3) + float4(b0, b1, b2, b3));
+}
+
+public void math2_const_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint math2, float src_max, float c0, float c1, float c2, float c3)
+{
+    float4 a_norm = input.read(idx);
+    float4 a = a_norm * src_max;
+    float3 ra;
+    switch (math2) {
+        case 0u: ra = pow(a.rgb, float3(c0, c1, c2));       break;
+        case 1u: ra = pow(float3(c0, c1, c2), a.rgb);       break;
+        case 2u: ra = atan2(a.rgb, float3(c0, c1, c2));    break;
+        default: ra = a.rgb;                   break;
+    }
+    output.write(idx, float4(ra / src_max, a_norm.a));
+}
+
+public void remainder_const_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float src_max, float c0, float c1, float c2, float c3)
+{
+    float4 a_norm = input.read(idx);
+    float4 a = a_norm * src_max;
+    float4 b = float4(c0, c1, c2, c3);
+    float4 d = max(abs(b), float4(1e-10, 1e-10, 1e-10, 1.0));
+    float4 q = floor(a / d + 1e-4);
+    float4 r = (a - d * q) / src_max;
+    if (b.x == 0.0) r.x = 1.0;
+    if (b.y == 0.0) r.y = 1.0;
+    if (b.z == 0.0) r.z = 1.0;
+    if (b.w == 0.0) r.w = 1.0;
+    r.a = a_norm.a;
+    output.write(idx, r);
+}

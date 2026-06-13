@@ -1,9 +1,9 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::{ParamBlock, ViewAdapter};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -39,7 +39,16 @@ pub struct RemapParams {
 
 impl Default for RemapParams {
     fn default() -> Self {
-        Self { out_w: 0, out_h: 0, sx: 1.0, sy: 1.0, in_w: 0, in_h: 0, tx: 0, ty: 0 }
+        Self {
+            out_w: 0,
+            out_h: 0,
+            sx: 1.0,
+            sy: 1.0,
+            in_w: 0,
+            in_h: 0,
+            tx: 0,
+            ty: 0,
+        }
     }
 }
 
@@ -58,36 +67,122 @@ pub fn remap_adapter(kind: RemapKind, geo: RemapParams) -> ViewAdapter {
 // ── Enums ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Kernel { Nearest, Linear, Cubic, Mitchell, Lanczos2, Lanczos3 }
-impl IntoVipsEnum for Kernel { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Kernel {
+    Nearest,
+    Linear,
+    Cubic,
+    Mitchell,
+    Lanczos2,
+    Lanczos3,
+}
+impl IntoVipsEnum for Kernel {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Direction { Horizontal, Vertical }
-impl IntoVipsEnum for Direction { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Direction {
+    Horizontal,
+    Vertical,
+}
+impl IntoVipsEnum for Direction {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Angle { D0, D90, D180, D270 }
-impl IntoVipsEnum for Angle { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Angle {
+    D0,
+    D90,
+    D180,
+    D270,
+}
+impl IntoVipsEnum for Angle {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Angle45 { D0, D45, D90, D135, D180, D225, D270, D315 }
-impl IntoVipsEnum for Angle45 { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Angle45 {
+    D0,
+    D45,
+    D90,
+    D135,
+    D180,
+    D225,
+    D270,
+    D315,
+}
+impl IntoVipsEnum for Angle45 {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Extend { Black, Copy, Repeat, Mirror, White, Background }
-impl IntoVipsEnum for Extend { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Extend {
+    Black,
+    Copy,
+    Repeat,
+    Mirror,
+    White,
+    Background,
+}
+impl IntoVipsEnum for Extend {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Interesting { None, Centre, Entropy, Attention, Low, High, All }
-impl IntoVipsEnum for Interesting { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Interesting {
+    None,
+    Centre,
+    Entropy,
+    Attention,
+    Low,
+    High,
+    All,
+}
+impl IntoVipsEnum for Interesting {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompassDirection { Centre, North, East, South, West, NorthEast, SouthEast, SouthWest, NorthWest }
-impl IntoVipsEnum for CompassDirection { fn into_vips(self) -> i32 { self as i32 } }
+pub enum CompassDirection {
+    Centre,
+    North,
+    East,
+    South,
+    West,
+    NorthEast,
+    SouthEast,
+    SouthWest,
+    NorthWest,
+}
+impl IntoVipsEnum for CompassDirection {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Size { Both, Up, Down, Force }
-impl IntoVipsEnum for Size { fn into_vips(self) -> i32 { self as i32 } }
+pub enum Size {
+    Both,
+    Up,
+    Down,
+    Force,
+}
+impl IntoVipsEnum for Size {
+    fn into_vips(self) -> i32 {
+        self as i32
+    }
+}
 
 // ── Operations ────────────────────────────────────────────────────────────────
 
@@ -98,9 +193,14 @@ pub struct Crop<B: Backend> {
     pub width: i32,
     pub height: i32,
 }
-impl<B: Backend> Operation<B> for Crop<B> where Crop<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Crop<B>
+where
+    Crop<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region {
             x: out.x + self.left,
@@ -110,7 +210,7 @@ impl<B: Backend> Operation<B> for Crop<B> where Crop<B>: Lower<B> {
             lod: out.lod,
         }))]
     }
-    fn output_spec(&self) -> ImageKind { 
+    fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
         spec.width = self.width;
         spec.height = self.height;
@@ -141,22 +241,28 @@ impl Lower<VipsBackend> for Crop<VipsBackend> {
 
 impl Lower<GpuBackend> for Crop<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(RemapKind::Translate, RemapParams {
-            tx: self.left,
-            ty: self.top,
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            RemapKind::Translate,
+            RemapParams {
+                tx: self.left,
+                ty: self.top,
+                ..Default::default()
+            },
+        ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for ExtractArea<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(RemapKind::Translate, RemapParams {
-            tx: self.left,
-            ty: self.top,
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            RemapKind::Translate,
+            RemapParams {
+                tx: self.left,
+                ty: self.top,
+                ..Default::default()
+            },
+        ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -168,11 +274,14 @@ impl Lower<GpuBackend> for Flip<GpuBackend> {
             Direction::Vertical => RemapKind::FlipV,
         };
         let out_spec = self.output_spec();
-        cx.adapt(remap_adapter(kind, RemapParams {
-            out_w: out_spec.width as u32,
-            out_h: out_spec.height as u32,
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            kind,
+            RemapParams {
+                out_w: out_spec.width as u32,
+                out_h: out_spec.height as u32,
+                ..Default::default()
+            },
+        ));
         cx.output(out_spec.output(cx.wu()));
     }
 }
@@ -181,10 +290,37 @@ impl Lower<GpuBackend> for Rot90<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let out_spec = self.output_spec();
         match self.angle {
-            Angle::D0 => { cx.adapt(remap_adapter(RemapKind::Identity, Default::default())); }
-            Angle::D90 => { cx.adapt(remap_adapter(RemapKind::Rot90, RemapParams { out_w: out_spec.width as u32, ..Default::default() })); }
-            Angle::D180 => { cx.adapt(remap_adapter(RemapKind::Rot180, RemapParams { out_w: out_spec.width as u32, out_h: out_spec.height as u32, ..Default::default() })); }
-            Angle::D270 => { cx.adapt(remap_adapter(RemapKind::Rot270, RemapParams { out_h: out_spec.height as u32, ..Default::default() })); }
+            Angle::D0 => {
+                cx.adapt(remap_adapter(RemapKind::Identity, Default::default()));
+            }
+            Angle::D90 => {
+                cx.adapt(remap_adapter(
+                    RemapKind::Rot90,
+                    RemapParams {
+                        out_w: out_spec.width as u32,
+                        ..Default::default()
+                    },
+                ));
+            }
+            Angle::D180 => {
+                cx.adapt(remap_adapter(
+                    RemapKind::Rot180,
+                    RemapParams {
+                        out_w: out_spec.width as u32,
+                        out_h: out_spec.height as u32,
+                        ..Default::default()
+                    },
+                ));
+            }
+            Angle::D270 => {
+                cx.adapt(remap_adapter(
+                    RemapKind::Rot270,
+                    RemapParams {
+                        out_h: out_spec.height as u32,
+                        ..Default::default()
+                    },
+                ));
+            }
         }
         cx.output(out_spec.output(cx.wu()));
     }
@@ -192,22 +328,28 @@ impl Lower<GpuBackend> for Rot90<GpuBackend> {
 
 impl Lower<GpuBackend> for Subsample<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(RemapKind::Scale, RemapParams {
-            sx: self.horizontal as f32,
-            sy: self.vertical as f32,
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            RemapKind::Scale,
+            RemapParams {
+                sx: self.horizontal as f32,
+                sy: self.vertical as f32,
+                ..Default::default()
+            },
+        ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Zoom<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(RemapKind::Scale, RemapParams {
-            sx: 1.0 / (self.horizontal as f32),
-            sy: 1.0 / (self.vertical as f32),
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            RemapKind::Scale,
+            RemapParams {
+                sx: 1.0 / (self.horizontal as f32),
+                sy: 1.0 / (self.vertical as f32),
+                ..Default::default()
+            },
+        ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -215,11 +357,14 @@ impl Lower<GpuBackend> for Zoom<GpuBackend> {
 impl Lower<GpuBackend> for Replicate<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
-        cx.adapt(remap_adapter(RemapKind::Tile, RemapParams {
-            in_w: in_spec.width as u32,
-            in_h: in_spec.height as u32,
-            ..Default::default()
-        }));
+        cx.adapt(remap_adapter(
+            RemapKind::Tile,
+            RemapParams {
+                in_w: in_spec.width as u32,
+                in_h: in_spec.height as u32,
+                ..Default::default()
+            },
+        ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -228,9 +373,10 @@ impl Lower<GpuBackend> for Resize<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let hscale = self.scale;
         let vscale = self.vertical_scale.unwrap_or(self.scale);
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_hscale", (1.0 / hscale) as f32)
-            .param("inv_vscale", (1.0 / vscale) as f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_hscale", (1.0 / hscale) as f32)
+                .param("inv_vscale", (1.0 / vscale) as f32),
         );
         cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -239,9 +385,10 @@ impl Lower<GpuBackend> for Resize<GpuBackend> {
 
 impl Lower<GpuBackend> for Reduce<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_hscale", self.horizontal as f32)
-            .param("inv_vscale", self.vertical as f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_hscale", self.horizontal as f32)
+                .param("inv_vscale", self.vertical as f32),
         );
         cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -250,9 +397,10 @@ impl Lower<GpuBackend> for Reduce<GpuBackend> {
 
 impl Lower<GpuBackend> for ReduceHorizontal<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_hscale", self.shrink as f32)
-            .param("inv_vscale", 1.0f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_hscale", self.shrink as f32)
+                .param("inv_vscale", 1.0f32),
         );
         cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -261,9 +409,10 @@ impl Lower<GpuBackend> for ReduceHorizontal<GpuBackend> {
 
 impl Lower<GpuBackend> for ReduceVertical<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_hscale", 1.0f32)
-            .param("inv_vscale", self.shrink as f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_hscale", 1.0f32)
+                .param("inv_vscale", self.shrink as f32),
         );
         cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -279,9 +428,14 @@ pub struct Embed<B: Backend> {
     pub extend: Option<Extend>,
     pub background: Option<[f64; 3]>,
 }
-impl<B: Backend> Operation<B> for Embed<B> where Embed<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Embed<B>
+where
+    Embed<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region {
             x: out.x - self.x,
@@ -302,7 +456,9 @@ impl<B: Backend> Operation<B> for Embed<B> where Embed<B>: Lower<B> {
         state.write_i32(self.y);
         state.write_i32(self.width);
         state.write_i32(self.height);
-        if let Some(e) = self.extend { state.write_i32(e.into_vips()); }
+        if let Some(e) = self.extend {
+            state.write_i32(e.into_vips());
+        }
     }
 }
 impl Lower<VipsBackend> for Embed<VipsBackend> {
@@ -314,8 +470,12 @@ impl Lower<VipsBackend> for Embed<VipsBackend> {
         op.set_int("y", self.y);
         op.set_int("width", self.width);
         op.set_int("height", self.height);
-        if let Some(e) = self.extend { op.set_int("extend", e.into_vips()); }
-        if let Some(bg) = self.background { op.set_array_double("background", &bg); }
+        if let Some(e) = self.extend {
+            op.set_int("extend", e.into_vips());
+        }
+        if let Some(bg) = self.background {
+            op.set_array_double("background", &bg);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -326,15 +486,16 @@ impl Lower<GpuBackend> for Embed<GpuBackend> {
         let in_spec = &*self.input.spec;
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("ox", self.x)
-            .param("oy", self.y)
-            .param("in_w", in_spec.width as u32)
-            .param("in_h", in_spec.height as u32)
-            .param("extend_mode", extend_mode as u32)
-            .param("bg_r", bg[0] as f32)
-            .param("bg_g", bg[1] as f32)
-            .param("bg_b", bg[2] as f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("ox", self.x)
+                .param("oy", self.y)
+                .param("in_w", in_spec.width as u32)
+                .param("in_h", in_spec.height as u32)
+                .param("extend_mode", extend_mode as u32)
+                .param("bg_r", bg[0] as f32)
+                .param("bg_g", bg[1] as f32)
+                .param("bg_b", bg[2] as f32),
         );
         cx.kernel("ops.geometry", "embed_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -345,18 +506,31 @@ pub struct Flip<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub direction: Direction,
 }
-impl<B: Backend> Operation<B> for Flip<B> where Flip<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Flip<B>
+where
+    Flip<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
         let (x, y) = match self.direction {
             Direction::Horizontal => (spec.width - out.x - out.w, out.y),
             Direction::Vertical => (out.x, spec.height - out.y - out.h),
         };
-        vec![Some(WorkUnit::Region(Region { x, y, w: out.w, h: out.h, lod: out.lod }))]
+        vec![Some(WorkUnit::Region(Region {
+            x,
+            y,
+            w: out.w,
+            h: out.h,
+            lod: out.lod,
+        }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.direction.into_vips());
     }
@@ -376,17 +550,40 @@ pub struct Rot90<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub angle: Angle,
 }
-impl<B: Backend> Operation<B> for Rot90<B> where Rot90<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Rot90<B>
+where
+    Rot90<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
         let (w, h) = (spec.width, spec.height);
         let region = match self.angle {
             Angle::D0 => out.clone(),
-            Angle::D90 => Region { x: out.y, y: h - out.x - out.w, w: out.h, h: out.w, lod: out.lod },
-            Angle::D180 => Region { x: w - out.x - out.w, y: h - out.y - out.h, w: out.w, h: out.h, lod: out.lod },
-            Angle::D270 => Region { x: w - out.y - out.h, y: out.x, w: out.h, h: out.w, lod: out.lod },
+            Angle::D90 => Region {
+                x: out.y,
+                y: h - out.x - out.w,
+                w: out.h,
+                h: out.w,
+                lod: out.lod,
+            },
+            Angle::D180 => Region {
+                x: w - out.x - out.w,
+                y: h - out.y - out.h,
+                w: out.w,
+                h: out.h,
+                lod: out.lod,
+            },
+            Angle::D270 => Region {
+                x: w - out.y - out.h,
+                y: out.x,
+                w: out.h,
+                h: out.w,
+                lod: out.lod,
+            },
         };
         vec![Some(WorkUnit::Region(region))]
     }
@@ -416,9 +613,14 @@ pub struct Rot45<B: Backend> {
     pub input: Input<ImageKind, B>,
     pub angle: Angle45,
 }
-impl<B: Backend> Operation<B> for Rot45<B> where Rot45<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Rot45<B>
+where
+    Rot45<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
         let (w, h) = (spec.width, spec.height);
@@ -440,7 +642,8 @@ impl<B: Backend> Operation<B> for Rot45<B> where Rot45<B>: Lower<B> {
             Angle45::D0 | Angle45::D90 | Angle45::D180 | Angle45::D270 => spec,
             _ => {
                 let mut spec = spec;
-                let diag = ((spec.width as f64 + spec.height as f64) / std::f64::consts::SQRT_2).ceil() as i32;
+                let diag = ((spec.width as f64 + spec.height as f64) / std::f64::consts::SQRT_2)
+                    .ceil() as i32;
                 spec.width = diag;
                 spec.height = diag;
                 spec
@@ -484,20 +687,21 @@ impl Lower<GpuBackend> for Rot45<GpuBackend> {
         let c_out_x = out_spec.width as f32 / 2.0;
         let c_out_y = out_spec.height as f32 / 2.0;
 
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_r00", cos_th)
-            .param("inv_r01", sin_th)
-            .param("inv_r10", -sin_th)
-            .param("inv_r11", cos_th)
-            .param("cx", c_in_x)
-            .param("cy", c_in_y)
-            .param("ox", c_out_x)
-            .param("oy", c_out_y)
-            .param("bg_r", 0.0f32)
-            .param("bg_g", 0.0f32)
-            .param("bg_b", 0.0f32)
-            .param("in_w", in_spec.width as u32)
-            .param("in_h", in_spec.height as u32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_r00", cos_th)
+                .param("inv_r01", sin_th)
+                .param("inv_r10", -sin_th)
+                .param("inv_r11", cos_th)
+                .param("cx", c_in_x)
+                .param("cy", c_in_y)
+                .param("ox", c_out_x)
+                .param("oy", c_out_y)
+                .param("bg_r", 0.0f32)
+                .param("bg_g", 0.0f32)
+                .param("bg_b", 0.0f32)
+                .param("in_w", in_spec.width as u32)
+                .param("in_h", in_spec.height as u32),
         );
         cx.kernel("ops.geometry", "rotate_kernel");
         cx.output(out_spec.output(cx.wu()));
@@ -513,14 +717,24 @@ pub struct Rotate<B: Backend> {
     pub offset_output_x: Option<f64>,
     pub offset_output_y: Option<f64>,
 }
-impl<B: Backend> Operation<B> for Rotate<B> where Rotate<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Rotate<B>
+where
+    Rotate<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
-        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+        vec![Some(WorkUnit::Region(Region::full(
+            (spec.width, spec.height),
+            out.lod,
+        )))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.angle.to_bits());
         state.write_u64(self.offset_input_x.unwrap_or(0.0).to_bits());
@@ -535,11 +749,21 @@ impl Lower<VipsBackend> for Rotate<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"rotate\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_double("angle", self.angle);
-        if let Some(bg) = self.background { op.set_array_double("background", &bg); }
-        if let Some(v) = self.offset_input_x { op.set_double("idx", v); }
-        if let Some(v) = self.offset_input_y { op.set_double("idy", v); }
-        if let Some(v) = self.offset_output_x { op.set_double("odx", v); }
-        if let Some(v) = self.offset_output_y { op.set_double("ody", v); }
+        if let Some(bg) = self.background {
+            op.set_array_double("background", &bg);
+        }
+        if let Some(v) = self.offset_input_x {
+            op.set_double("idx", v);
+        }
+        if let Some(v) = self.offset_input_y {
+            op.set_double("idy", v);
+        }
+        if let Some(v) = self.offset_output_x {
+            op.set_double("odx", v);
+        }
+        if let Some(v) = self.offset_output_y {
+            op.set_double("ody", v);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -558,20 +782,21 @@ impl Lower<GpuBackend> for Rotate<GpuBackend> {
         let c_out_y = self.offset_output_y.unwrap_or(out_spec.height as f64 / 2.0) as f32;
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
 
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_r00", cos_th)
-            .param("inv_r01", sin_th)
-            .param("inv_r10", -sin_th)
-            .param("inv_r11", cos_th)
-            .param("cx", c_in_x)
-            .param("cy", c_in_y)
-            .param("ox", c_out_x)
-            .param("oy", c_out_y)
-            .param("bg_r", bg[0] as f32)
-            .param("bg_g", bg[1] as f32)
-            .param("bg_b", bg[2] as f32)
-            .param("in_w", in_spec.width as u32)
-            .param("in_h", in_spec.height as u32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_r00", cos_th)
+                .param("inv_r01", sin_th)
+                .param("inv_r10", -sin_th)
+                .param("inv_r11", cos_th)
+                .param("cx", c_in_x)
+                .param("cy", c_in_y)
+                .param("ox", c_out_x)
+                .param("oy", c_out_y)
+                .param("bg_r", bg[0] as f32)
+                .param("bg_g", bg[1] as f32)
+                .param("bg_b", bg[2] as f32)
+                .param("in_w", in_spec.width as u32)
+                .param("in_h", in_spec.height as u32),
         );
         cx.kernel("ops.geometry", "rotate_kernel");
         cx.output(out_spec.output(cx.wu()));
@@ -584,12 +809,20 @@ pub struct Smartcrop<B: Backend> {
     pub height: i32,
     pub interesting: Option<Interesting>,
 }
-impl<B: Backend> Operation<B> for Smartcrop<B> where Smartcrop<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Smartcrop<B>
+where
+    Smartcrop<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
-        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+        vec![Some(WorkUnit::Region(Region::full(
+            (spec.width, spec.height),
+            out.lod,
+        )))]
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
@@ -600,7 +833,9 @@ impl<B: Backend> Operation<B> for Smartcrop<B> where Smartcrop<B>: Lower<B> {
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.width);
         state.write_i32(self.height);
-        if let Some(i) = self.interesting { state.write_i32(i.into_vips()); }
+        if let Some(i) = self.interesting {
+            state.write_i32(i.into_vips());
+        }
     }
 }
 impl Lower<VipsBackend> for Smartcrop<VipsBackend> {
@@ -610,7 +845,9 @@ impl Lower<VipsBackend> for Smartcrop<VipsBackend> {
         op.set_image("input", input_handle.ptr);
         op.set_int("width", self.width);
         op.set_int("height", self.height);
-        if let Some(i) = self.interesting { op.set_int("interesting", i.into_vips()); }
+        if let Some(i) = self.interesting {
+            op.set_int("interesting", i.into_vips());
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -624,9 +861,14 @@ pub struct Gravity<B: Backend> {
     pub extend: Option<Extend>,
     pub background: Option<[f64; 3]>,
 }
-impl<B: Backend> Operation<B> for Gravity<B> where Gravity<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Gravity<B>
+where
+    Gravity<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
         let (old_w, old_h) = (spec.width, spec.height);
@@ -660,7 +902,9 @@ impl<B: Backend> Operation<B> for Gravity<B> where Gravity<B>: Lower<B> {
         state.write_i32(self.direction.into_vips());
         state.write_i32(self.width);
         state.write_i32(self.height);
-        if let Some(e) = self.extend { state.write_i32(e.into_vips()); }
+        if let Some(e) = self.extend {
+            state.write_i32(e.into_vips());
+        }
     }
 }
 impl Lower<VipsBackend> for Gravity<VipsBackend> {
@@ -671,8 +915,12 @@ impl Lower<VipsBackend> for Gravity<VipsBackend> {
         op.set_int("direction", self.direction.into_vips());
         op.set_int("width", self.width);
         op.set_int("height", self.height);
-        if let Some(e) = self.extend { op.set_int("extend", e.into_vips()); }
-        if let Some(bg) = self.background { op.set_array_double("background", &bg); }
+        if let Some(e) = self.extend {
+            op.set_int("extend", e.into_vips());
+        }
+        if let Some(bg) = self.background {
+            op.set_array_double("background", &bg);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -698,15 +946,16 @@ impl Lower<GpuBackend> for Gravity<GpuBackend> {
         };
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("ox", ox)
-            .param("oy", oy)
-            .param("in_w", in_spec.width as u32)
-            .param("in_h", in_spec.height as u32)
-            .param("extend_mode", extend_mode as u32)
-            .param("bg_r", bg[0] as f32)
-            .param("bg_g", bg[1] as f32)
-            .param("bg_b", bg[2] as f32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("ox", ox)
+                .param("oy", oy)
+                .param("in_w", in_spec.width as u32)
+                .param("in_h", in_spec.height as u32)
+                .param("extend_mode", extend_mode as u32)
+                .param("bg_r", bg[0] as f32)
+                .param("bg_g", bg[1] as f32)
+                .param("bg_b", bg[2] as f32),
         );
         cx.kernel("ops.geometry", "embed_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -720,17 +969,24 @@ pub struct Resize<B: Backend> {
     pub vertical_scale: Option<f64>,
     pub gap: Option<f64>,
 }
-impl<B: Backend> Operation<B> for Resize<B> where Resize<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Resize<B>
+where
+    Resize<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let hscale = self.scale;
         let vscale = self.vertical_scale.unwrap_or(self.scale);
         vec![Some(WorkUnit::Region(Region {
             x: (out.x as f64 / hscale).floor() as i32,
             y: (out.y as f64 / vscale).floor() as i32,
-            w: ((out.x + out.w) as f64 / hscale).ceil() as i32 - (out.x as f64 / hscale).floor() as i32,
-            h: ((out.y + out.h) as f64 / vscale).ceil() as i32 - (out.y as f64 / vscale).floor() as i32,
+            w: ((out.x + out.w) as f64 / hscale).ceil() as i32
+                - (out.x as f64 / hscale).floor() as i32,
+            h: ((out.y + out.h) as f64 / vscale).ceil() as i32
+                - (out.y as f64 / vscale).floor() as i32,
             lod: out.lod,
         }))]
     }
@@ -746,7 +1002,9 @@ impl<B: Backend> Operation<B> for Resize<B> where Resize<B>: Lower<B> {
         state.write_u64(self.scale.to_bits());
         state.write_u64(self.vertical_scale.unwrap_or(0.0).to_bits());
         state.write_u64(self.gap.unwrap_or(0.0).to_bits());
-        if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
+        if let Some(k) = self.kernel {
+            state.write_i32(k.into_vips());
+        }
     }
 }
 impl Lower<VipsBackend> for Resize<VipsBackend> {
@@ -755,9 +1013,15 @@ impl Lower<VipsBackend> for Resize<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"resize\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_double("scale", self.scale);
-        if let Some(k) = self.kernel { op.set_int("kernel", k.into_vips()); }
-        if let Some(v) = self.vertical_scale { op.set_double("vscale", v); }
-        if let Some(g) = self.gap { op.set_double("gap", g); }
+        if let Some(k) = self.kernel {
+            op.set_int("kernel", k.into_vips());
+        }
+        if let Some(v) = self.vertical_scale {
+            op.set_double("vscale", v);
+        }
+        if let Some(g) = self.gap {
+            op.set_double("gap", g);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -777,12 +1041,20 @@ pub struct Thumbnail<B: Backend> {
     pub intent: Option<i32>,
     pub fail_on: Option<i32>,
 }
-impl<B: Backend> Operation<B> for Thumbnail<B> where Thumbnail<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Thumbnail<B>
+where
+    Thumbnail<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
-        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+        vec![Some(WorkUnit::Region(Region::full(
+            (spec.width, spec.height),
+            out.lod,
+        )))]
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
@@ -807,7 +1079,9 @@ impl<B: Backend> Operation<B> for Thumbnail<B> where Thumbnail<B>: Lower<B> {
         state.write_i32(self.width);
         state.write_i32(self.height.unwrap_or(0));
         state.write_i32(self.size.unwrap_or(0));
-        if let Some(c) = self.crop { state.write_i32(c.into_vips()); }
+        if let Some(c) = self.crop {
+            state.write_i32(c.into_vips());
+        }
         state.write_i32(self.intent.unwrap_or(0));
     }
 }
@@ -817,16 +1091,36 @@ impl Lower<VipsBackend> for Thumbnail<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"thumbnail_image\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_int("width", self.width);
-        if let Some(h) = self.height { op.set_int("height", h); }
-        if let Some(s) = self.size { op.set_int("size", s); }
-        if let Some(c) = self.crop { op.set_int("crop", c.into_vips()); }
-        if let Some(v) = self.linear { op.set_bool("linear", v); }
-        if let Some(v) = self.auto_rotate { op.set_bool("auto_rotate", v); }
-        if let Some(v) = self.no_rotate { op.set_bool("no_rotate", v); }
-        if let Some(ref v) = self.import_profile { op.set_string("import_profile", v); }
-        if let Some(ref v) = self.export_profile { op.set_string("export_profile", v); }
-        if let Some(v) = self.intent { op.set_int("intent", v); }
-        if let Some(v) = self.fail_on { op.set_int("fail_on", v); }
+        if let Some(h) = self.height {
+            op.set_int("height", h);
+        }
+        if let Some(s) = self.size {
+            op.set_int("size", s);
+        }
+        if let Some(c) = self.crop {
+            op.set_int("crop", c.into_vips());
+        }
+        if let Some(v) = self.linear {
+            op.set_bool("linear", v);
+        }
+        if let Some(v) = self.auto_rotate {
+            op.set_bool("auto_rotate", v);
+        }
+        if let Some(v) = self.no_rotate {
+            op.set_bool("no_rotate", v);
+        }
+        if let Some(ref v) = self.import_profile {
+            op.set_string("import_profile", v);
+        }
+        if let Some(ref v) = self.export_profile {
+            op.set_string("export_profile", v);
+        }
+        if let Some(v) = self.intent {
+            op.set_int("intent", v);
+        }
+        if let Some(v) = self.fail_on {
+            op.set_int("fail_on", v);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -838,9 +1132,10 @@ impl Lower<GpuBackend> for Thumbnail<GpuBackend> {
         let out_spec = self.output_spec();
         let inv_hscale = in_spec.width as f32 / out_spec.width as f32;
         let inv_vscale = in_spec.height as f32 / out_spec.height as f32;
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("inv_hscale", inv_hscale)
-            .param("inv_vscale", inv_vscale)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("inv_hscale", inv_hscale)
+                .param("inv_vscale", inv_vscale),
         );
         cx.kernel("ops.geometry", "resize_kernel");
         cx.output(out_spec.output(cx.wu()));
@@ -853,9 +1148,14 @@ pub struct Shrink<B: Backend> {
     pub vertical: f64,
     pub ceil: Option<bool>,
 }
-impl<B: Backend> Operation<B> for Shrink<B> where Shrink<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Shrink<B>
+where
+    Shrink<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let hf = self.horizontal.ceil() as i32;
         let vf = self.vertical.ceil() as i32;
@@ -867,7 +1167,9 @@ impl<B: Backend> Operation<B> for Shrink<B> where Shrink<B>: Lower<B> {
             lod: out.lod,
         }))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.horizontal.to_bits());
         state.write_u64(self.vertical.to_bits());
@@ -880,7 +1182,9 @@ impl Lower<VipsBackend> for Shrink<VipsBackend> {
         op.set_image("in", input_handle.ptr);
         op.set_double("hshrink", self.horizontal);
         op.set_double("vshrink", self.vertical);
-        if let Some(c) = self.ceil { op.set_bool("ceil", c); }
+        if let Some(c) = self.ceil {
+            op.set_bool("ceil", c);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -888,9 +1192,10 @@ impl Lower<VipsBackend> for Shrink<VipsBackend> {
 
 impl Lower<GpuBackend> for Shrink<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("h_factor", self.horizontal.ceil() as u32)
-            .param("v_factor", self.vertical.ceil() as u32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("h_factor", self.horizontal.ceil() as u32)
+                .param("v_factor", self.vertical.ceil() as u32),
         );
         cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -904,9 +1209,14 @@ pub struct Reduce<B: Backend> {
     pub kernel: Option<Kernel>,
     pub gap: Option<f64>,
 }
-impl<B: Backend> Operation<B> for Reduce<B> where Reduce<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Reduce<B>
+where
+    Reduce<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let hf = self.horizontal;
         let vf = self.vertical;
@@ -927,7 +1237,9 @@ impl<B: Backend> Operation<B> for Reduce<B> where Reduce<B>: Lower<B> {
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.horizontal.to_bits());
         state.write_u64(self.vertical.to_bits());
-        if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
+        if let Some(k) = self.kernel {
+            state.write_i32(k.into_vips());
+        }
         state.write_u64(self.gap.unwrap_or(0.0).to_bits());
     }
 }
@@ -938,8 +1250,12 @@ impl Lower<VipsBackend> for Reduce<VipsBackend> {
         op.set_image("in", input_handle.ptr);
         op.set_double("hshrink", self.horizontal);
         op.set_double("vshrink", self.vertical);
-        if let Some(k) = self.kernel { op.set_int("kernel", k.into_vips()); }
-        if let Some(g) = self.gap { op.set_double("gap", g); }
+        if let Some(k) = self.kernel {
+            op.set_int("kernel", k.into_vips());
+        }
+        if let Some(g) = self.gap {
+            op.set_double("gap", g);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -951,9 +1267,14 @@ pub struct ReduceHorizontal<B: Backend> {
     pub kernel: Option<Kernel>,
     pub gap: Option<f64>,
 }
-impl<B: Backend> Operation<B> for ReduceHorizontal<B> where ReduceHorizontal<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ReduceHorizontal<B>
+where
+    ReduceHorizontal<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let hf = self.shrink;
         vec![Some(WorkUnit::Region(Region {
@@ -971,7 +1292,9 @@ impl<B: Backend> Operation<B> for ReduceHorizontal<B> where ReduceHorizontal<B>:
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.shrink.to_bits());
-        if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
+        if let Some(k) = self.kernel {
+            state.write_i32(k.into_vips());
+        }
         state.write_u64(self.gap.unwrap_or(0.0).to_bits());
     }
 }
@@ -981,8 +1304,12 @@ impl Lower<VipsBackend> for ReduceHorizontal<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"reduceh\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_double("hshrink", self.shrink);
-        if let Some(k) = self.kernel { op.set_int("kernel", k.into_vips()); }
-        if let Some(g) = self.gap { op.set_double("gap", g); }
+        if let Some(k) = self.kernel {
+            op.set_int("kernel", k.into_vips());
+        }
+        if let Some(g) = self.gap {
+            op.set_double("gap", g);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -994,9 +1321,14 @@ pub struct ReduceVertical<B: Backend> {
     pub kernel: Option<Kernel>,
     pub gap: Option<f64>,
 }
-impl<B: Backend> Operation<B> for ReduceVertical<B> where ReduceVertical<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ReduceVertical<B>
+where
+    ReduceVertical<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let vf = self.shrink;
         vec![Some(WorkUnit::Region(Region {
@@ -1014,7 +1346,9 @@ impl<B: Backend> Operation<B> for ReduceVertical<B> where ReduceVertical<B>: Low
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.shrink.to_bits());
-        if let Some(k) = self.kernel { state.write_i32(k.into_vips()); }
+        if let Some(k) = self.kernel {
+            state.write_i32(k.into_vips());
+        }
         state.write_u64(self.gap.unwrap_or(0.0).to_bits());
     }
 }
@@ -1024,8 +1358,12 @@ impl Lower<VipsBackend> for ReduceVertical<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"reducev\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_double("vshrink", self.shrink);
-        if let Some(k) = self.kernel { op.set_int("kernel", k.into_vips()); }
-        if let Some(g) = self.gap { op.set_double("gap", g); }
+        if let Some(k) = self.kernel {
+            op.set_int("kernel", k.into_vips());
+        }
+        if let Some(g) = self.gap {
+            op.set_double("gap", g);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -1036,9 +1374,14 @@ pub struct ShrinkHorizontal<B: Backend> {
     pub shrink: i32,
     pub ceil: Option<bool>,
 }
-impl<B: Backend> Operation<B> for ShrinkHorizontal<B> where ShrinkHorizontal<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ShrinkHorizontal<B>
+where
+    ShrinkHorizontal<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let hf = self.shrink;
         vec![Some(WorkUnit::Region(Region {
@@ -1054,7 +1397,9 @@ impl<B: Backend> Operation<B> for ShrinkHorizontal<B> where ShrinkHorizontal<B>:
         spec.width = (spec.width + self.shrink - 1) / self.shrink;
         spec
     }
-    fn dyn_hash(&self, state: &mut dyn Hasher) { state.write_i32(self.shrink); }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.shrink);
+    }
 }
 impl Lower<VipsBackend> for ShrinkHorizontal<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
@@ -1062,7 +1407,9 @@ impl Lower<VipsBackend> for ShrinkHorizontal<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"shrinkh\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_int("hshrink", self.shrink);
-        if let Some(c) = self.ceil { op.set_bool("ceil", c); }
+        if let Some(c) = self.ceil {
+            op.set_bool("ceil", c);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -1070,9 +1417,10 @@ impl Lower<VipsBackend> for ShrinkHorizontal<VipsBackend> {
 
 impl Lower<GpuBackend> for ShrinkHorizontal<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("h_factor", self.shrink as u32)
-            .param("v_factor", 1u32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("h_factor", self.shrink as u32)
+                .param("v_factor", 1u32),
         );
         cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -1084,9 +1432,14 @@ pub struct ShrinkVertical<B: Backend> {
     pub shrink: i32,
     pub ceil: Option<bool>,
 }
-impl<B: Backend> Operation<B> for ShrinkVertical<B> where ShrinkVertical<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ShrinkVertical<B>
+where
+    ShrinkVertical<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let vf = self.shrink;
         vec![Some(WorkUnit::Region(Region {
@@ -1102,7 +1455,9 @@ impl<B: Backend> Operation<B> for ShrinkVertical<B> where ShrinkVertical<B>: Low
         spec.height = (spec.height + self.shrink - 1) / self.shrink;
         spec
     }
-    fn dyn_hash(&self, state: &mut dyn Hasher) { state.write_i32(self.shrink); }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_i32(self.shrink);
+    }
 }
 impl Lower<VipsBackend> for ShrinkVertical<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
@@ -1110,7 +1465,9 @@ impl Lower<VipsBackend> for ShrinkVertical<VipsBackend> {
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"shrinkv\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_int("vshrink", self.shrink);
-        if let Some(c) = self.ceil { op.set_bool("ceil", c); }
+        if let Some(c) = self.ceil {
+            op.set_bool("ceil", c);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -1118,9 +1475,10 @@ impl Lower<VipsBackend> for ShrinkVertical<VipsBackend> {
 
 impl Lower<GpuBackend> for ShrinkVertical<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(crate::backend::gpu::view::ParamBlock::new()
-            .param("h_factor", 1u32)
-            .param("v_factor", self.shrink as u32)
+        cx.param_block(
+            crate::backend::gpu::view::ParamBlock::new()
+                .param("h_factor", 1u32)
+                .param("v_factor", self.shrink as u32),
         );
         cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -1134,12 +1492,21 @@ pub struct ExtractArea<B: Backend> {
     pub width: i32,
     pub height: i32,
 }
-impl<B: Backend> Operation<B> for ExtractArea<B> where ExtractArea<B>: Lower<B> {
+impl<B: Backend> Operation<B> for ExtractArea<B>
+where
+    ExtractArea<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region {
-            x: out.x + self.left, y: out.y + self.top, w: out.w, h: out.h, lod: out.lod
+            x: out.x + self.left,
+            y: out.y + self.top,
+            w: out.w,
+            h: out.h,
+            lod: out.lod,
         }))]
     }
     fn output_spec(&self) -> ImageKind {
@@ -1175,9 +1542,14 @@ pub struct Subsample<B: Backend> {
     pub vertical: i32,
     pub point: Option<bool>,
 }
-impl<B: Backend> Operation<B> for Subsample<B> where Subsample<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Subsample<B>
+where
+    Subsample<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region {
             x: out.x * self.horizontal,
@@ -1205,7 +1577,9 @@ impl Lower<VipsBackend> for Subsample<VipsBackend> {
         op.set_image("input", input_handle.ptr);
         op.set_int("xfac", self.horizontal);
         op.set_int("yfac", self.vertical);
-        if let Some(p) = self.point { op.set_bool("point", p); }
+        if let Some(p) = self.point {
+            op.set_bool("point", p);
+        }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
@@ -1216,9 +1590,14 @@ pub struct Zoom<B: Backend> {
     pub horizontal: i32,
     pub vertical: i32,
 }
-impl<B: Backend> Operation<B> for Zoom<B> where Zoom<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Zoom<B>
+where
+    Zoom<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(Region {
             x: out.x / self.horizontal,
@@ -1256,16 +1635,27 @@ pub struct Replicate<B: Backend> {
     pub across: i32,
     pub down: i32,
 }
-impl<B: Backend> Operation<B> for Replicate<B> where Replicate<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Replicate<B>
+where
+    Replicate<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
         let (w, h) = (spec.width, spec.height);
         let x0 = out.x.rem_euclid(w);
         let y0 = out.y.rem_euclid(h);
         if x0 + out.w <= w && y0 + out.h <= h {
-            vec![Some(WorkUnit::Region(Region { x: x0, y: y0, w: out.w, h: out.h, lod: out.lod }))]
+            vec![Some(WorkUnit::Region(Region {
+                x: x0,
+                y: y0,
+                w: out.w,
+                h: out.h,
+                lod: out.lod,
+            }))]
         } else {
             vec![Some(WorkUnit::Region(Region::full((w, h), out.lod)))]
         }
@@ -1299,12 +1689,20 @@ pub struct Grid<B: Backend> {
     pub across: i32,
     pub down: i32,
 }
-impl<B: Backend> Operation<B> for Grid<B> where Grid<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Grid<B>
+where
+    Grid<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         let spec = &*self.input.spec;
-        vec![Some(WorkUnit::Region(Region::full((spec.width, spec.height), out.lod)))]
+        vec![Some(WorkUnit::Region(Region::full(
+            (spec.width, spec.height),
+            out.lod,
+        )))]
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
@@ -1321,10 +1719,11 @@ impl<B: Backend> Operation<B> for Grid<B> where Grid<B>: Lower<B> {
 impl Lower<GpuBackend> for Grid<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
-        cx.param_block(ParamBlock::new()
-            .param("in_w", in_spec.width as u32)
-            .param("tile_height", self.tile_height as u32)
-            .param("across", self.across as u32)
+        cx.param_block(
+            ParamBlock::new()
+                .param("in_w", in_spec.width as u32)
+                .param("tile_height", self.tile_height as u32)
+                .param("across", self.across as u32),
         );
         cx.kernel("ops.geometry", "grid_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -1343,13 +1742,18 @@ impl Lower<VipsBackend> for Grid<VipsBackend> {
     }
 }
 
-
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Crop<B>: crate::operation::Lower<B>,
 {
     pub fn crop(&self, left: i32, top: i32, width: i32, height: i32) -> Self {
-        self.push(Crop { input: self.as_input(), left, top, width, height })
+        self.push(Crop {
+            input: self.as_input(),
+            left,
+            top,
+            width,
+            height,
+        })
     }
 }
 
@@ -1357,8 +1761,24 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Embed<B>: crate::operation::Lower<B>,
 {
-    pub fn embed(&self, x: i32, y: i32, width: i32, height: i32, extend: Option<Extend>, background: Option<[f64; 3]>) -> Self {
-        self.push(Embed { input: self.as_input(), x, y, width, height, extend, background })
+    pub fn embed(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        extend: Option<Extend>,
+        background: Option<[f64; 3]>,
+    ) -> Self {
+        self.push(Embed {
+            input: self.as_input(),
+            x,
+            y,
+            width,
+            height,
+            extend,
+            background,
+        })
     }
 }
 
@@ -1367,7 +1787,10 @@ where
     Flip<B>: crate::operation::Lower<B>,
 {
     pub fn flip(&self, direction: Direction) -> Self {
-        self.push(Flip { input: self.as_input(), direction })
+        self.push(Flip {
+            input: self.as_input(),
+            direction,
+        })
     }
 }
 
@@ -1376,7 +1799,10 @@ where
     Rot90<B>: crate::operation::Lower<B>,
 {
     pub fn rot90(&self, angle: Angle) -> Self {
-        self.push(Rot90 { input: self.as_input(), angle })
+        self.push(Rot90 {
+            input: self.as_input(),
+            angle,
+        })
     }
 }
 
@@ -1385,7 +1811,10 @@ where
     Rot45<B>: crate::operation::Lower<B>,
 {
     pub fn rot45(&self, angle: Angle45) -> Self {
-        self.push(Rot45 { input: self.as_input(), angle })
+        self.push(Rot45 {
+            input: self.as_input(),
+            angle,
+        })
     }
 }
 
@@ -1393,8 +1822,24 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Rotate<B>: crate::operation::Lower<B>,
 {
-    pub fn rotate(&self, angle: f64, background: Option<[f64; 3]>, offset_input_x: Option<f64>, offset_input_y: Option<f64>, offset_output_x: Option<f64>, offset_output_y: Option<f64>) -> Self {
-        self.push(Rotate { input: self.as_input(), angle, background, offset_input_x, offset_input_y, offset_output_x, offset_output_y })
+    pub fn rotate(
+        &self,
+        angle: f64,
+        background: Option<[f64; 3]>,
+        offset_input_x: Option<f64>,
+        offset_input_y: Option<f64>,
+        offset_output_x: Option<f64>,
+        offset_output_y: Option<f64>,
+    ) -> Self {
+        self.push(Rotate {
+            input: self.as_input(),
+            angle,
+            background,
+            offset_input_x,
+            offset_input_y,
+            offset_output_x,
+            offset_output_y,
+        })
     }
 }
 
@@ -1403,7 +1848,12 @@ where
     Smartcrop<B>: crate::operation::Lower<B>,
 {
     pub fn smartcrop(&self, width: i32, height: i32, interesting: Option<Interesting>) -> Self {
-        self.push(Smartcrop { input: self.as_input(), width, height, interesting })
+        self.push(Smartcrop {
+            input: self.as_input(),
+            width,
+            height,
+            interesting,
+        })
     }
 }
 
@@ -1411,8 +1861,22 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Gravity<B>: crate::operation::Lower<B>,
 {
-    pub fn gravity(&self, direction: CompassDirection, width: i32, height: i32, extend: Option<Extend>, background: Option<[f64; 3]>) -> Self {
-        self.push(Gravity { input: self.as_input(), direction, width, height, extend, background })
+    pub fn gravity(
+        &self,
+        direction: CompassDirection,
+        width: i32,
+        height: i32,
+        extend: Option<Extend>,
+        background: Option<[f64; 3]>,
+    ) -> Self {
+        self.push(Gravity {
+            input: self.as_input(),
+            direction,
+            width,
+            height,
+            extend,
+            background,
+        })
     }
 }
 
@@ -1420,8 +1884,20 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Resize<B>: crate::operation::Lower<B>,
 {
-    pub fn resize(&self, scale: f64, kernel: Option<Kernel>, vertical_scale: Option<f64>, gap: Option<f64>) -> Self {
-        self.push(Resize { input: self.as_input(), scale, kernel, vertical_scale, gap })
+    pub fn resize(
+        &self,
+        scale: f64,
+        kernel: Option<Kernel>,
+        vertical_scale: Option<f64>,
+        gap: Option<f64>,
+    ) -> Self {
+        self.push(Resize {
+            input: self.as_input(),
+            scale,
+            kernel,
+            vertical_scale,
+            gap,
+        })
     }
 }
 
@@ -1429,8 +1905,34 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Thumbnail<B>: crate::operation::Lower<B>,
 {
-    pub fn thumbnail(&self, width: i32, height: Option<i32>, size: Option<i32>, crop: Option<Interesting>, linear: Option<bool>, auto_rotate: Option<bool>, no_rotate: Option<bool>, import_profile: Option<String>, export_profile: Option<String>, intent: Option<i32>, fail_on: Option<i32>) -> Self {
-        self.push(Thumbnail { input: self.as_input(), width, height, size, crop, linear, auto_rotate, no_rotate, import_profile, export_profile, intent, fail_on })
+    pub fn thumbnail(
+        &self,
+        width: i32,
+        height: Option<i32>,
+        size: Option<i32>,
+        crop: Option<Interesting>,
+        linear: Option<bool>,
+        auto_rotate: Option<bool>,
+        no_rotate: Option<bool>,
+        import_profile: Option<String>,
+        export_profile: Option<String>,
+        intent: Option<i32>,
+        fail_on: Option<i32>,
+    ) -> Self {
+        self.push(Thumbnail {
+            input: self.as_input(),
+            width,
+            height,
+            size,
+            crop,
+            linear,
+            auto_rotate,
+            no_rotate,
+            import_profile,
+            export_profile,
+            intent,
+            fail_on,
+        })
     }
 }
 
@@ -1439,7 +1941,12 @@ where
     Shrink<B>: crate::operation::Lower<B>,
 {
     pub fn shrink(&self, horizontal: f64, vertical: f64, ceil: Option<bool>) -> Self {
-        self.push(Shrink { input: self.as_input(), horizontal, vertical, ceil })
+        self.push(Shrink {
+            input: self.as_input(),
+            horizontal,
+            vertical,
+            ceil,
+        })
     }
 }
 
@@ -1447,8 +1954,20 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Reduce<B>: crate::operation::Lower<B>,
 {
-    pub fn reduce(&self, horizontal: f64, vertical: f64, kernel: Option<Kernel>, gap: Option<f64>) -> Self {
-        self.push(Reduce { input: self.as_input(), horizontal, vertical, kernel, gap })
+    pub fn reduce(
+        &self,
+        horizontal: f64,
+        vertical: f64,
+        kernel: Option<Kernel>,
+        gap: Option<f64>,
+    ) -> Self {
+        self.push(Reduce {
+            input: self.as_input(),
+            horizontal,
+            vertical,
+            kernel,
+            gap,
+        })
     }
 }
 
@@ -1457,7 +1976,12 @@ where
     ReduceHorizontal<B>: crate::operation::Lower<B>,
 {
     pub fn reduce_horizontal(&self, shrink: f64, kernel: Option<Kernel>, gap: Option<f64>) -> Self {
-        self.push(ReduceHorizontal { input: self.as_input(), shrink, kernel, gap })
+        self.push(ReduceHorizontal {
+            input: self.as_input(),
+            shrink,
+            kernel,
+            gap,
+        })
     }
 }
 
@@ -1466,7 +1990,12 @@ where
     ReduceVertical<B>: crate::operation::Lower<B>,
 {
     pub fn reduce_vertical(&self, shrink: f64, kernel: Option<Kernel>, gap: Option<f64>) -> Self {
-        self.push(ReduceVertical { input: self.as_input(), shrink, kernel, gap })
+        self.push(ReduceVertical {
+            input: self.as_input(),
+            shrink,
+            kernel,
+            gap,
+        })
     }
 }
 
@@ -1475,7 +2004,11 @@ where
     ShrinkHorizontal<B>: crate::operation::Lower<B>,
 {
     pub fn shrink_horizontal(&self, shrink: i32, ceil: Option<bool>) -> Self {
-        self.push(ShrinkHorizontal { input: self.as_input(), shrink, ceil })
+        self.push(ShrinkHorizontal {
+            input: self.as_input(),
+            shrink,
+            ceil,
+        })
     }
 }
 
@@ -1484,7 +2017,11 @@ where
     ShrinkVertical<B>: crate::operation::Lower<B>,
 {
     pub fn shrink_vertical(&self, shrink: i32, ceil: Option<bool>) -> Self {
-        self.push(ShrinkVertical { input: self.as_input(), shrink, ceil })
+        self.push(ShrinkVertical {
+            input: self.as_input(),
+            shrink,
+            ceil,
+        })
     }
 }
 
@@ -1493,7 +2030,13 @@ where
     ExtractArea<B>: crate::operation::Lower<B>,
 {
     pub fn extract_area(&self, left: i32, top: i32, width: i32, height: i32) -> Self {
-        self.push(ExtractArea { input: self.as_input(), left, top, width, height })
+        self.push(ExtractArea {
+            input: self.as_input(),
+            left,
+            top,
+            width,
+            height,
+        })
     }
 }
 
@@ -1502,7 +2045,12 @@ where
     Subsample<B>: crate::operation::Lower<B>,
 {
     pub fn subsample(&self, horizontal: i32, vertical: i32, point: Option<bool>) -> Self {
-        self.push(Subsample { input: self.as_input(), horizontal, vertical, point })
+        self.push(Subsample {
+            input: self.as_input(),
+            horizontal,
+            vertical,
+            point,
+        })
     }
 }
 
@@ -1511,7 +2059,11 @@ where
     Zoom<B>: crate::operation::Lower<B>,
 {
     pub fn zoom(&self, horizontal: i32, vertical: i32) -> Self {
-        self.push(Zoom { input: self.as_input(), horizontal, vertical })
+        self.push(Zoom {
+            input: self.as_input(),
+            horizontal,
+            vertical,
+        })
     }
 }
 
@@ -1520,7 +2072,11 @@ where
     Replicate<B>: crate::operation::Lower<B>,
 {
     pub fn replicate(&self, across: i32, down: i32) -> Self {
-        self.push(Replicate { input: self.as_input(), across, down })
+        self.push(Replicate {
+            input: self.as_input(),
+            across,
+            down,
+        })
     }
 }
 
@@ -1529,6 +2085,11 @@ where
     Grid<B>: crate::operation::Lower<B>,
 {
     pub fn grid(&self, tile_height: i32, across: i32, down: i32) -> Self {
-        self.push(Grid { input: self.as_input(), tile_height, across, down })
+        self.push(Grid {
+            input: self.as_input(),
+            tile_height,
+            across,
+            down,
+        })
     }
 }

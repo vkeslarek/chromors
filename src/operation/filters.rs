@@ -1,8 +1,8 @@
 use std::hash::Hasher;
 
+use crate::backend::Backend;
 use crate::backend::gpu::view::ParamBlock;
 use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
-use crate::backend::Backend;
 use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
@@ -81,7 +81,11 @@ impl Lower<VipsBackend> for Sharpen<VipsBackend> {
 impl Lower<GpuBackend> for Sharpen<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
-        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
+        let scale = if let WorkUnit::Region(r) = &wu {
+            r.lod.scale_factor() as f32
+        } else {
+            1.0
+        };
         let sigma = self.sigma.unwrap_or(0.5) as f32 / scale;
         let m1 = self.smooth.unwrap_or(1.0) as f32;
         cx.param_block(ParamBlock::new().param("sigma", sigma).param("m1", m1));
@@ -361,7 +365,11 @@ fn gauss_radius(sigma: f32) -> i32 {
 impl Lower<GpuBackend> for Blur<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
-        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
+        let scale = if let WorkUnit::Region(r) = &wu {
+            r.lod.scale_factor() as f32
+        } else {
+            1.0
+        };
         let sigma = self.sigma / scale;
         // Single-pass 2D kernel (not separable H/V): a separable fused
         // two-step pass would have the V step read NEIGHBOR threads' H
@@ -378,17 +386,35 @@ where
     Blur<B>: Lower<B>,
 {
     pub fn blur(&self, sigma: f32) -> Self {
-        self.push(Blur { input: self.as_input(), sigma })
+        self.push(Blur {
+            input: self.as_input(),
+            sigma,
+        })
     }
 }
-
 
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Sharpen<B>: crate::operation::Lower<B>,
 {
-    pub fn sharpen(&self, sigma: Option<f64>, flat: Option<f64>, jagged: Option<f64>, edge: Option<f64>, smooth: Option<f64>, maximum: Option<f64>) -> Self {
-        self.push(Sharpen { input: self.as_input(), sigma, flat, jagged, edge, smooth, maximum })
+    pub fn sharpen(
+        &self,
+        sigma: Option<f64>,
+        flat: Option<f64>,
+        jagged: Option<f64>,
+        edge: Option<f64>,
+        smooth: Option<f64>,
+        maximum: Option<f64>,
+    ) -> Self {
+        self.push(Sharpen {
+            input: self.as_input(),
+            sigma,
+            flat,
+            jagged,
+            edge,
+            smooth,
+            maximum,
+        })
     }
 }
 
@@ -397,7 +423,11 @@ where
     Canny<B>: crate::operation::Lower<B>,
 {
     pub fn canny(&self, sigma: Option<f64>, precision: Option<i32>) -> Self {
-        self.push(Canny { input: self.as_input(), sigma, precision })
+        self.push(Canny {
+            input: self.as_input(),
+            sigma,
+            precision,
+        })
     }
 }
 
@@ -406,7 +436,10 @@ where
     Median<B>: crate::operation::Lower<B>,
 {
     pub fn median(&self, size: i32) -> Self {
-        self.push(Median { input: self.as_input(), size })
+        self.push(Median {
+            input: self.as_input(),
+            size,
+        })
     }
 }
 
@@ -415,7 +448,11 @@ where
     HoughLine<B>: crate::operation::Lower<B>,
 {
     pub fn hough_line(&self, width: Option<i32>, height: Option<i32>) -> Self {
-        self.push(HoughLine { input: self.as_input(), width, height })
+        self.push(HoughLine {
+            input: self.as_input(),
+            width,
+            height,
+        })
     }
 }
 
@@ -423,7 +460,17 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     HoughCircle<B>: crate::operation::Lower<B>,
 {
-    pub fn hough_circle(&self, scale: Option<i32>, min_radius: Option<i32>, max_radius: Option<i32>) -> Self {
-        self.push(HoughCircle { input: self.as_input(), scale, min_radius, max_radius })
+    pub fn hough_circle(
+        &self,
+        scale: Option<i32>,
+        min_radius: Option<i32>,
+        max_radius: Option<i32>,
+    ) -> Self {
+        self.push(HoughCircle {
+            input: self.as_input(),
+            scale,
+            min_radius,
+            max_radius,
+        })
     }
 }

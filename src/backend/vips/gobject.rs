@@ -1,6 +1,5 @@
-
 use crate::error::Error;
-use crate::ffi as ffi;
+use crate::ffi;
 use std::ffi::{CStr, CString};
 
 thread_local! {

@@ -1,11 +1,11 @@
 #[path = "../common/mod.rs"]
 pub mod common;
-use poc::data::image::Image2D as GenImage;
-use poc::data::mask2d::Mask2D;
 use poc::backend::gpu::GpuBackend;
 use poc::backend::vips::VipsBackend;
-use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend};
+use poc::data::image::Image2D as GenImage;
+use poc::data::mask2d::Mask2D;
 use poc::operation::composite::{BlendMode, Composite2};
+use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend};
 use poc::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
 use poc::pixel::PixelFormat;
 
@@ -22,13 +22,25 @@ fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
     let bands = img.format().channel_count() as usize;
     let target = poc::data::image::RamImageTarget;
     let bytes = img
-        .pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) })
+        .pull(
+            &target,
+            Region {
+                x: 0,
+                y: 0,
+                w: w as i32,
+                h: h as i32,
+                lod: Lod(0),
+            },
+        )
         .unwrap();
     let pixel_count = w as usize * h as usize * bands;
     let floats: &[f32] = bytemuck::cast_slice(&bytes);
-    floats.iter().take(pixel_count).map(|v| (v / 255.0).clamp(0.0, 1.0)).collect()
+    floats
+        .iter()
+        .take(pixel_count)
+        .map(|v| (v / 255.0).clamp(0.0, 1.0))
+        .collect()
 }
-
 
 mod arithmetic;
 mod bands;

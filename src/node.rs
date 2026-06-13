@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use crate::kind::{Kind, AnyKind};
-use crate::operation::{AnyOperation, Operation, Input, AnyInput};
-use crate::io::{AnySource, Source, Target};
 use crate::backend::{Backend, Builder};
 use crate::buffer::Buffer;
 use crate::error::Error;
+use crate::io::{AnySource, Source, Target};
+use crate::kind::{AnyKind, Kind};
+use crate::operation::{AnyInput, AnyOperation, Input, Operation};
+use std::sync::Arc;
 
 /// Pointer-identity key for a DAG node, shared by `GraphWalk` and every
 /// backend builder's node-keyed maps. An immutable `Arc` DAG never moves its
@@ -55,7 +55,10 @@ impl<B: Backend> Node<B> {
         }
     }
 
-    pub fn demand_erased(&self, wu: &crate::work_unit::WorkUnit) -> Vec<Option<crate::work_unit::WorkUnit>> {
+    pub fn demand_erased(
+        &self,
+        wu: &crate::work_unit::WorkUnit,
+    ) -> Vec<Option<crate::work_unit::WorkUnit>> {
         match self {
             Node::Source(_) => vec![],
             Node::Op(op) => op.demand_erased(wu),
@@ -145,7 +148,10 @@ impl<K: Kind, B: Backend> Data<K, B> {
         crate::operation::Reinterpret<K, T, B>: Operation<B, Output = T>,
     {
         let spec = self.spec.reinterpret_spec();
-        self.push(crate::operation::Reinterpret { input: self.as_input(), spec })
+        self.push(crate::operation::Reinterpret {
+            input: self.as_input(),
+            spec,
+        })
     }
 
     /// Zero-cost cast with an explicit target spec — the caller asserts byte
@@ -156,7 +162,10 @@ impl<K: Kind, B: Backend> Data<K, B> {
         T: Kind<WorkUnit = K::WorkUnit>,
         crate::operation::Reinterpret<K, T, B>: Operation<B, Output = T>,
     {
-        self.push(crate::operation::Reinterpret { input: self.as_input(), spec })
+        self.push(crate::operation::Reinterpret {
+            input: self.as_input(),
+            spec,
+        })
     }
 }
 
@@ -164,7 +173,11 @@ impl<K: Kind, B: Backend> Data<K, B> {
     /// Build a fresh pipeline tip from a graph leaf.
     pub fn from_source<S: Source<B, Kind = K>>(source: Arc<S>, ctx: Arc<B::Ctx>) -> Self {
         let spec = source.spec();
-        Self { root: Arc::new(Node::Source(source)), ctx, spec }
+        Self {
+            root: Arc::new(Node::Source(source)),
+            ctx,
+            spec,
+        }
     }
 }
 
@@ -245,7 +258,9 @@ impl<'a, B: Backend> GraphWalk<'a, B> {
         F: FnMut(&Arc<Node<B>>, &crate::work_unit::WorkUnit),
     {
         let k = NodeId::of(node);
-        let Some(wu) = self.demands.get(&k).cloned() else { return }; // pruned
+        let Some(wu) = self.demands.get(&k).cloned() else {
+            return;
+        }; // pruned
         if !self.lowered.insert(k) {
             return; // diamond: lower once
         }

@@ -34,14 +34,20 @@ fn chain_10_ops_materializes() {
     let step10 = step9.invert();
 
     let rect = Region {
-        x: 0, y: 0,
-        w: step10.width(), h: step10.height(),
+        x: 0,
+        y: 0,
+        w: step10.width(),
+        h: step10.height(),
         lod: Lod(0),
     };
 
     let bytes = step10.pull(&RamImageTarget, rect).unwrap();
-    println!("chain_10_ops → {} bytes ({}×{})",
-        bytes.len(), step10.width(), step10.height());
+    println!(
+        "chain_10_ops → {} bytes ({}×{})",
+        bytes.len(),
+        step10.width(),
+        step10.height()
+    );
     assert!(!bytes.is_empty());
 }
 

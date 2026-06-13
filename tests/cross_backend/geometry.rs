@@ -44,8 +44,22 @@ fn embed_matches_vips() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let vips_res = vips_img.embed(20, 20, 240, 240, Some(Extend::Background), Some([0.0, 0.0, 0.0]));
-    let gpu_res = gpu_img.embed(20, 20, 240, 240, Some(Extend::Background), Some([0.0, 0.0, 0.0]));
+    let vips_res = vips_img.embed(
+        20,
+        20,
+        240,
+        240,
+        Some(Extend::Background),
+        Some([0.0, 0.0, 0.0]),
+    );
+    let gpu_res = gpu_img.embed(
+        20,
+        20,
+        240,
+        240,
+        Some(Extend::Background),
+        Some([0.0, 0.0, 0.0]),
+    );
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -337,8 +351,20 @@ fn gravity_matches_vips() {
     let new_w = vips_img.width() + 40;
     let new_h = vips_img.height() + 40;
 
-    let vips_res = vips_img.gravity(CompassDirection::Centre, new_w, new_h, Some(Extend::Background), Some([0.0, 0.0, 0.0]));
-    let gpu_res = gpu_img.gravity(CompassDirection::Centre, new_w, new_h, Some(Extend::Background), Some([0.0, 0.0, 0.0]));
+    let vips_res = vips_img.gravity(
+        CompassDirection::Centre,
+        new_w,
+        new_h,
+        Some(Extend::Background),
+        Some([0.0, 0.0, 0.0]),
+    );
+    let gpu_res = gpu_img.gravity(
+        CompassDirection::Centre,
+        new_w,
+        new_h,
+        Some(Extend::Background),
+        Some([0.0, 0.0, 0.0]),
+    );
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -355,8 +381,12 @@ fn thumbnail_matches_vips() {
     let vips_img = common::gray();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let vips_res = vips_img.thumbnail(100, None, None, None, None, None, None, None, None, None, None);
-    let gpu_res = gpu_img.thumbnail(100, None, None, None, None, None, None, None, None, None, None);
+    let vips_res = vips_img.thumbnail(
+        100, None, None, None, None, None, None, None, None, None, None,
+    );
+    let gpu_res = gpu_img.thumbnail(
+        100, None, None, None, None, None, None, None, None, None, None,
+    );
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);

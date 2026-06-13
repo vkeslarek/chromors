@@ -26,7 +26,7 @@ fn test_agnostic_half_is_pure() {
     }
 
     let files = find_rs_files(src_dir);
-    
+
     // The "Agnostic" files that should NEVER know about backends.
     let agnostic_modules = [
         "src/node.rs",
@@ -37,19 +37,19 @@ fn test_agnostic_half_is_pure() {
     ];
 
     let forbidden_words = [
-        "Vips", 
-        "Gpu", 
-        "Slang", 
+        "Vips",
+        "Gpu",
+        "Slang",
         "slang_",
-        "View", 
-        "ParamBlock", 
+        "View",
+        "ParamBlock",
         "libvips",
-        "wgpu"
+        "wgpu",
     ];
 
     for path in files {
         let path_str = path.to_string_lossy().replace('\\', "/");
-        
+
         // Is this an agnostic file?
         if agnostic_modules.iter().any(|m| path_str.ends_with(m)) {
             let content = fs::read_to_string(&path).unwrap();
@@ -83,18 +83,21 @@ fn test_operations_are_agnostic() {
         return;
     }
 
-    // Operations can have `Lower<GpuBackend>` and `Lower<VipsBackend>` impls, 
+    // Operations can have `Lower<GpuBackend>` and `Lower<VipsBackend>` impls,
     // BUT the structural part (`Operation<B>`) must not hardcode backends.
-    // However, since we put `Lower` impls in the same file as `Operation` for now, 
-    // it's acceptable for them to mention Gpu/Vips. 
+    // However, since we put `Lower` impls in the same file as `Operation` for now,
+    // it's acceptable for them to mention Gpu/Vips.
     // The key invariant is: no loose graph traversals.
-    
+
     let files = find_rs_files(src_dir);
     for path in files {
         let content = fs::read_to_string(&path).unwrap();
         // Operations should not do loose walks.
         if content.contains("demand_walk") || content.contains("lower_walk") {
-            panic!("ARCH VIOLATION in {}: Operations must not implement or call loose graph traversals.", path.display());
+            panic!(
+                "ARCH VIOLATION in {}: Operations must not implement or call loose graph traversals.",
+                path.display()
+            );
         }
     }
 }
@@ -110,7 +113,10 @@ fn test_no_loose_matches_on_node() {
     for path in files {
         let content = fs::read_to_string(&path).unwrap();
         if content.contains("match &**node") || content.contains("Node::Op(") {
-            panic!("ARCH VIOLATION in {}: Backends must not match on Node::Op or Node::Source! Use delegated methods like node.lower()", path.display());
+            panic!(
+                "ARCH VIOLATION in {}: Backends must not match on Node::Op or Node::Source! Use delegated methods like node.lower()",
+                path.display()
+            );
         }
     }
 }
@@ -132,11 +138,17 @@ fn test_backends_are_datatype_agnostic() {
         }
 
         let content = fs::read_to_string(&path).unwrap();
-        
+
         // Ensure no datatype-specific Sources or Targets are placed in the generic backend directory.
         // They must reside in `src/data/<datatype>.rs` because they are specific to a Kind!
-        if content.contains("struct VipsImageSource") || content.contains("struct GpuImageSource") || content.contains("ImageSource") {
-            panic!("ARCH VIOLATION in {}: Datatype-specific Sources (like VipsImageSource) belong in src/data/, NOT in src/backend/!", path.display());
+        if content.contains("struct VipsImageSource")
+            || content.contains("struct GpuImageSource")
+            || content.contains("ImageSource")
+        {
+            panic!(
+                "ARCH VIOLATION in {}: Datatype-specific Sources (like VipsImageSource) belong in src/data/, NOT in src/backend/!",
+                path.display()
+            );
         }
     }
 }

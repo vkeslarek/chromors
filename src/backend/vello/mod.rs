@@ -1,12 +1,12 @@
 pub mod handle;
 
-use std::sync::Arc;
 use crate::backend::{Backend, Builder};
-use crate::error::Error;
 use crate::buffer::Buffer;
-use crate::work_unit::WorkUnit;
+use crate::error::Error;
 use crate::kind::AnyKind;
 use crate::node::{Node, NodeId};
+use crate::work_unit::WorkUnit;
+use std::sync::Arc;
 
 pub use handle::{VelloHandle, VelloScene};
 
@@ -28,7 +28,10 @@ pub struct VelloBuilder {
 
 impl Default for VelloBuilder {
     fn default() -> Self {
-        Self { outputs: std::collections::HashMap::new(), current: None }
+        Self {
+            outputs: std::collections::HashMap::new(),
+            current: None,
+        }
     }
 }
 
@@ -36,7 +39,10 @@ impl VelloBuilder {
     /// Look up an already-lowered upstream input's vello handle.
     /// Post-order lowering guarantees it is present.
     pub fn input(&self, src: &Arc<Node<VelloBackend>>) -> Arc<VelloHandle> {
-        self.outputs.get(&NodeId::of(src)).expect("input lowered before its consumer").clone()
+        self.outputs
+            .get(&NodeId::of(src))
+            .expect("input lowered before its consumer")
+            .clone()
     }
 
     /// Register the vello handle this node produced.
@@ -65,7 +71,12 @@ impl Builder<VelloBackend> for VelloBuilder {
         self.current = Some(node);
     }
 
-    fn finish(mut self, root: NodeId, spec: Arc<dyn AnyKind>, _root_wu: &WorkUnit) -> Result<Buffer<VelloBackend>, Error> {
+    fn finish(
+        mut self,
+        root: NodeId,
+        spec: Arc<dyn AnyKind>,
+        _root_wu: &WorkUnit,
+    ) -> Result<Buffer<VelloBackend>, Error> {
         let handle = self
             .take(root)
             .ok_or_else(|| Error::Backend("root node produced no handle".into()))?;

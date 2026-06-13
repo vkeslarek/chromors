@@ -215,9 +215,23 @@ use super::*;
 /// `ScaleBandGpuOp { band: 0, factor: 0.5 }` halves the red channel.
 /// No per-band-scale primitive exists in poc (only extract_band/bandjoin/linear-as-impl-detail).
 #[test]
-#[ignore = "ScaleBandGpuOp (per-band scale) not ported to poc yet (was ScaleBandGpuOp in old chromors API)"]
 fn scale_red_band_matches_vips() {
-    unimplemented!("per-band scale not ported to poc — add Operation<B>+Lower<B> for both backends first")
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // linear with per-band multipliers: scale red by 0.5, green by 1.0, blue by 1.0
+    let vips_res = vips_img.linear(vec![0.5, 1.0, 1.0], vec![0.0]);
+    let gpu_res = gpu_img.linear(vec![0.5, 1.0, 1.0], vec![0.0]);
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    assert_eq!(vips_bytes.len(), gpu_bytes.len());
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("scale_red_band (linear) RMS = {}", rms);
+    assert!(rms < 5.0, "scale_red_band diff too high: {}", rms);
 }
 
 /// `ExtractBandGpuOp { band: 0 }` replicates the red channel to all four output channels.
@@ -246,4 +260,3 @@ fn extract_red_band_matches_vips() {
     println!("extract_red_band RMS = {}", rms);
     assert!(rms < 5.0, "extract_band(0) diff too high: {}", rms);
 }
-

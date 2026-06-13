@@ -1,7 +1,7 @@
+use crate::work_unit::{WorkUnit, WorkUnitFor};
 use std::any::Any;
 use std::fmt::Debug;
 use std::hash::Hasher;
-use crate::work_unit::{WorkUnit, WorkUnitFor};
 
 /// Object-safe, **backend-agnostic** datatype metadata. The runtime talks to
 /// this without knowing the concrete Kind *or* the backend. No `view`/`params`

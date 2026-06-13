@@ -11,7 +11,10 @@ macro_rules! assert_approx_eq {
         assert!(
             (a - b).abs() <= eps,
             "assert_approx_eq failed: `{}` vs `{}` (|Δ| = {} > {})",
-            a, b, (a - b).abs(), eps
+            a,
+            b,
+            (a - b).abs(),
+            eps
         );
     }};
 }
@@ -49,12 +52,12 @@ pub(crate) mod libraw_ffi {
     include!(concat!(env!("OUT_DIR"), "/libraw_ffi.rs"));
 }
 
+pub mod color;
+pub mod export;
 pub mod node;
 pub mod operation;
-pub mod work_unit;
-pub mod color;
 pub mod pixel;
-pub mod export;
+pub mod work_unit;
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
@@ -64,8 +67,8 @@ pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/ffi.rs"));
 }
 
-pub use backend::*;
 pub use backend::gpu::*;
+pub use backend::*;
 pub use buffer::*;
 pub use error::*;
 pub use io::*;

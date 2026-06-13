@@ -1,9 +1,9 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
-use crate::backend::vips::{VipsBackend, VipsBuilder};
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::gpu::view::ParamBlock;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
+use crate::backend::vips::{VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation};
 use crate::work_unit::{Region, WorkUnit};
@@ -17,17 +17,30 @@ pub struct IccImport<B: Backend> {
     pub intent: Option<i32>,
 }
 
-impl<B: Backend> Operation<B> for IccImport<B> where IccImport<B>: Lower<B> {
+impl<B: Backend> Operation<B> for IccImport<B>
+where
+    IccImport<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
-        if let Some(v) = self.embedded { state.write_u8(v as u8); }
-        if let Some(ref v) = self.input_profile { state.write(v.as_bytes()); }
-        if let Some(v) = self.intent { state.write_i32(v); }
+        if let Some(v) = self.embedded {
+            state.write_u8(v as u8);
+        }
+        if let Some(ref v) = self.input_profile {
+            state.write(v.as_bytes());
+        }
+        if let Some(v) = self.intent {
+            state.write_i32(v);
+        }
     }
 }
 
@@ -59,17 +72,30 @@ pub struct IccExport<B: Backend> {
     pub depth: Option<i32>,
 }
 
-impl<B: Backend> Operation<B> for IccExport<B> where IccExport<B>: Lower<B> {
+impl<B: Backend> Operation<B> for IccExport<B>
+where
+    IccExport<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
-        if let Some(ref v) = self.output_profile { state.write(v.as_bytes()); }
-        if let Some(v) = self.intent { state.write_i32(v); }
-        if let Some(v) = self.depth { state.write_i32(v); }
+        if let Some(ref v) = self.output_profile {
+            state.write(v.as_bytes());
+        }
+        if let Some(v) = self.intent {
+            state.write_i32(v);
+        }
+        if let Some(v) = self.depth {
+            state.write_i32(v);
+        }
     }
 }
 
@@ -103,19 +129,34 @@ pub struct IccTransform<B: Backend> {
     pub depth: Option<i32>,
 }
 
-impl<B: Backend> Operation<B> for IccTransform<B> where IccTransform<B>: Lower<B> {
+impl<B: Backend> Operation<B> for IccTransform<B>
+where
+    IccTransform<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write(self.output_profile.as_bytes());
-        if let Some(v) = self.embedded { state.write_u8(v as u8); }
-        if let Some(ref v) = self.input_profile { state.write(v.as_bytes()); }
-        if let Some(v) = self.intent { state.write_i32(v); }
-        if let Some(v) = self.depth { state.write_i32(v); }
+        if let Some(v) = self.embedded {
+            state.write_u8(v as u8);
+        }
+        if let Some(ref v) = self.input_profile {
+            state.write(v.as_bytes());
+        }
+        if let Some(v) = self.intent {
+            state.write_i32(v);
+        }
+        if let Some(v) = self.depth {
+            state.write_i32(v);
+        }
     }
 }
 
@@ -149,15 +190,24 @@ pub struct Gamma<B: Backend> {
     pub exponent: Option<f64>,
 }
 
-impl<B: Backend> Operation<B> for Gamma<B> where Gamma<B>: Lower<B> {
+impl<B: Backend> Operation<B> for Gamma<B>
+where
+    Gamma<B>: Lower<B>,
+{
     type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+    fn inputs(&self) -> Vec<&dyn AnyInput<B>> {
+        vec![&self.input]
+    }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![Some(WorkUnit::Region(out.clone()))]
     }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
+    fn output_spec(&self) -> ImageKind {
+        (*self.input.spec).clone()
+    }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
-        if let Some(v) = self.exponent { state.write(&v.to_ne_bytes()); }
+        if let Some(v) = self.exponent {
+            state.write(&v.to_ne_bytes());
+        }
     }
 }
 
@@ -178,21 +228,28 @@ impl Lower<VipsBackend> for Gamma<VipsBackend> {
 
 impl Lower<GpuBackend> for Gamma<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new()
-            .param("exponent", self.exponent.unwrap_or(1.0) as f32)
-        );
+        cx.param_block(ParamBlock::new().param("exponent", self.exponent.unwrap_or(1.0) as f32));
         cx.kernel("ops.icc", "gamma_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
-
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     IccImport<B>: crate::operation::Lower<B>,
 {
-    pub fn icc_import(&self, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>) -> Self {
-        self.push(IccImport { input: self.as_input(), embedded, input_profile, intent })
+    pub fn icc_import(
+        &self,
+        embedded: Option<bool>,
+        input_profile: Option<String>,
+        intent: Option<i32>,
+    ) -> Self {
+        self.push(IccImport {
+            input: self.as_input(),
+            embedded,
+            input_profile,
+            intent,
+        })
     }
 }
 
@@ -200,8 +257,18 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     IccExport<B>: crate::operation::Lower<B>,
 {
-    pub fn icc_export(&self, output_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
-        self.push(IccExport { input: self.as_input(), output_profile, intent, depth })
+    pub fn icc_export(
+        &self,
+        output_profile: Option<String>,
+        intent: Option<i32>,
+        depth: Option<i32>,
+    ) -> Self {
+        self.push(IccExport {
+            input: self.as_input(),
+            output_profile,
+            intent,
+            depth,
+        })
     }
 }
 
@@ -209,8 +276,22 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     IccTransform<B>: crate::operation::Lower<B>,
 {
-    pub fn icc_transform(&self, output_profile: String, embedded: Option<bool>, input_profile: Option<String>, intent: Option<i32>, depth: Option<i32>) -> Self {
-        self.push(IccTransform { input: self.as_input(), output_profile, embedded, input_profile, intent, depth })
+    pub fn icc_transform(
+        &self,
+        output_profile: String,
+        embedded: Option<bool>,
+        input_profile: Option<String>,
+        intent: Option<i32>,
+        depth: Option<i32>,
+    ) -> Self {
+        self.push(IccTransform {
+            input: self.as_input(),
+            output_profile,
+            embedded,
+            input_profile,
+            intent,
+            depth,
+        })
     }
 }
 
@@ -219,6 +300,9 @@ where
     Gamma<B>: crate::operation::Lower<B>,
 {
     pub fn gamma(&self, exponent: Option<f64>) -> Self {
-        self.push(Gamma { input: self.as_input(), exponent })
+        self.push(Gamma {
+            input: self.as_input(),
+            exponent,
+        })
     }
 }

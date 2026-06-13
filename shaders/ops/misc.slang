@@ -85,7 +85,6 @@ public void passthrough_kernel<R: IRegion>(uint2 idx, R input, RWRegion output)
 
 public void msb_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int band) {
     float4 c = input.read(idx);
-    // Vips `msb` extracts the most-significant byte.
     // For 8-bit formats, floor(c.rgb * 255.0) is the MSB.
     // We scale it back to [0,1] for the working space.
     // Note: this is an approximation valid only for 8-bit source data.
@@ -221,3 +220,73 @@ public void case5_kernel<R1: IRegion, R2: IRegion, R3: IRegion, R4: IRegion, R5:
     output.write(idx, res);
 }
 
+
+
+public void boolean_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output, uint boolean_op)
+{
+    float4 a = left.read(idx);
+    float4 b = right.read(idx);
+    int3 va = int3(a.rgb * 255.0);
+    int3 vb = int3(b.rgb * 255.0);
+    int3 r;
+    switch (boolean_op) {
+        case 0u: r = va & vb;  break;
+        case 1u: r = va | vb;  break;
+        case 2u: r = va ^ vb;  break;
+        case 3u: r = va << vb; break;
+        case 4u: r = va >> vb; break;
+        default: r = va;      break;
+    }
+    output.write(idx, float4(float3(r) / 255.0, a.a));
+}
+
+public void relational_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output, uint relational)
+{
+    float4 a = left.read(idx);
+    float4 b = right.read(idx);
+    float3 r;
+    switch (relational) {
+        case 0u: r = float3(a.rgb == b.rgb ? 1.0 : 0.0); break;
+        case 1u: r = float3(a.rgb != b.rgb ? 1.0 : 0.0); break;
+        case 2u: r = float3(a.rgb <  b.rgb ? 1.0 : 0.0); break;
+        case 3u: r = float3(a.rgb <= b.rgb ? 1.0 : 0.0); break;
+        case 4u: r = float3(a.rgb >  b.rgb ? 1.0 : 0.0); break;
+        case 5u: r = float3(a.rgb >= b.rgb ? 1.0 : 0.0); break;
+        default: r = a.rgb; break;
+    }
+    output.write(idx, float4(r, a.a));
+}
+
+public void boolean_const_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint boolean_op, float src_max, float c0, float c1, float c2, float c3)
+{
+    float4 a = input.read(idx);
+    int3 va = int3(a.rgb * src_max);
+    int3 vb = int3(float3(c0, c1, c2));
+    int3 r;
+    switch (boolean_op) {
+        case 0u: r = va & vb;  break;
+        case 1u: r = va | vb;  break;
+        case 2u: r = va ^ vb;  break;
+        case 3u: r = va << vb; break;
+        case 4u: r = va >> vb; break;
+        default: r = va;      break;
+    }
+    output.write(idx, float4(float3(r) / src_max, a.a));
+}
+
+public void relational_const_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint relational, float src_max, float c0, float c1, float c2, float c3)
+{
+    float4 a = input.read(idx);
+    float3 a_scaled = a.rgb * src_max;
+    float3 r;
+    switch (relational) {
+        case 0u: r = float3(a_scaled == float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        case 1u: r = float3(a_scaled != float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        case 2u: r = float3(a_scaled <  float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        case 3u: r = float3(a_scaled <= float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        case 4u: r = float3(a_scaled >  float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        case 5u: r = float3(a_scaled >= float3(c0, c1, c2) ? 1.0 : 0.0); break;
+        default: r = float3(0.0); break;
+    }
+    output.write(idx, float4(r, a.a));
+}

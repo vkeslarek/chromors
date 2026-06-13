@@ -93,7 +93,11 @@ pub struct ParamBlock {
 
 impl ParamBlock {
     pub fn new() -> Self {
-        Self { fields: vec![], field_sizes: vec![], bytes: vec![] }
+        Self {
+            fields: vec![],
+            field_sizes: vec![],
+            bytes: vec![],
+        }
     }
 
     pub fn param<T: SlangScalar>(mut self, name: &str, value: T) -> Self {
@@ -159,7 +163,13 @@ impl RegionParams {
     /// A tight, origin-aligned region covering a `w×h` buffer.
     pub fn tight(w: i32, h: i32) -> Self {
         let (w, h) = (w.max(0) as u32, h.max(0) as u32);
-        Self { stride: w, x: 0, y: 0, w, h }
+        Self {
+            stride: w,
+            x: 0,
+            y: 0,
+            w,
+            h,
+        }
     }
     /// Push this region as a named `BufferRegion` field (+ std430 bytes) onto a
     /// `ChainParams` block.

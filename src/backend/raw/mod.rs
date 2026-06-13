@@ -1,14 +1,14 @@
 pub mod decode;
-pub mod params;
 pub mod handle;
+pub mod params;
 
-use std::sync::Arc;
 use crate::backend::{Backend, Builder};
-use crate::error::Error;
 use crate::buffer::Buffer;
-use crate::work_unit::WorkUnit;
+use crate::error::Error;
 use crate::kind::AnyKind;
 use crate::node::{Node, NodeId};
+use crate::work_unit::WorkUnit;
+use std::sync::Arc;
 
 pub use handle::{GpsInfo, LensInfo, RawFrame, RawHandle, RawMeta};
 pub use params::{
@@ -35,7 +35,10 @@ pub struct RawBuilder {
 
 impl Default for RawBuilder {
     fn default() -> Self {
-        Self { outputs: std::collections::HashMap::new(), current: None }
+        Self {
+            outputs: std::collections::HashMap::new(),
+            current: None,
+        }
     }
 }
 
@@ -43,7 +46,10 @@ impl RawBuilder {
     /// Look up an already-lowered upstream input's raw handle.
     /// Post-order lowering guarantees it is present.
     pub fn input(&self, src: &Arc<Node<RawBackend>>) -> Arc<RawHandle> {
-        self.outputs.get(&NodeId::of(src)).expect("input lowered before its consumer").clone()
+        self.outputs
+            .get(&NodeId::of(src))
+            .expect("input lowered before its consumer")
+            .clone()
     }
 
     /// Register the raw handle this node produced.
@@ -72,7 +78,12 @@ impl Builder<RawBackend> for RawBuilder {
         self.current = Some(node);
     }
 
-    fn finish(mut self, root: NodeId, spec: Arc<dyn AnyKind>, _root_wu: &WorkUnit) -> Result<Buffer<RawBackend>, Error> {
+    fn finish(
+        mut self,
+        root: NodeId,
+        spec: Arc<dyn AnyKind>,
+        _root_wu: &WorkUnit,
+    ) -> Result<Buffer<RawBackend>, Error> {
         let handle = self
             .take(root)
             .ok_or_else(|| Error::Raw("root node produced no handle".into()))?;
@@ -85,4 +96,3 @@ impl Builder<RawBackend> for RawBuilder {
 }
 
 // Re-export backend operations and decode implementation.
-
