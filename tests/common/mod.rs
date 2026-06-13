@@ -36,8 +36,21 @@ pub fn rgba() -> Image2D<VipsBackend> {
     Image2D::<VipsBackend>::open("tests/fixtures/rgba.png").unwrap()
 }
 
+pub fn rgb_pattern() -> Image2D<VipsBackend> {
+    init();
+    Image2D::<VipsBackend>::open("tests/fixtures/rgb_pattern.jpg").unwrap()
+}
+
+/// Shared GPU context for all tests in this process. Each `GpuContext::new()`
+/// creates a fresh wgpu device; creating one per test exhausts GPU memory
+/// once the suite has enough GPU tests, so cache and reuse a single context
+/// (mirrors real usage — one GpuContext per app session, per invariant 9).
+static GPU_CTX: std::sync::OnceLock<Arc<GpuContext>> = std::sync::OnceLock::new();
+
 pub fn gpu_ctx() -> Arc<GpuContext> {
-    GpuContext::new().expect("GPU adapter required for GPU tests")
+    GPU_CTX
+        .get_or_init(|| GpuContext::new().expect("GPU adapter required for GPU tests"))
+        .clone()
 }
 
 /// Upload a vips image to the POC GpuBackend.
@@ -148,6 +161,28 @@ pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
             pixels.iter().take(pixel_count).copied().collect()
         }
     }
+}
+
+/// Read raw vips output bytes and reinterpret as `u16`, ignoring the
+/// (possibly stale) `format()` metadata. Needed for ops like `multiply` that
+/// vips promotes uchar->ushort at runtime without updating `format()`.
+pub fn vips_materialize_raw_u16(img: &Image2D<VipsBackend>) -> Vec<u16> {
+    use poc::io::Target;
+    let (w, h) = (img.width(), img.height());
+    let target = poc::data::image::RamImageTarget;
+    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    bytemuck::cast_slice::<u8, u16>(&bytes).to_vec()
+}
+
+/// Read raw vips output bytes and reinterpret as `f32`, ignoring the
+/// (possibly stale) `format()` metadata. Needed for ops like `divide` that
+/// vips promotes uchar->float at runtime without updating `format()`.
+pub fn vips_materialize_raw_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
+    use poc::io::Target;
+    let (w, h) = (img.width(), img.height());
+    let target = poc::data::image::RamImageTarget;
+    let bytes = img.pull(&target, Region { x: 0, y: 0, w: w as i32, h: h as i32, lod: Lod(0) }).unwrap();
+    bytemuck::cast_slice::<u8, f32>(&bytes).to_vec()
 }
 
 /// Convert f32 bytes to u8 bytes for RMS comparison, preserving exact float encoding.

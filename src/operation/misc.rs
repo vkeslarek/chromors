@@ -425,13 +425,24 @@ where
 
 impl Lower<VipsBackend> for Recomb<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
+        use crate::backend::vips::IntoVipsBandFormat;
         let input_handle = cx.input(self.input.src());
         let matrix_handle = cx.input(self.matrix.src());
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"recomb\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_image("m", matrix_handle.ptr);
         let out_handle = op.run().unwrap();
-        cx.emit(out_handle);
+
+        // vips_recomb always promotes to float, but output_spec() keeps the
+        // input's format (matching the GPU lowering, which stays in the
+        // original format) -- cast back down so both backends' outputs share
+        // the same band format/byte layout.
+        let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
+        cast_op.set_image("in", out_handle.ptr);
+        cast_op.set_int("format", self.input.spec.format.into_vips_band_format());
+        cast_op.set_bool("shift", false);
+        let cast_handle = cast_op.run().unwrap();
+        cx.emit(cast_handle);
     }
 }
 
@@ -514,6 +525,23 @@ where
         if let Some(v) = self.size {
             state.write_i32(v);
         }
+    }
+}
+
+impl Lower<GpuBackend> for Invertlut<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let size = self.size.unwrap_or(256) as u32;
+        let height = self.input.spec.entries;
+        let bands = self.input.spec.bands.saturating_sub(1);
+        cx.dispatch((size, 1));
+        cx.param_block(
+            ParamBlock::new()
+                .param("height", height)
+                .param("size", size)
+                .param("bands", bands),
+        );
+        cx.kernel("ops.data_driven", "invertlut_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

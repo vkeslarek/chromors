@@ -78,6 +78,18 @@ impl Lower<VipsBackend> for Sharpen<VipsBackend> {
     }
 }
 
+impl Lower<GpuBackend> for Sharpen<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let wu = cx.wu().clone();
+        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
+        let sigma = self.sigma.unwrap_or(0.5) as f32 / scale;
+        let m1 = self.smooth.unwrap_or(1.0) as f32;
+        cx.param_block(ParamBlock::new().param("sigma", sigma).param("m1", m1));
+        cx.kernel("ops.gaussian_blur", "sharpen_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
 // ── Canny ─────────────────────────────────────────────────────────────────────
 
 pub struct Canny<B: Backend> {
@@ -156,6 +168,14 @@ where
 
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.size);
+    }
+}
+
+impl Lower<GpuBackend> for Median<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("sz", self.size as u32));
+        cx.kernel("ops.convolution", "median_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -296,7 +316,7 @@ where
     }
 
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        let halo = (self.sigma * 3.0).ceil() as i32;
+        let halo = gauss_radius(self.sigma / out.lod.scale_factor() as f32);
         vec![Some(WorkUnit::Region(out.expanded(halo)))]
     }
 
@@ -321,80 +341,44 @@ impl Lower<VipsBackend> for Blur<VipsBackend> {
     }
 }
 
-// ── Blur (GPU Separable) ──────────────────────────────────────────────────────
-
-pub struct BlurH {
-    pub input: Input<ImageKind, GpuBackend>,
-    pub sigma: f32,
+/// Mask radius matching `vips_gaussmat`'s default (`min_ampl = 0.2`): the
+/// largest `x` with `exp(-x^2 / (2*sigma^2)) >= min_ampl`. Much narrower than
+/// a naive `sigma*3` window -- e.g. radius 5 (not 9) for sigma=3.
+fn gauss_radius(sigma: f32) -> i32 {
+    let sig2 = 2.0 * sigma * sigma;
+    let max_x = (8.0 * sigma) as i32;
+    let mut x = 0;
+    while x < max_x {
+        let v = (-((x * x) as f32) / sig2).exp();
+        if v < 0.2 {
+            break;
+        }
+        x += 1;
+    }
+    (x - 1).max(0)
 }
 
-impl Operation<GpuBackend> for BlurH {
-    type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        let scaled_radius = ((self.sigma * 3.0) / out.lod.scale_factor() as f32).ceil() as i32;
-        vec![Some(WorkUnit::Region(Region {
-            x: out.x - scaled_radius,
-            y: out.y,
-            w: out.w + 2 * scaled_radius,
-            h: out.h,
-            lod: out.lod,
-        }))]
-    }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
-    fn dyn_hash(&self, state: &mut dyn Hasher) {
-        state.write_u32(self.sigma.to_bits());
-    }
-}
-
-impl Lower<GpuBackend> for BlurH {
+impl Lower<GpuBackend> for Blur<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
-        cx.param_block(ParamBlock::scalar("sigma", self.sigma / scale));
-        cx.kernel("ops.gaussian_blur", "blur_h_kernel");
+        let sigma = self.sigma / scale;
+        // Single-pass 2D kernel (not separable H/V): a separable fused
+        // two-step pass would have the V step read NEIGHBOR threads' H
+        // output, which a single dispatch can't order across workgroups.
+        cx.kernel("ops.gaussian_blur", "blur_kernel");
+        cx.param("sigma", sigma);
+        cx.param("radius", gauss_radius(sigma));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
-pub struct BlurV {
-    pub input: Input<ImageKind, GpuBackend>,
-    pub sigma: f32,
-}
-
-impl Operation<GpuBackend> for BlurV {
-    type Output = ImageKind;
-    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> { vec![&self.input] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        let scaled_radius = ((self.sigma * 3.0) / out.lod.scale_factor() as f32).ceil() as i32;
-        vec![Some(WorkUnit::Region(Region {
-            x: out.x,
-            y: out.y - scaled_radius,
-            w: out.w,
-            h: out.h + 2 * scaled_radius,
-            lod: out.lod,
-        }))]
-    }
-    fn output_spec(&self) -> ImageKind { (*self.input.spec).clone() }
-    fn dyn_hash(&self, state: &mut dyn Hasher) {
-        state.write_u32(self.sigma.to_bits());
-    }
-}
-
-impl Lower<GpuBackend> for BlurV {
-    fn lower(&self, cx: &mut GpuBuilder) {
-        let wu = cx.wu().clone();
-        let scale = if let WorkUnit::Region(r) = &wu { r.lod.scale_factor() as f32 } else { 1.0 };
-        cx.param_block(ParamBlock::scalar("sigma", self.sigma / scale));
-        cx.kernel("ops.gaussian_blur", "blur_v_kernel");
-        cx.output(self.output_spec().output(cx.wu()));
-    }
-}
-
-impl crate::data::image::Image2D<GpuBackend> {
+impl<B: Backend> crate::data::image::Image2D<B>
+where
+    Blur<B>: Lower<B>,
+{
     pub fn blur(&self, sigma: f32) -> Self {
-        let h = self.push(BlurH { input: self.as_input(), sigma });
-        h.push(BlurV { input: h.as_input(), sigma })
+        self.push(Blur { input: self.as_input(), sigma })
     }
 }
 

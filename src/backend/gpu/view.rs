@@ -81,19 +81,24 @@ impl SlangScalar for i32 {
 }
 
 /// One std430 buffer containing geometry params (from Kind) and scalar configs (from Operation).
+/// `field_sizes` mirrors `fields` 1:1 — the byte length each field occupies in
+/// `bytes` — so fields can be located/removed by name without a type-name ↔
+/// size lookup table (custom struct types like `"RemapGeo"` aren't 4 bytes).
 #[derive(Debug, Clone, Default)]
 pub struct ParamBlock {
     pub fields: Vec<(String, &'static str)>,
+    pub field_sizes: Vec<usize>,
     pub bytes: Vec<u8>,
 }
 
 impl ParamBlock {
     pub fn new() -> Self {
-        Self { fields: vec![], bytes: vec![] }
+        Self { fields: vec![], field_sizes: vec![], bytes: vec![] }
     }
 
     pub fn param<T: SlangScalar>(mut self, name: &str, value: T) -> Self {
         self.fields.push((name.to_string(), T::SLANG_TY));
+        self.field_sizes.push(std::mem::size_of::<T>());
         self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self
     }
@@ -107,6 +112,7 @@ impl ParamBlock {
     /// adapter geometry that isn't a single scalar.
     pub fn field<T: bytemuck::Pod>(mut self, name: &str, ty: &'static str, value: T) -> Self {
         self.fields.push((name.to_string(), ty));
+        self.field_sizes.push(std::mem::size_of::<T>());
         self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self
     }
@@ -159,6 +165,7 @@ impl RegionParams {
     /// `ChainParams` block.
     pub fn push_into(&self, block: &mut ParamBlock, name: &str) {
         block.fields.push((name.to_string(), "BufferRegion"));
+        block.field_sizes.push(20);
         for v in [self.stride, self.x, self.y, self.w, self.h] {
             block.bytes.extend_from_slice(&v.to_le_bytes());
         }

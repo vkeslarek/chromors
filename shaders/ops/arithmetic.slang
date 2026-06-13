@@ -37,16 +37,20 @@ public void math_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint ma
 }
 
 // ── Single-image round (rint, ceil, floor) ───────────────────────────────────
-public void round_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint round_op)
+//
+// vips round/floor/ceil/rint operate on the *raw pixel value* (a no-op for
+// integer formats), not the decoded [0,1] working value -- rescale by
+// src_max before rounding and back after, matching morph_kernel's convention.
+public void round_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint round_op, float src_max)
 {
-    float4 c = input.read(idx);
+    float4 c = input.read(idx) * src_max;
     switch (round_op) {
         case 0u: c = round(c); break;
         case 1u: c = ceil(c);  break;
         case 2u: c = floor(c); break;
         default: break;
     }
-    output.write(idx, c);
+    output.write(idx, c / src_max);
 }
 
 // ── Single-image math2_const (pow, wop, atan2 with constant) ─────────────────
@@ -154,13 +158,27 @@ public void min_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, R
     output.write(idx, min(a, b));
 }
 
-public void remainder_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output)
+// vips remainder is integer modulo on raw pixel values: rescale to the raw
+// domain by src_max before dividing. A small epsilon on the quotient guards
+// against GPU division using an approximate reciprocal (e.g. a/d landing at
+// 0.99999994 instead of 1.0 when a == b) -- safe because the true fractional
+// part of a raw-integer ratio is always >= 1/src_max, far larger than the
+// epsilon.
+public void remainder_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 left, R2 right, RWRegion output, float src_max)
 {
-    float4 a = left.read(idx);
-    float4 b = right.read(idx);
+    float4 a_norm = left.read(idx);
+    float4 a = a_norm * src_max;
+    float4 b = right.read(idx) * src_max;
     float4 d = max(abs(b), float4(1e-10, 1e-10, 1e-10, 1.0));
-    float4 r = a - d * floor(a / d);
-    r.a = a.a;
+    float4 q = floor(a / d + 1e-4);
+    float4 r = (a - d * q) / src_max;
+    // vips convention for unsigned formats: x % 0 == TYPE_MAX, i.e. 1.0 once
+    // normalised to [0,1].
+    if (b.x == 0.0) r.x = 1.0;
+    if (b.y == 0.0) r.y = 1.0;
+    if (b.z == 0.0) r.z = 1.0;
+    if (b.w == 0.0) r.w = 1.0;
+    r.a = a_norm.a;
     output.write(idx, r);
 }
 

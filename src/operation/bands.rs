@@ -274,7 +274,16 @@ impl Lower<GpuBackend> for Bandbool<GpuBackend> {
 
 impl Lower<GpuBackend> for Bandfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("factor", self.factor));
+        let in_bands = self.input.spec.format.channel_count() as u32;
+        let out_bands = self.output_spec().format.channel_count() as u32;
+        // Field order must match bandfold_kernel's parameter order exactly --
+        // kernel args are bound positionally from this block.
+        cx.param_block(
+            ParamBlock::new()
+                .param("factor", self.factor)
+                .param("in_bands", in_bands)
+                .param("out_bands", out_bands),
+        );
         cx.kernel("ops.bands", "bandfold_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
@@ -282,7 +291,16 @@ impl Lower<GpuBackend> for Bandfold<GpuBackend> {
 
 impl Lower<GpuBackend> for Bandunfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("factor", self.factor));
+        let in_bands = self.input.spec.format.channel_count() as u32;
+        let out_bands = self.output_spec().format.channel_count() as u32;
+        // Field order must match bandunfold_kernel's parameter order exactly --
+        // kernel args are bound positionally from this block.
+        cx.param_block(
+            ParamBlock::new()
+                .param("factor", self.factor)
+                .param("in_bands", in_bands)
+                .param("out_bands", out_bands),
+        );
         cx.kernel("ops.bands", "bandunfold_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }

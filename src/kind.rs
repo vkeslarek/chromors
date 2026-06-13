@@ -22,3 +22,16 @@ pub trait AnyKind: Send + Sync + Debug + 'static {
 pub trait Kind: AnyKind + Clone + Sized {
     type WorkUnit: WorkUnitFor;
 }
+
+/// `Self`'s payload bytes are also a valid `T` payload; this derives the `T`
+/// spec from `Self`'s own. Pure metadata statement — no compute, no buffer
+/// transformation. The `T: Kind<WorkUnit = Self::WorkUnit>` bound rejects
+/// shape-mismatched casts (e.g. Region ⇄ Atomic) at compile time. "Byte-identical
+/// payload" is the impl's contract, not a runtime check — the `Reinterpret`
+/// operation node (`operation::reinterpret`) debug-asserts `byte_size` equality.
+pub trait ReinterpretAs<T>: Kind
+where
+    T: Kind<WorkUnit = Self::WorkUnit>,
+{
+    fn reinterpret_spec(&self) -> T;
+}

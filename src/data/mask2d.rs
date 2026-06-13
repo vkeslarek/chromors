@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, RegionParams, View};
 use crate::backend::gpu::{GpuBackend, GpuBuffer, GpuBuilder, GpuContext, GpuView};
-use crate::backend::vips::VipsBand;
+use crate::backend::vips::{VipsBackend, VipsBand, VipsBuilder, VipsHandle};
 use crate::buffer::Buffer;
 use crate::error::Error;
 use crate::io::Source;
@@ -128,6 +128,7 @@ impl Source<GpuBackend> for GpuConstantMaskSource {
             Ok(buf) => {
                 let geom = RegionParams::tight(self.spec.width, self.spec.height);
                 cx.input(self.spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.output(self.spec.output(&wu));
             }
             Err(e) => cx.fail(e),
         }
@@ -156,6 +157,92 @@ impl Mask2D<GpuBackend> {
             data[i * dim + i] = 1.0;
         }
         Self::from_values(ctx, n, n, &data)
+    }
+}
+
+// ── Vips constant source ────────────────────────────────────────────────────
+
+/// A Vips leaf holding a constant `f64` weight grid — `conv`/`morph`-family
+/// ops read mask images in vips' native `VIPS_FORMAT_DOUBLE`.
+pub struct VipsConstantMaskSource {
+    pub spec: Arc<Mask2DKind>,
+    pub data: Vec<f64>,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+impl Source<VipsBackend> for VipsConstantMaskSource {
+    type Kind = Mask2DKind;
+
+    fn spec(&self) -> Arc<Mask2DKind> {
+        self.spec.clone()
+    }
+
+    fn fetch(&self, _ctx: &(), _wu: &Region) -> Result<Buffer<VipsBackend>, Error> {
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_memory_copy(
+                self.data.as_ptr() as *const std::ffi::c_void,
+                self.data.len() * 8,
+                self.spec.width,
+                self.spec.height,
+                1,
+                crate::ffi::VipsBandFormat_VIPS_FORMAT_DOUBLE,
+            )
+        };
+        if ptr.is_null() {
+            return Err(Error::Vips(crate::backend::vips::vips_error()));
+        }
+        // vips_conv/conva/compass/morph read the mask's "scale"/"offset"
+        // double properties (defaulting to 0 if unset, which divides the
+        // convolution result by zero).
+        unsafe {
+            let scale = std::ffi::CString::new("scale").unwrap();
+            let offset = std::ffi::CString::new("offset").unwrap();
+            crate::ffi::vips_image_set_double(ptr, scale.as_ptr(), self.scale);
+            crate::ffi::vips_image_set_double(ptr, offset.as_ptr(), self.offset);
+        }
+        Ok(Buffer { payload: Arc::new(VipsHandle { ptr }), spec: self.spec.clone() })
+    }
+
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let region = Region::full((self.spec.width, self.spec.height), crate::work_unit::Lod(0));
+        let buf = self.fetch(&(), &region).unwrap();
+        cx.emit((*buf.payload).clone());
+    }
+
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        for &v in &self.data {
+            state.write_u64(v.to_bits());
+        }
+    }
+}
+
+impl Mask2D<VipsBackend> {
+    /// A mask holding `values` (row-major, `width * height` entries), with
+    /// vips' default `scale=1`/`offset=0` (unscaled weights).
+    pub fn from_values(width: i32, height: i32, values: &[f32]) -> Self {
+        Self::from_values_scaled(width, height, values, 1.0, 0.0)
+    }
+
+    /// A mask holding `values`, with explicit `scale`/`offset` set on the
+    /// vips mask image (read by `vips_conv`/`conva`/`compass`/`morph` to
+    /// normalise the convolution result: `result = sum(src*weight) / scale +
+    /// offset`).
+    pub fn from_values_scaled(width: i32, height: i32, values: &[f32], scale: f64, offset: f64) -> Self {
+        let spec = Arc::new(Mask2DKind::new(width, height));
+        let data: Vec<f64> = values.iter().map(|&v| v as f64).collect();
+        let src = VipsConstantMaskSource { spec: spec.clone(), data, scale, offset };
+        Data::from_source(Arc::new(src), Arc::new(()))
+    }
+
+    /// The `n x n` identity matrix.
+    pub fn identity(n: i32) -> Self {
+        let dim = n.max(0) as usize;
+        let mut data = vec![0.0f32; dim * dim];
+        for i in 0..dim {
+            data[i * dim + i] = 1.0;
+        }
+        Self::from_values(n, n, &data)
     }
 }
 

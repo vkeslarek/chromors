@@ -117,6 +117,29 @@ impl<K: Kind, B: Backend> Data<K, B> {
         let buf = self.materialize(wu.clone())?;
         target.extract(&buf, &wu, &self.ctx)
     }
+
+    /// Zero-cost typed cast, derived from the Kind's own declaration
+    /// (`ReinterpretAs::reinterpret_spec`).
+    pub fn reinterpret<T>(&self) -> Data<T, B>
+    where
+        K: crate::kind::ReinterpretAs<T>,
+        T: Kind<WorkUnit = K::WorkUnit>,
+        crate::operation::Reinterpret<K, T, B>: Operation<B, Output = T>,
+    {
+        let spec = self.spec.reinterpret_spec();
+        self.push(crate::operation::Reinterpret { input: self.as_input(), spec })
+    }
+
+    /// Zero-cost cast with an explicit target spec — the caller asserts byte
+    /// compatibility (used for the rewrap direction, where the target spec
+    /// carries data the source Kind doesn't have, e.g. frame timing).
+    pub fn reinterpret_with<T>(&self, spec: T) -> Data<T, B>
+    where
+        T: Kind<WorkUnit = K::WorkUnit>,
+        crate::operation::Reinterpret<K, T, B>: Operation<B, Output = T>,
+    {
+        self.push(crate::operation::Reinterpret { input: self.as_input(), spec })
+    }
 }
 
 impl<K: Kind, B: Backend> Data<K, B> {

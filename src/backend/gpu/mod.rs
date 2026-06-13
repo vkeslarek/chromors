@@ -133,10 +133,14 @@ pub struct GpuBuilder {
     current_wu: Option<WorkUnit>,
 
     /// The dispatch domain (`numthreads` grid, in pixels/elements) — set
-    /// explicitly via [`GpuBuilder::dispatch`], or defaulted from the root's
-    /// `Region` WorkUnit by [`GpuBuilder::output`] when not set. `None` only
-    /// for an Atomic output whose op never set it (falls back to `(1, 1)`).
+    /// explicitly via [`GpuBuilder::dispatch`], or defaulted from each
+    /// `output()` call's `Region` WorkUnit when not pinned. `None` only for
+    /// an Atomic output whose op never set it (falls back to `(1, 1)`).
     dispatch: Option<(u32, u32)>,
+    /// Set by [`GpuBuilder::dispatch`] — once true, `output()` no longer
+    /// overwrites `dispatch` (a reduction op's explicit input-sized domain
+    /// wins over any leaf source's region-derived default).
+    dispatch_explicit: bool,
 }
 
 impl GpuBuilder {
@@ -160,6 +164,7 @@ impl GpuBuilder {
             error: None,
             current_wu: None,
             dispatch: None,
+            dispatch_explicit: false,
         }
     }
 
@@ -168,7 +173,28 @@ impl GpuBuilder {
     /// their own output is `Atomic`-shaped, so `output()` can't derive it.
     pub fn dispatch(&mut self, dims: (u32, u32)) -> &mut Self {
         self.dispatch = Some(dims);
+        self.dispatch_explicit = true;
         self
+    }
+
+    /// Remove any existing `params` fields with the given names (and their
+    /// matching bytes/sizes), preserving the relative order of the rest. Used
+    /// by [`GpuBuilder::output`] so a leaf source's `region_out` (pushed by
+    /// its `lower` in case it turns out to be the bare DAG root) doesn't
+    /// shadow the *actual* root op's `region_out` once one is registered.
+    fn remove_fields_named(&mut self, names: &[String]) {
+        let old_fields = std::mem::take(&mut self.params.fields);
+        let old_sizes = std::mem::take(&mut self.params.field_sizes);
+        let old_bytes = std::mem::take(&mut self.params.bytes);
+        let mut offset = 0usize;
+        for ((name, ty), size) in old_fields.into_iter().zip(old_sizes) {
+            if !names.iter().any(|n| n == &name) {
+                self.params.fields.push((name, ty));
+                self.params.field_sizes.push(size);
+                self.params.bytes.extend_from_slice(&old_bytes[offset..offset + size]);
+            }
+            offset += size;
+        }
     }
 
     /// Materializer hook: announce the node about to be lowered — its
@@ -225,9 +251,14 @@ impl GpuBuilder {
         for (name, ty) in &slot_params.fields {
             self.params.fields.push((name.replace("{slot}", &slot.to_string()), ty));
         }
+        self.params.field_sizes.extend(slot_params.field_sizes.iter().copied());
         self.params.bytes.extend_from_slice(&slot_params.bytes);
         self.input_views.push(view);
         self.source_buffers.push(buf);
+        // If this leaf turns out to be the DAG root (no kernel steps at all —
+        // a plain `Data::from_source(..).pull(..)`), the encoder reads its
+        // decoded value directly through this slot.
+        self.cur_output_adapter = Some(StepInput { base: BaseInput::Source(slot), adapter: None });
         self
     }
 
@@ -289,11 +320,12 @@ impl GpuBuilder {
                 .map(|(name, ty)| (name.replace("{p}", &prefix), *ty))
                 .collect();
             self.params.fields.extend(fields.iter().cloned());
+            self.params.field_sizes.extend(adapter.params.field_sizes.iter().copied());
             self.params.bytes.extend_from_slice(&adapter.params.bytes);
             let resolved = ViewAdapter {
                 wrapper: adapter.wrapper,
                 ctor: adapter.ctor.replace("{p}", &prefix).into(),
-                params: ParamBlock { fields, bytes: adapter.params.bytes },
+                params: ParamBlock { fields, field_sizes: adapter.params.field_sizes.clone(), bytes: adapter.params.bytes },
                 module: adapter.module,
             };
             StepInput { base: input.base, adapter: Some(resolved) }
@@ -305,12 +337,31 @@ impl GpuBuilder {
         self
     }
 
+    /// The current node's value IS its single input's value — no kernel, no
+    /// temp, no adapter. A downstream consumer resolving this node gets its
+    /// input instead (via `alias_adapters`, the same map `adapt` uses); if
+    /// this node is the DAG root, the encoder reads through it too (via
+    /// `cur_output_adapter`). Used by [`crate::operation::Reinterpret`] — a
+    /// zero-cost typed cast between byte-identical Kinds.
+    pub fn forward(&mut self) -> &mut Self {
+        let Some(input) = self.cur_inputs.first().cloned() else {
+            self.fail(Error::Backend("forward: node has no input".into()));
+            return self;
+        };
+        if let Some(k) = self.cur_node {
+            self.alias_adapters.insert(k, input.clone());
+        }
+        self.cur_output_adapter = Some(input);
+        self
+    }
+
     /// A scalar param for the current step. Namespaced by step index so two
     /// steps (or two nodes) using the same name never collide in `ChainParams`.
     pub fn param<T: SlangScalar>(&mut self, name: &str, value: T) -> &mut Self {
         let idx = self.steps.len() - 1;
         let field = format!("s{idx}_{name}");
         self.params.fields.push((field.clone(), T::SLANG_TY));
+        self.params.field_sizes.push(std::mem::size_of::<T>());
         self.params.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self.steps[idx].params.push(field);
         self
@@ -323,12 +374,19 @@ impl GpuBuilder {
     /// from the root's `Region` WorkUnit — for image ops the dispatch domain
     /// and the output rect are the same rectangle.
     pub fn output(&mut self, wrap: OutputWrap) -> &mut Self {
-        if self.dispatch.is_none() {
+        if !self.dispatch_explicit {
             if let Some(r) = Region::typed(self.wu()) {
                 self.dispatch = Some((r.w.max(0) as u32, r.h.max(0) as u32));
             }
         }
+        // A leaf source's `lower` always calls `output()` (in case it's the
+        // bare DAG root); when an op also calls `output()`, drop the
+        // source's same-named fields (e.g. `region_out`) so the op's values
+        // — not the source's — land at that field's offset in `ChainParams`.
+        let names: Vec<String> = wrap.params.fields.iter().map(|(n, _)| n.clone()).collect();
+        self.remove_fields_named(&names);
         self.params.fields.extend(wrap.params.fields.iter().cloned());
+        self.params.field_sizes.extend(wrap.params.field_sizes.iter().copied());
         self.params.bytes.extend_from_slice(&wrap.params.bytes);
         self.output = Some(wrap);
         self
@@ -339,6 +397,7 @@ impl GpuBuilder {
     pub fn param_block(&mut self, block: ParamBlock) -> &mut Self {
         self.pending_params.extend(block.fields.iter().map(|(name, _)| name.clone()));
         self.params.fields.extend(block.fields);
+        self.params.field_sizes.extend(block.field_sizes);
         self.params.bytes.extend_from_slice(&block.bytes);
         self
     }

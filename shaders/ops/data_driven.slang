@@ -13,6 +13,86 @@ public void maplut_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 input, R2 lut,
     output.write(idx, res);
 }
 
+// ── Invertlut ────────────────────────────────────────────────────────────────
+//
+// `lut` holds `height` rows of `(x, y0, y1, y2)` packed into float4 — column
+// 0 is the target value (vips' "in" matrix column 0), columns 1.. are the
+// real-value vertices per output band (vips' "in" matrix columns 1..bands).
+// Rows are assumed pre-sorted by column 0 (vips sorts internally; the GPU
+// port skips that step and requires sorted input).
+//
+// For each output band `bi` and output index `idx.x` (`k`), this mirrors
+// `vips_invertlut`'s piecewise-linear inversion + head/tail extrapolation.
+
+public void invertlut_kernel<R1: IRegion>(
+    uint2 idx, R1 lut, RWRegion output,
+    uint height, uint size, uint bands)
+{
+    int k = int(idx.x);
+    int last_idx = int(size) - 1;
+    float4 result = float4(0.0);
+
+    for (uint bi = 0u; bi < bands; bi++)
+    {
+        float4 row0 = lut.read(uint2(0u, 0u));
+        float4 rowN = lut.read(uint2(height - 1u, 0u));
+        float y0 = row0[bi + 1u];
+        float yN = rowN[bi + 1u];
+        float x0 = row0.x;
+        float xN = rowN.x;
+
+        int first = int(y0 * float(last_idx));
+        int last = int(yN * float(last_idx));
+
+        float val;
+        if (k >= first && k <= last)
+        {
+            float ki = float(k) / float(last_idx);
+
+            int j = -1;
+            for (int jj = int(height) - 1; jj >= 0; jj--)
+            {
+                if (lut.read(uint2(uint(jj), 0u))[bi + 1u] < ki)
+                {
+                    j = jj;
+                    break;
+                }
+            }
+            if (j == -1) j = 0;
+
+            if (height > 1u)
+            {
+                int j1 = min(j + 1, int(height) - 1);
+                float yj = lut.read(uint2(uint(j), 0u))[bi + 1u];
+                float yj1 = lut.read(uint2(uint(j1), 0u))[bi + 1u];
+                float xj = lut.read(uint2(uint(j), 0u)).x;
+                float xj1 = lut.read(uint2(uint(j1), 0u)).x;
+                float irange = yj1 - yj;
+                float orange = xj1 - xj;
+                val = (irange != 0.0) ? (xj + orange * (ki - yj) / irange) : xj;
+            }
+            else
+            {
+                val = x0;
+            }
+        }
+        else if (k < first)
+        {
+            float fac = (first != 0) ? (x0 / float(first)) : 0.0;
+            val = float(k) * fac;
+        }
+        else
+        {
+            float fac = (1.0 - xN) / float(last_idx - last);
+            val = xN + float(k - last) * fac;
+        }
+
+        result[bi] = val;
+    }
+
+    output.write(idx, result);
+}
+
 public void recomb_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 input, R2 matrix, RWRegion output, uint n) {
     float4 c = input.read(idx);
     float4 res = float4(0.0);

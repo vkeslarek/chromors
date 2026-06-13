@@ -77,3 +77,20 @@ public void rotate_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float
 
     output.write(idx, res);
 }
+
+// ── Grid ─────────────────────────────────────────────────────────────────────
+//
+// Re-tiles `in_w`-wide x `tile_height`-high horizontal strips of the input
+// (stacked top-to-bottom) into an `across`-wide x N-down grid of tiles, in
+// scan order (matches vips_grid).
+
+public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint in_w, uint tile_height, uint across) {
+    uint col = idx.x / in_w;
+    uint row = idx.y / tile_height;
+    uint strip = row * across + col;
+
+    uint sx = idx.x % in_w;
+    uint sy = strip * tile_height + (idx.y % tile_height);
+
+    output.write(idx, input.read(uint2(sx, sy)));
+}

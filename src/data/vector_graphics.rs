@@ -135,6 +135,7 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
                 let spec = <VectorGraphicsImageSource as Source<GpuBackend>>::spec(self);
                 let geom = crate::backend::gpu::view::RegionParams::tight(spec.width, spec.height);
                 cx.input(spec.input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.output(spec.output(&wu));
             }
             Err(e) => cx.fail(e),
         }

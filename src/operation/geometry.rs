@@ -1318,6 +1318,18 @@ impl<B: Backend> Operation<B> for Grid<B> where Grid<B>: Lower<B> {
         state.write_i32(self.down);
     }
 }
+impl Lower<GpuBackend> for Grid<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let in_spec = &*self.input.spec;
+        cx.param_block(ParamBlock::new()
+            .param("in_w", in_spec.width as u32)
+            .param("tile_height", self.tile_height as u32)
+            .param("across", self.across as u32)
+        );
+        cx.kernel("ops.geometry_extended", "grid_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
 impl Lower<VipsBackend> for Grid<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());

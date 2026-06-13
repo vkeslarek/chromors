@@ -4,8 +4,15 @@ This crate is a **clean-room prototype of one processing model**. It has ONE
 architecture. There is no "old way". If you find code that looks like the list
 in **§7 FORBIDDEN**, it is a bug to delete, not a pattern to copy.
 
-> The full design rationale is `../docs/processing-model-v2.md`. This file is
-> the **binding contract**. Where prose and this file disagree, this file wins.
+> **`docs/architecture.md` is the full reference**: every type, every trait,
+> the DAG/demand/lower walk, GPU kernel fusion + emit/compile/dispatch, the
+> vips backend, and step-by-step recipes for adding a datatype/operation/
+> backend, with worked examples. **Read it first if you're new.**
+>
+> This file (`CLAUDE.md`) is the **compact binding contract**: the
+> non-negotiable rules, distilled. It does not re-explain *why* or *how* —
+> that's `architecture.md`. Where the two disagree on a RULE (not an
+> explanation), this file wins.
 
 ---
 
@@ -15,6 +22,9 @@ A **lazy, multi-backend DAG**: operations build an immutable `Arc<Node<B>>`
 graph; nothing runs until a `Target` pulls a `WorkUnit`; then the chosen
 `Backend` (`GpuBackend` = Slang JIT fusion, `VipsBackend` = libvips) walks the
 graph **type-blind** and lowers each node into its builder.
+
+→ `docs/architecture.md` §1 for the full mental model and §10 for an
+end-to-end worked trace.
 
 ---
 
@@ -32,6 +42,8 @@ Every piece of code is in exactly one of two halves. **Never mix them.**
 **Litmus test:** does the type/method mention Slang, `View`, `ParamBlock`,
 wgpu, or libvips? Then it is **per-backend** and must NOT appear on `AnyKind`,
 `Kind`, `Operation<B>`, `WorkUnit`, `Source`, `Target`, or the materializer.
+
+→ `docs/architecture.md` §2 for the file-by-file mapping of this table.
 
 ---
 
@@ -61,11 +73,13 @@ Buffer<B>  : payload: Arc<B::Payload> + spec: Arc<dyn AnyKind>. Backend-resident
 ```
 
 `AnyOperation<B>` / `AnySource<B>` are the **object-safe erased mirrors** of
-`Operation<B>` / `Source<B>` (the typed traits are not object-safe). They carry
-`inputs` / `demand_erased` / `output_kind` / `lower` / `dyn_hash`. A **blanket
-impl bridges** every typed op/source to its erased form. `Node<B>` stores
-`Arc<dyn AnyOperation<B>>` / `Arc<dyn AnySource<B>>`. **Do not** make the typed
-traits object-safe; do not bypass the bridge.
+`Operation<B>` / `Source<B>` (the typed traits are not object-safe), bridged
+by a blanket impl. `Node<B>` stores `Arc<dyn AnyOperation<B>>` /
+`Arc<dyn AnySource<B>>`. **Do not** make the typed traits object-safe; do not
+bypass the bridge.
+
+→ `docs/architecture.md` §3 for what each trait/type does and how to use it
+(one subsection per item above).
 
 ---
 
@@ -106,12 +120,11 @@ traits object-safe; do not bypass the bridge.
 
 8. **The DAG is immutable and arena-free.** `push` wraps a NEW `Arc<Node>`. No
    `Mutex`, no `NodeId`, no central `Graph`. Diamonds dedup by `Arc::as_ptr`.
-   Every walk must dedup (a `HashSet<usize>` of node pointers) and MUST use
-   the generic `GraphWalk<'a, B>` object from `src/node.rs`, which owns the transient
-   traversal state (`demands` map, `lowered` set). Loose traversal functions
-   are strictly forbidden. Furthermore, `Node<B>` provides delegated methods
-   (`lower()`, `output_kind()`, `inputs()`, `demand_erased()`) so that you NEVER
-   need to `match` on `Node::Op` vs `Node::Source` during materialization.
+   Every walk must dedup and MUST use the generic `GraphWalk<'a, B>` object
+   from `src/node.rs` (owns `demands` map + `lowered` set). Loose traversal
+   functions are strictly forbidden. `Node<B>` provides delegated methods
+   (`lower()`, `output_kind()`, `inputs()`, `demand_erased()`) so you NEVER
+   `match` on `Node::Op` vs `Node::Source` during materialization.
 
 9. **The only engine-owned cache is the GPU pipeline cache (keyed by IR-text
    hash XOR the `.slang` source fingerprint), with LRU.** The fingerprint is
@@ -123,64 +136,56 @@ traits object-safe; do not bypass the bridge.
 10. **Color/format conversion is an `Operation`, never an implicit fusion
     step.** All GPU codecs live in Slang; Rust only picks the wrapper string.
 
----
-
-## 5. How to add a datatype (the recipe)
-
-Create `src/data/<name>.rs`, add it to `src/data/mod.rs`. Inside:
-
-1. `struct <Name>Kind { …metadata… }` + `impl AnyKind` (shape/byte_size/dyn_hash) + `impl Kind` (WorkUnit).
-2. `impl GpuView for <Name>Kind` and/or `impl VipsBand for <Name>Kind` — only the backends it supports.
-3. `pub type <Name><B = …> = Data<<Name>Kind, B>;`
-4. Operations producing it: `struct <Op> { input: Input<…, B>, … }` + `impl Operation<B>` (structure) + one `impl Lower<EachBackend>`.
-5. Ergonomic methods: `impl <Name><B> { pub fn … }` (in-crate ⇒ plain inherent impls are fine).
-6. The Slang kernel + wrapper (GPU) — see §8.
-
-See `src/data/image.rs` (multi-backend), `src/data/histogram.rs` /
-`src/data/vectorscope.rs` (GPU-only, `Atomic`-shaped) as the canonical examples.
+→ `docs/architecture.md` §3.5/§4 (#1,#2,#8), §3.2 (#3,#7), §7/§8 (#4,#5,#6),
+§5.1 (#9), §8/§5.3 (#10) for the mechanics behind each invariant, and §11 for
+a one-page cheat sheet linking invariants to FORBIDDEN patterns.
 
 ---
 
-## 6. How to add an operation
+## 5. Adding a datatype / operation / backend — quick recipe
 
-```rust
-pub struct Foo<B: Backend> { input: Input<InKind, B>, /* params */ }
+Full recipes with worked examples (`ImageKind`/`HistogramKind`,
+`Invert`/`ExtractBand`/`Blur`/`Reinterpret`) are in `docs/architecture.md`
+§7–§9. The compact version:
 
-impl<B: Backend> Operation<B> for Foo<B> where Foo<B>: Lower<B> {
-    type Output = OutKind;                                  // may differ from input Kind
-    fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
-    fn demand(&self, out: &<OutKind as Kind>::WorkUnit) -> Vec<Option<WorkUnit>> { /* halo / prune */ }
-    fn output_spec(&self) -> OutKind { /* derive from self.input.spec */ }
-    fn dyn_hash(&self, s: &mut dyn Hasher) { /* hash own params */ }
-}
+- **Datatype** (`docs/architecture.md` §7): one new `src/data/<name>.rs` —
+  `<Name>Kind` (`impl AnyKind` + `impl Kind { type WorkUnit = ... }`),
+  `impl GpuView`/`impl VipsBand` for whichever backends it supports,
+  `pub type <Name><B> = Data<<Name>Kind, B>`, producing operations, ergonomic
+  inherent methods, Slang kernel(s) if GPU.
 
-impl Lower<GpuBackend> for Foo<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) {
-        // The op contributes ONLY its kernel step(s) + scalar params. Inputs
-        // are registered by the Source leaf; decode/encode come from the Kind.
-        cx.kernel("foo_main").param("k", self.k);
-        cx.output(self.output_spec().output());   // Kind decides sandwich vs direct
-    }
-}
-impl Lower<VipsBackend> for Foo<VipsBackend> { fn lower(&self, cx: &mut VipsBuilder) { /* build vips op, cx.emit */ } }
-```
+- **Operation** (`docs/architecture.md` §8):
+  ```rust
+  pub struct Foo<B: Backend> { input: Input<InKind, B>, /* params */ }
 
-`Lower::lower` takes **only** `&mut B::Builder`. The node's resolved `WorkUnit`
-is carried by the builder (`GpuBuilder::wu()` / set via `enter`) — **do NOT add
-a `wu` parameter to `lower`** (it must stay backend-neutral; vips ignores wu).
+  impl<B: Backend> Operation<B> for Foo<B> where Foo<B>: Lower<B> {
+      type Output = OutKind;
+      fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.input] }
+      fn demand(&self, out: &<OutKind as Kind>::WorkUnit) -> Vec<Option<WorkUnit>> { /* halo / prune */ }
+      fn output_spec(&self) -> OutKind { /* derive from self.input.spec */ }
+      fn dyn_hash(&self, s: &mut dyn Hasher) { /* hash own params */ }
+  }
+  impl Lower<GpuBackend> for Foo<GpuBackend> {
+      fn lower(&self, cx: &mut GpuBuilder) {
+          cx.kernel("ops.foo", "foo_kernel").param("k", self.k);
+          cx.output(self.output_spec().output(cx.wu()));
+      }
+  }
+  impl Lower<VipsBackend> for Foo<VipsBackend> { fn lower(&self, cx: &mut VipsBuilder) { /* build vips op, cx.emit */ } }
+  ```
+  `lower` takes **only** `&mut B::Builder` (no `wu` param — use `cx.wu()`).
+  Fusion is automatic: consecutive ops' kernel steps chain in one shader via
+  post-order lowering — no extra Rust needed. Two steps in the same fused pass
+  must not both `cx.param_block(...)` a same-named field (use `cx.param`,
+  which is step-namespaced) — see `docs/architecture.md` §5.2.4.
 
-**Multistep / fusion.** Each `cx.kernel(...)` adds a step to the fused pass.
-Step 0 reads the decoded sources; step `i>0` reads step `i-1`'s working buffer
-(the emitter ping-pongs two `float4` scratch buffers). So a separable op assembles
-its passes — e.g. blur is `run_h` then `run_v`, a method that just calls
-`cx.kernel("blur_h_kernel")` then `cx.kernel("blur_v_kernel")` — and fusion
-across ops (`invert` then `blur`) falls out of the post-order lower for free.
-The op never allocates buffers or names bindings; it only adds kernels + the
-Kind's `output()`.
+- **Backend** (`docs/architecture.md` §9): new `impl Backend` + `Builder` +
+  capability trait; every existing op gains it via one
+  `impl Lower<NewBackend>` each (the generic `Operation<B>` impl is untouched).
 
 ---
 
-## 7. FORBIDDEN — delete on sight, never write
+## 6. FORBIDDEN — delete on sight, never write
 
 - ❌ `trait Operation<Input> { fn execute(&self, input) }` (eager, old chromors).
   We use lazy `Operation<B>` + `Lower<B>`. There is no `execute`.
@@ -201,42 +206,47 @@ Kind's `output()`.
 
 ---
 
-## 8. Slang code (incoming)
+## 7. Slang code
 
 Slang shaders live in `shaders/` (compiled by `backend::gpu::slang` via FFI to
 SPIR-V, cached by IR hash). Rules:
 
 - The **working-space sandwich** is mandatory: every kernel decodes inputs to
   the working representation, processes, encodes the output — via the generic
-  Slang `Codec<Format, ColorSpace>` / `WorkingView` library, parameterised by
-  the strings `GpuView::view` returns. Color conversion is shader-side only.
+  Slang `Codec<Format, ColorSpace>` / `IRegion` library (`shaders/lib/region.slang`),
+  parameterised by the strings `GpuView::view` returns. Color conversion is
+  shader-side only.
 - A new datatype's Slang wrapper (e.g. `HistogramOut<N>`, `PointListView<N>`)
   is real new GPU code — but it is the ONLY thing added; no Rust enum/match.
 - Entry-point names are what `lower` passes to `GpuBuilder::kernel(...)`.
 - Do not put image-processing logic in the materializer or the viewport; the
   shader does the math, Rust only orchestrates buffers + params.
 
+→ `docs/architecture.md` §5.3/§5.4 for the `View`/`ParamBlock`/`ViewAdapter`
+vocabulary and how it becomes emitted Slang text.
+
 ---
 
-## 9. File map
+## 8. File map
 
 ```
 src/
   kind.rs            AnyKind, Kind                          (agnostic)
   work_unit.rs       Shape, WorkUnit, Region/Range/Atomic, Lod, union/bounding/tile_aligned
-  operation.rs       Operation<B>, Lower<B>, Input, AnyInput, AnyOperation (erased bridge)
+  operation/mod.rs   Operation<B>, Lower<B>, Input, AnyInput, AnyOperation (erased bridge)
   io.rs              Source<B>, Target<K,B>, AnySource (erased bridge)
-  node.rs            Node<B>, Data<K,B>                      (immutable DAG handle)
+  node.rs            Node<B>, Data<K,B>, GraphWalk           (immutable DAG handle + walk)
   buffer.rs          Buffer<B>                               (backend-resident)
   backend/mod.rs     Backend trait
   backend/gpu/       GpuBackend, GpuBuilder, GpuView, GpuContext (pipeline cache), GpuBuffer,
-                     view.rs (View/ParamBlock/Role/Binding/TempSpec — GPU vocabulary),
-                     materialize.rs (demand_walk + lower_walk, type-blind),
-                     emit.rs / compile.rs / slang.rs (Slang JIT → SPIR-V → pipeline)
+                     view.rs (View/ParamBlock/ViewAdapter/OutputWrap — GPU vocabulary),
+                     emit.rs (builder -> Slang text) / compile.rs (cache+dispatch) / slang.rs (JIT)
   backend/vips/      VipsBackend, VipsBuilder (node-keyed handle map), VipsBand,
-                     mod.rs (lower_walk, deduped); gobject/source/target/… = FFI plumbing
-  data/              concrete datatypes: image.rs, histogram.rs, vectorscope.rs
+                     mod.rs; gobject/source/target/working = FFI + CPU custom-region plumbing
+  data/              concrete datatypes: image.rs, histogram.rs, vectorscope.rs, ...
   color/ pixel/      color science + pixel formats (agnostic metadata used by Kinds)
+docs/
+  architecture.md    full reference: types/traits/algorithms/recipes (read this first)
 tests/
   smoke.rs           GPU: ImageKind+Blur+ImageSource type-check end to end
   vips_smoke.rs      Vips: SAME generic traits, different Lower
@@ -244,7 +254,7 @@ tests/
 
 ---
 
-## 10. Verification (run before claiming done)
+## 9. Verification (run before claiming done)
 
 ```
 cargo build --lib        # MUST be 0 errors

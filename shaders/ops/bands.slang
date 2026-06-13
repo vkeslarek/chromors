@@ -60,17 +60,23 @@ public void add_to_band_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, 
 // the fifth band is stored in the alpha channel (overwriting band 3) and the
 // caller should use the CPU Vips path for lossless 5-band images.
 
+// 1- and 2-band outputs use the Gray/GrayA codecs, which encode from a
+// broadcast (r=g=b=gray, a=alpha) working value -- not from distinct r/g
+// components -- so the joined band(s) must be broadcast across rgb.
+
 public void bandjoin1_kernel<R: IRegion>(uint2 idx, R src0, RWRegion output, uint ch0)
 {
     float4 c0 = src0.read(idx);
-    output.write(idx, float4(c0[ch0], 0.0, 0.0, 1.0));
+    float v = c0[ch0];
+    output.write(idx, float4(v, v, v, 1.0));
 }
 
 public void bandjoin2_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 src0, R2 src1, RWRegion output, uint ch0, uint ch1)
 {
     float4 c0 = src0.read(idx);
     float4 c1 = src1.read(idx);
-    output.write(idx, float4(c0[ch0], c1[ch1], 0.0, 1.0));
+    float v = c0[ch0];
+    output.write(idx, float4(v, v, v, c1[ch1]));
 }
 
 public void bandjoin3_kernel<R1: IRegion, R2: IRegion, R3: IRegion>(uint2 idx, R1 src0, R2 src1, R3 src2, RWRegion output, uint ch0, uint ch1, uint ch2)
@@ -138,29 +144,74 @@ public void bandbool_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uin
     output.write(idx, float4(fr, fr, fr, 1.0));
 }
 
-public void bandfold_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint factor)
+// Bandfold/bandunfold pack/unpack the X axis into band planes (vips
+// `bandfold`/`bandunfold`: out pixel = memcpy of `factor` consecutive input
+// pixels' worth of bytes). A working float4 holds at most 4 bands, and the
+// Gray/GrayA codecs decode/encode a 1- or 2-band image as a *broadcast*
+// (r=g=b=v, a=alpha) rather than packing distinct values into r/g -- so band
+// `c` of an `n`-band pixel must be read/written through these helpers, not
+// `c[band]` directly.
+
+float band_get(float4 c, uint band, uint n_bands)
 {
-    uint f = max(factor, 1u);
-    uint src_y = idx.y / f;
-    uint band = idx.y % f;
-    float4 c = input.read(uint2(idx.x, src_y));
-    float val;
-    if (band == 0u) val = c.r;
-    else if (band == 1u) val = c.g;
-    else if (band == 2u) val = c.b;
-    else val = c.a;
-    output.write(idx, float4(val, val, val, 1.0));
+    if (n_bands <= 1u) return c.r;
+    if (n_bands == 2u) return (band == 0u) ? c.r : c.a;
+    if (band == 0u) return c.r;
+    if (band == 1u) return c.g;
+    if (band == 2u) return c.b;
+    return c.a;
 }
 
-public void bandunfold_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint factor)
+float4 band_set(float4 c, uint band, uint n_bands, float val)
 {
-    float4 out_val = float4(0.0, 0.0, 0.0, 1.0);
+    if (n_bands <= 1u) { c.r = val; c.g = val; c.b = val; return c; }
+    if (n_bands == 2u) {
+        if (band == 0u) { c.r = val; c.g = val; c.b = val; }
+        else { c.a = val; }
+        return c;
+    }
+    if (band == 0u) c.r = val;
+    else if (band == 1u) c.g = val;
+    else if (band == 2u) c.b = val;
+    else c.a = val;
+    return c;
+}
+
+public void bandfold_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint factor, uint in_bands, uint out_bands)
+{
     uint f = max(factor, 1u);
-    if (f >= 1u) out_val.r = input.read(uint2(idx.x, idx.y * f + 0u)).r;
-    if (f >= 2u) out_val.g = input.read(uint2(idx.x, idx.y * f + 1u)).r;
-    if (f >= 3u) out_val.b = input.read(uint2(idx.x, idx.y * f + 2u)).r;
-    if (f >= 4u) out_val.a = input.read(uint2(idx.x, idx.y * f + 3u)).r;
-    output.write(idx, out_val);
+    float4 result = float4(0.0, 0.0, 0.0, 1.0);
+
+    for (uint k = 0u; k < f; k++)
+    {
+        float4 c = input.read(uint2(idx.x * f + k, idx.y));
+        for (uint ci = 0u; ci < in_bands; ci++)
+        {
+            uint out_band = k * in_bands + ci;
+            if (out_band < out_bands)
+                result = band_set(result, out_band, out_bands, band_get(c, ci, in_bands));
+        }
+    }
+
+    output.write(idx, result);
+}
+
+public void bandunfold_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint factor, uint in_bands, uint out_bands)
+{
+    uint f = max(factor, 1u);
+    uint x_in = idx.x / f;
+    uint k = idx.x % f;
+    float4 c = input.read(uint2(x_in, idx.y));
+    float4 result = float4(0.0, 0.0, 0.0, 1.0);
+
+    for (uint b = 0u; b < out_bands; b++)
+    {
+        uint in_band = k * out_bands + b;
+        if (in_band < in_bands)
+            result = band_set(result, b, out_bands, band_get(c, in_band, in_bands));
+    }
+
+    output.write(idx, result);
 }
 
 public void bandmean_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint bands)

@@ -263,11 +263,11 @@ impl crate::data::image::Image2D<GpuBackend> {
     pub fn sobel(&self) -> Self {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
-        let mask_gx = crate::data::mask2d::Mask2D::from_values(
+        let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             std::sync::Arc::clone(&ctx), 3, 3,
             &[-1.0, 0.0, 1.0, -2.0, 0.0, 2.0, -1.0, 0.0, 1.0]
         );
-        let mask_gy = crate::data::mask2d::Mask2D::from_values(
+        let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             ctx, 3, 3,
             &[-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0]
         );
@@ -286,11 +286,11 @@ impl crate::data::image::Image2D<GpuBackend> {
     pub fn prewitt(&self) -> Self {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
-        let mask_gx = crate::data::mask2d::Mask2D::from_values(
+        let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             std::sync::Arc::clone(&ctx), 3, 3,
             &[-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
         );
-        let mask_gy = crate::data::mask2d::Mask2D::from_values(
+        let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             ctx, 3, 3,
             &[-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
         );
@@ -309,11 +309,11 @@ impl crate::data::image::Image2D<GpuBackend> {
     pub fn scharr(&self) -> Self {
         use crate::operation::convolution::Convolution;
         let ctx = std::sync::Arc::clone(self.ctx());
-        let mask_gx = crate::data::mask2d::Mask2D::from_values(
+        let mask_gx = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             std::sync::Arc::clone(&ctx), 3, 3,
             &[-3.0, 0.0, 3.0, -10.0, 0.0, 10.0, -3.0, 0.0, 3.0]
         );
-        let mask_gy = crate::data::mask2d::Mask2D::from_values(
+        let mask_gy = crate::data::mask2d::Mask2D::<GpuBackend>::from_values(
             ctx, 3, 3,
             &[-3.0, -10.0, -3.0, 0.0, 0.0, 0.0, 3.0, 10.0, 3.0]
         );

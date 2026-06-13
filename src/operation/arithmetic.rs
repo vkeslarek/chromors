@@ -21,7 +21,7 @@ pub struct Add<B: Backend> {
 impl<B: Backend> Operation<B> for Add<B> where Add<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -46,7 +46,7 @@ pub struct Subtract<B: Backend> {
 impl<B: Backend> Operation<B> for Subtract<B> where Subtract<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -71,7 +71,7 @@ pub struct Multiply<B: Backend> {
 impl<B: Backend> Operation<B> for Multiply<B> where Multiply<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -96,7 +96,7 @@ pub struct Divide<B: Backend> {
 impl<B: Backend> Operation<B> for Divide<B> where Divide<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -121,7 +121,7 @@ pub struct MaxPair<B: Backend> {
 impl<B: Backend> Operation<B> for MaxPair<B> where MaxPair<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -146,7 +146,7 @@ pub struct MinPair<B: Backend> {
 impl<B: Backend> Operation<B> for MinPair<B> where MinPair<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -171,7 +171,7 @@ pub struct Remainder<B: Backend> {
 impl<B: Backend> Operation<B> for Remainder<B> where Remainder<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -196,7 +196,7 @@ pub struct Complexform<B: Backend> {
 impl<B: Backend> Operation<B> for Complexform<B> where Complexform<B>: Lower<B> {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
@@ -227,7 +227,7 @@ where
 {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.cmplx.into_vips());
@@ -319,7 +319,7 @@ where
 {
     type Output = ImageKind;
     fn inputs(&self) -> Vec<&dyn AnyInput<B>> { vec![&self.left, &self.right] }
-    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone()))] }
+    fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> { vec![Some(WorkUnit::Region(out.clone())); 2] }
     fn output_spec(&self) -> ImageKind { (*self.left.spec).clone() }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_i32(self.math2.into_vips());
@@ -360,7 +360,12 @@ impl Lower<GpuBackend> for MinPair<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "min_kernel"); cx.output(self.output_spec().output(cx.wu())); }
 }
 impl Lower<GpuBackend> for Remainder<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "remainder_kernel"); cx.output(self.output_spec().output(cx.wu())); }
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let src_max = self.left.spec.format.component_max_f64() as f32;
+        cx.param_block(ParamBlock::scalar("src_max", src_max));
+        cx.kernel("ops.arithmetic", "remainder_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
 }
 impl Lower<GpuBackend> for Complexform<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) { cx.kernel("ops.arithmetic", "complexform_kernel"); cx.output(self.output_spec().output(cx.wu())); }
@@ -380,10 +385,17 @@ impl Lower<GpuBackend> for Math<GpuBackend> {
     }
 }
 impl Lower<GpuBackend> for Round<GpuBackend> {
-    fn lower(&self, cx: &mut GpuBuilder) { 
-        cx.param_block(ParamBlock::scalar("op", self.round.into_vips() as u32));
-        cx.kernel("ops.arithmetic", "round_kernel"); 
-        cx.output(self.output_spec().output(cx.wu())); 
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let src_max = self.input.spec.format.component_max_f64() as f32;
+        // Field order must match round_kernel's parameter order exactly --
+        // kernel args are bound positionally from this block.
+        cx.param_block(
+            ParamBlock::new()
+                .param("op", self.round.into_vips() as u32)
+                .param("src_max", src_max),
+        );
+        cx.kernel("ops.arithmetic", "round_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 impl Lower<GpuBackend> for Math2<GpuBackend> {

@@ -2,7 +2,7 @@ mod common;
 
 use poc::backend::gpu::GpuBackend;
 use poc::data::histogram::RawTarget;
-use poc::data::image::{Image2D as GenImage, RamImageTarget};
+use poc::data::image::{Image2D as GenImage, ImageKind as GenImageKind, RamImageTarget};
 use poc::io::Target;
 use poc::work_unit::{Atomic, Lod, Region};
 
@@ -220,8 +220,14 @@ fn data_driven_kernels_compile_and_run() {
     let vips_img = common::rgba();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let lut = gpu_img.crop(0, 0, 256, 1);
-    let matrix = gpu_img.crop(0, 0, 3, 3);
+    let lut_data: Vec<f32> = (0..256)
+        .flat_map(|i| {
+            let v = i as f32 / 255.0;
+            [v, v, v, 1.0]
+        })
+        .collect();
+    let lut = poc::data::lut::Lut::from_values(ctx.clone(), 256, 4, &lut_data);
+    let matrix = poc::data::mask2d::Mask2D::identity(ctx.clone(), 3);
     let cond = gpu_img.crop(0, 0, 10, 10);
     let bg = gpu_img.crop(0, 0, 10, 10);
     let t = gpu_img.crop(0, 0, 10, 10);
@@ -327,4 +333,106 @@ fn edge_detection_kernels_compile_and_run() {
         let bytes = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
+}
+
+// ── Reinterpret (kind-polymorphism) ────────────────────────────────────────────
+
+/// A test-only Kind whose payload is byte-identical to `ImageKind` plus a
+/// host-side tag — stands in for `VideoFrameKind` (docs/kind-polymorphism.md)
+/// without needing a video module.
+#[derive(Clone, Debug, PartialEq)]
+struct TaggedImageKind {
+    image: poc::data::image::ImageKind,
+    tag: u32,
+}
+
+impl poc::kind::AnyKind for TaggedImageKind {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn byte_size(&self, wu: &poc::work_unit::WorkUnit) -> u64 {
+        self.image.byte_size(wu)
+    }
+    fn dyn_hash(&self, state: &mut dyn std::hash::Hasher) {
+        self.image.dyn_hash(state);
+        state.write_u32(self.tag);
+    }
+}
+
+impl poc::kind::Kind for TaggedImageKind {
+    type WorkUnit = Region;
+}
+
+impl poc::backend::gpu::GpuView for TaggedImageKind {
+    fn input(&self) -> poc::backend::gpu::View {
+        self.image.input()
+    }
+    fn output(&self, wu: &poc::work_unit::WorkUnit) -> poc::backend::gpu::OutputWrap {
+        self.image.output(wu)
+    }
+}
+
+impl poc::kind::ReinterpretAs<poc::data::image::ImageKind> for TaggedImageKind {
+    fn reinterpret_spec(&self) -> poc::data::image::ImageKind {
+        self.image.clone()
+    }
+}
+
+#[test]
+fn reinterpret_cast_is_transparent_to_compute() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+
+    // Plain path: invert directly on the image.
+    let plain = gpu_img.invert().pull(&RamImageTarget, rect.clone()).unwrap();
+
+    // Cast → invert → cast back → cast to image again, same byte rect.
+    let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
+        gpu_img.reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 42 });
+    let roundtrip = tagged
+        .reinterpret::<GenImageKind>()
+        .invert()
+        .reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 7 })
+        .reinterpret::<GenImageKind>()
+        .pull(&RamImageTarget, rect)
+        .unwrap();
+
+    assert_eq!(plain, roundtrip, "Reinterpret casts must be byte-transparent to compute");
+}
+
+#[test]
+fn bare_source_root_pulls() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // Zero ops: the Source leaf is the DAG root, zero kernel steps.
+    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+    let bytes = gpu_img.pull(&RamImageTarget, rect).unwrap();
+    assert!(!bytes.is_empty());
+}
+
+#[test]
+fn reinterpret_root_cast_pulls() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
+        gpu_img.reinterpret_with(TaggedImageKind { image: (*gpu_img.spec).clone(), tag: 1 });
+
+    let rect = Region { x: 0, y: 0, w: gpu_img.width(), h: gpu_img.height(), lod: Lod(0) };
+
+    let direct = gpu_img.pull(&RamImageTarget, rect.clone()).unwrap();
+    // Root = Reinterpret(Tagged->Image), input = Reinterpret(Image->Tagged), input = Source.
+    // Zero kernel steps anywhere in the graph.
+    let via_cast = tagged.reinterpret::<GenImageKind>().pull(&RamImageTarget, rect).unwrap();
+
+    assert_eq!(direct, via_cast, "root Reinterpret cast must read through to its input unchanged");
 }
