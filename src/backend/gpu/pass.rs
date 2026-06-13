@@ -382,3 +382,31 @@ pub(crate) fn gpu_materialize(
     // Materialize the reduced DAG (should now fit in budget).
     crate::node::materialize::<GpuBackend>(ctx, &new_root, wu)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_binding_count_scratch_output() {
+        assert_eq!(binding_count(3, 2, true), 7);
+    }
+
+    #[test]
+    fn test_binding_count_direct_output() {
+        assert_eq!(binding_count(3, 2, false), 6);
+    }
+
+    #[test]
+    fn test_binding_count_zero_steps() {
+        assert_eq!(binding_count(0, 1, true), 3);
+        assert_eq!(binding_count(0, 1, false), 3);
+    }
+
+    #[test]
+    fn test_exceeds_binding_limit_check() {
+        assert!(exceeds_binding_limit(10, 5, true, 16));
+        assert!(!exceeds_binding_limit(10, 5, true, 17));
+        assert!(!exceeds_binding_limit(10, 5, true, 18));
+    }
+}

@@ -198,3 +198,108 @@ impl WorkUnitFor for Atomic {
         if let WorkUnit::Atomic = wu { Some(Atomic) } else { None }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_region_fits_returns_single_tile() {
+        let wu = WorkUnit::Region(Region { x: 0, y: 0, w: 100, h: 100, lod: Lod(0) });
+        let tiles = wu.split(1_000_000, |wu| match wu {
+            WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 4,
+            _ => 0,
+        }).unwrap();
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0], wu);
+    }
+
+    #[test]
+    fn split_region_bisects_landscape() {
+        let wu = WorkUnit::Region(Region { x: 0, y: 0, w: 200, h: 100, lod: Lod(0) });
+        let tiles = wu.split(50_000, |wu| match wu {
+            WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 4,
+            _ => 0,
+        }).unwrap();
+        assert!(tiles.len() >= 2);
+        for tile in &tiles {
+            let bytes = match tile { WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 4, _ => panic!() };
+            assert!(bytes <= 50_000);
+        }
+        let total_pixels: i64 = tiles.iter().map(|t| match t { WorkUnit::Region(r) => r.w as i64 * r.h as i64, _ => 0 }).sum();
+        assert_eq!(total_pixels, 200 * 100);
+    }
+
+    #[test]
+    fn split_region_bisects_portrait() {
+        let wu = WorkUnit::Region(Region { x: 0, y: 0, w: 100, h: 200, lod: Lod(0) });
+        let tiles = wu.split(50_000, |wu| match wu {
+            WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 4,
+            _ => 0,
+        }).unwrap();
+        assert!(tiles.len() >= 2);
+        let WorkUnit::Region(first) = &tiles[0] else { panic!() };
+        let WorkUnit::Region(second) = &tiles[1] else { panic!() };
+        assert_eq!(first.y, 0); assert_eq!(first.h, 100);
+        assert_eq!(second.y, 100); assert_eq!(second.h, 100);
+    }
+
+    #[test]
+    fn split_region_recursive_many_tiles() {
+        let wu = WorkUnit::Region(Region { x: 0, y: 0, w: 1000, h: 1000, lod: Lod(0) });
+        let tiles = wu.split(1_000_000, |wu| match wu {
+            WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 16,
+            _ => 0,
+        }).unwrap();
+        assert!(tiles.len() >= 16);
+        for tile in &tiles {
+            let bytes = match tile { WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 16, _ => panic!() };
+            assert!(bytes <= 1_000_000);
+        }
+        let total: i64 = tiles.iter().map(|t| match t { WorkUnit::Region(r) => r.w as i64 * r.h as i64, _ => 0 }).sum();
+        assert_eq!(total, 1_000_000);
+    }
+
+    #[test]
+    fn split_region_preserves_offset_and_lod() {
+        let wu = WorkUnit::Region(Region { x: 50, y: 100, w: 200, h: 200, lod: Lod(2) });
+        let tiles = wu.split(50_000, |wu| match wu {
+            WorkUnit::Region(r) => (r.w as u64) * (r.h as u64) * 4,
+            _ => 0,
+        }).unwrap();
+        for tile in &tiles {
+            let WorkUnit::Region(r) = tile else { panic!() };
+            assert_eq!(r.lod, Lod(2));
+            assert!(r.x >= 50);
+            assert!(r.y >= 100);
+        }
+    }
+
+    #[test]
+    fn split_range_bisects() {
+        let wu = WorkUnit::Range(Range { start: 0, end: 1000 });
+        let tiles = wu.split(500, |wu| match wu {
+            WorkUnit::Range(r) => (r.end - r.start) as u64,
+            _ => 0,
+        }).unwrap();
+        assert!(tiles.len() >= 2);
+        for tile in &tiles {
+            let bytes = match tile { WorkUnit::Range(r) => (r.end - r.start) as u64, _ => panic!() };
+            assert!(bytes <= 500);
+        }
+    }
+
+    #[test]
+    fn split_atomic_returns_error() {
+        let wu = WorkUnit::Atomic;
+        let result = wu.split(100, |_| 200);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_atomic_below_limit_returns_single() {
+        let wu = WorkUnit::Atomic;
+        let tiles = wu.split(100, |_| 50).unwrap();
+        assert_eq!(tiles.len(), 1);
+    }
+}
