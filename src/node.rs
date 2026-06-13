@@ -26,6 +26,14 @@ pub enum Node<B: Backend> {
 }
 
 impl<B: Backend> Node<B> {
+    pub fn is_source(&self) -> bool {
+        matches!(self, Node::Source(_))
+    }
+
+    pub fn is_op(&self) -> bool {
+        matches!(self, Node::Op(_))
+    }
+
     pub fn output_kind(&self) -> Arc<dyn AnyKind> {
         match self {
             Node::Source(src) => src.output_kind(),
@@ -52,6 +60,16 @@ impl<B: Backend> Node<B> {
             Node::Source(_) => vec![],
             Node::Op(op) => op.demand_erased(wu),
         }
+    }
+
+    /// Construct an Op node from an erased operation.
+    pub fn from_op(op: Arc<dyn AnyOperation<B>>) -> Self {
+        Node::Op(op)
+    }
+
+    /// Construct a Source node from an erased source.
+    pub fn from_source(src: Arc<dyn crate::io::AnySource<B>>) -> Self {
+        Node::Source(src)
     }
 }
 

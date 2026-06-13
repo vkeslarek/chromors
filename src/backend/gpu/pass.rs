@@ -10,7 +10,7 @@
 //!    remaining pass under the binding budget.
 //! 3. **Pre-materialize** each cut subgraph independently (parallel via rayon).
 //! 4. **Rebuild** the DAG with lightweight wrapper nodes (`RebuiltOp`) that
-//!    swap the cut children for `BufferImageSource` leaves. The wrapper
+//!    swap the cut children for `StagingSource` leaves. The wrapper
 //!    delegates `lower`/`demand`/`output_kind`/`dyn_hash` to the original op —
 //!    only `inputs()` is overridden. `GraphWalk` traverses the rebuilt tree
 //!    naturally, no modifications needed.
@@ -55,35 +55,23 @@ pub fn exceeds_binding_limit(
     binding_count(n_steps, n_sources, needs_scratch) > max_storage_buffers as usize
 }
 
-// ── DAG wrapper nodes ────────────────────────────────────────────────────────
+// ── DAG wrapper nodes (GPU-specific) ──────────────────────────────────────────
 
-/// A lightweight `AnyInput` that holds a rebuilt child node + its Kind.
-/// Used by `RebuiltOp` to point `inputs()` at new (possibly cut-replaced) children.
+/// A lightweight `AnyInput` for rebuilt children.
 struct StubInput {
     node: Arc<Node<GpuBackend>>,
     kind: Arc<dyn AnyKind>,
 }
 
 impl AnyInput<GpuBackend> for StubInput {
-    fn src(&self) -> &Arc<Node<GpuBackend>> {
-        &self.node
-    }
-    fn spec(&self) -> &dyn AnyKind {
-        self.kind.as_ref()
-    }
+    fn src(&self) -> &Arc<Node<GpuBackend>> { &self.node }
+    fn spec(&self) -> &dyn AnyKind { self.kind.as_ref() }
 }
 
-/// Wrapper around an existing `AnyOperation` that overrides `inputs()` to
-/// return rebuilt children (with cut nodes replaced by `BufferImageSource`
-/// leaves). All other behavior delegates to the original op unchanged.
-///
-/// `GraphWalk` calls `node.inputs()` → gets our `StubInput`s → traverses the
-/// rebuilt tree naturally. `lower()` delegates to the original op, which
-/// interacts with `GpuBuilder` via `cx.kernel()`/`cx.param()`/`cx.output()`
-/// — the builder resolves inputs by `NodeId` from `enter()`, which receives
-/// the correct rebuilt NodeIds from the walk.
+/// Wraps an existing node, overrides `inputs()` with rebuilt children.
+/// All other behavior delegates to the original node.
 struct RebuiltOp {
-    original: Arc<dyn AnyOperation<GpuBackend>>,
+    original: Arc<Node<GpuBackend>>,
     inputs: Vec<StubInput>,
 }
 
@@ -91,36 +79,32 @@ impl AnyOperation<GpuBackend> for RebuiltOp {
     fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
         self.inputs.iter().map(|i| i as &dyn AnyInput<GpuBackend>).collect()
     }
-
     fn demand_erased(&self, out: &WorkUnit) -> Vec<Option<WorkUnit>> {
         self.original.demand_erased(out)
     }
-
     fn output_kind(&self) -> Arc<dyn AnyKind> {
         self.original.output_kind()
     }
-
     fn lower(&self, cx: &mut GpuBuilder) {
         self.original.lower(cx)
     }
-
-    fn dyn_hash(&self, state: &mut dyn Hasher) {
-        self.original.dyn_hash(state)
+    fn dyn_hash(&self, state: &mut dyn std::hash::Hasher) {
+        state.write_usize(Arc::as_ptr(&self.original) as usize);
     }
 }
 
-// ── BufferImageSource — staging cut result as a DAG leaf ─────────────────────
+// ── StagingSource — staging cut result as a DAG leaf ─────────────────────
 
 /// A GPU source backed by a pre-materialized `GpuBuffer`. Created by the
 /// CutFinder when a subgraph is pre-dispatched and its result injected as a
 /// new source leaf. The buffer contains pixel data in the format described
 /// by its `ImageKind`.
-pub struct BufferImageSource {
+pub struct StagingSource {
     spec: Arc<crate::data::image::ImageKind>,
     buffer: Arc<GpuBuffer>,
 }
 
-impl Source<GpuBackend> for BufferImageSource {
+impl Source<GpuBackend> for StagingSource {
     type Kind = crate::data::image::ImageKind;
 
     fn spec(&self) -> Arc<crate::data::image::ImageKind> {
@@ -179,9 +163,10 @@ fn analyze_dag(root: &Arc<Node<GpuBackend>>) -> DagAnalysis {
         }
         levels[depth].push(node.clone());
 
-        match &*node {
-            Node::Source(_) => n_sources += 1,
-            Node::Op(_) => n_ops += 1,
+        if node.is_source() {
+            n_sources += 1;
+        } else {
+            n_ops += 1;
         }
 
         for input in node.inputs() {
@@ -213,8 +198,8 @@ fn find_cuts(
         return vec![];
     }
 
-    let is_op = |n: &Arc<Node<GpuBackend>>| matches!(&**n, Node::Op(_));
-    let is_source = |n: &Arc<Node<GpuBackend>>| matches!(&**n, Node::Source(_));
+    let is_op = |n: &Arc<Node<GpuBackend>>| n.is_op();
+    let is_source = |n: &Arc<Node<GpuBackend>>| n.is_source();
 
     // Try each BFS depth as a candidate cut level (shallow first).
     for cut_depth in 1..analysis.levels.len() {
@@ -264,7 +249,7 @@ fn find_cuts(
 
 // ── DAG rebuild ──────────────────────────────────────────────────────────────
 
-/// Recursively rebuild the DAG, replacing cut nodes with `BufferImageSource`
+/// Recursively rebuild the DAG, replacing cut nodes with `StagingSource`
 /// leaves. Unchanged subtrees share the original `Arc<Node>`. Only paths
 /// that contain a replacement get new `RebuiltOp` wrapper nodes.
 fn rebuild_dag(
@@ -277,11 +262,12 @@ fn rebuild_dag(
         return replacement.clone();
     }
 
-    let Node::Op(op) = &**node else {
-        return node.clone(); // Source leaf — no children to rebuild.
-    };
+    if node.is_source() {
+        return node.clone();
+    }
 
-    let original_inputs = op.inputs();
+    // Node is an op — check if any child subtree has a replacement.
+    let original_inputs = node.inputs();
     let mut any_changed = false;
 
     let rebuilt_children: Vec<Arc<Node<GpuBackend>>> = original_inputs
@@ -313,8 +299,8 @@ fn rebuild_dag(
         })
         .collect();
 
-    Arc::new(Node::Op(Arc::new(RebuiltOp {
-        original: op.clone(),
+    Arc::new(Node::from_op(Arc::new(RebuiltOp {
+        original: node.clone(),
         inputs: stubs,
     })))
 }
@@ -358,7 +344,7 @@ pub(crate) fn gpu_materialize(
             // Recursive: if the subgraph still exceeds limits, it'll cut again.
             let buf = gpu_materialize(ctx, cut_node, wu)?;
 
-            // Wrap the result as a BufferImageSource leaf.
+            // Wrap the result as a StagingSource leaf.
             let img_kind = buf
                 .spec
                 .as_any()
@@ -370,12 +356,12 @@ pub(crate) fn gpu_materialize(
                     ))
                 })?;
 
-            let source = Arc::new(BufferImageSource {
+            let source = Arc::new(StagingSource {
                 spec: Arc::new(img_kind.clone()),
                 buffer: buf.payload,
             });
 
-            let source_node: Arc<Node<GpuBackend>> = Arc::new(Node::Source(
+            let source_node: Arc<Node<GpuBackend>> = Arc::new(Node::from_source(
                 source as Arc<dyn crate::io::AnySource<GpuBackend>>,
             ));
 

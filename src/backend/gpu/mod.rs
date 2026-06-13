@@ -463,22 +463,13 @@ impl Builder<GpuBackend> for GpuBuilder {
             return Err(e);
         }
 
-        // Binding budget: the CutFinder (pass::gpu_materialize) should have
-        // already split the DAG so this pass fits. If it still doesn't, that's
-        // a bug in the CutFinder — fail loudly rather than silently submitting
-        // an invalid bind group.
-        let n_bindings = pass::binding_count(
-            self.steps.len(),
-            self.source_buffers.len(),
-            self.needs_scratch(),
+        debug_assert!(
+            pass::binding_count(self.steps.len(), self.source_buffers.len(), self.needs_scratch())
+                <= self.ctx.max_storage_buffers as usize,
+            "CutFinder should have split this pass (need {} bindings, device has {})",
+            pass::binding_count(self.steps.len(), self.source_buffers.len(), self.needs_scratch()),
+            self.ctx.max_storage_buffers,
         );
-        if n_bindings > self.ctx.max_storage_buffers as usize {
-            return Err(Error::Backend(format!(
-                "fused pass requires {} storage buffer bindings but the device \
-                 supports at most {} — CutFinder failed to reduce the pass",
-                n_bindings, self.ctx.max_storage_buffers
-            )));
-        }
 
         let dims = self.dispatch.unwrap_or((1, 1));
         RegionParams::tight(dims.0 as i32, dims.1 as i32).push_into(&mut self.params, "domain");
