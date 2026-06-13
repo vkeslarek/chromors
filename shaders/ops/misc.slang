@@ -73,7 +73,7 @@ public void invertlut_kernel<R1: IRegion>(
 public void saturation_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float amount)
 {
     float4 c = input.read(idx);
-    float l = _luma(c.rgb);
+    float l = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
     c.rgb = lerp(float3(l, l, l), c.rgb, amount);
     output.write(idx, c);
 }

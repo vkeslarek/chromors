@@ -7,9 +7,9 @@ A next-generation, backend-agnostic image and vector graphics processing engine 
 ## Key Features
 
 * **Unified Polymorphic Graph:** A single evaluation graph that orchestrates nodes across different computation backends.
-* **Backend-Agnostic Core:** The core abstraction `Data<K, B>` isolates operations, allowing you to seamlessly swap or interact between different processing engines.
-* **Type-Safe `Kinds`:** Operations are strongly typed by data kinds (`ImageKind`, `Mask2DKind`, `HistogramKind`, `LutKind`, `Fft2DKind`, `VectorGraphicsKind`). The compiler guarantees you don't accidentally treat a histogram or an FFT spectrum as a colorimetric picture.
-* **Zero-Copy Interoperability:** Effortlessly bridge buffers between CPU, GPU, and memory via the `Source`/`Target` materialization abstraction.
+* **Backend-Agnostic Core:** The core abstraction using phantom-typed handles like `Image2D<B>` isolates operations, allowing you to seamlessly swap or interact between different processing engines.
+* **Type-Safe `Kinds`:** Operations are strongly typed by data types (`ImageType`, `Mask2DType`, `HistogramType`, `LutType`, `Fft2DType`, `FeaturesType`). The compiler guarantees you don't accidentally treat a histogram or an FFT spectrum as a colorimetric picture.
+* **Zero-Copy Interoperability:** Effortlessly bridge buffers between CPU, GPU, and memory via the `Sourceable`/`Targetable` materialization abstraction.
 * **Tiered Caching:** JIT operations are intelligently cached across VRAM, RAM, and Disk to ensure blazing fast real-time responsiveness.
 * **Color Science Engine:** Industry-standard color space primitives, chromatic adaptation, and transfer functions (`SRGB`, `ACES_CG`, `DISPLAY_P3`, `REC2020`, etc.).
 
@@ -99,22 +99,22 @@ Chromors includes a comprehensive suite of operations. The GPU backend provides 
 ### Abstraction Model
 Backends are bound by a strict contract of traits. You interact with data through unified mechanisms rather than backend-specific calls:
 
-* `Source<B>`: The only door into the model. Translates backend-specific inputs into the computation graph.
-* `Target<K, B>`: The only door out of the model. Materializes graph results into physical RAM or backend-specific structures.
-* `Operation<B>`: Represents polymorphic data transformations.
-* `Data<K, B>`: The core node structure that holds a lazy evaluation tree. Provides ergonomic inherent methods (like `.blur()`, `.sobel()`) that push operations into the graph.
+* `Sourceable`: Translates backend-specific inputs into the computation graph.
+* `Targetable`: The only door out of the model. Materializes graph results into physical RAM or backend-specific structures (using `.pull()`).
+* `TypedOperation`: Represents polymorphic data transformations in a strongly-typed graph.
+* **Phantom-typed Handles**: Structures like `Image2D<B>` and `Histogram<B>` provide a clean, type-safe API for end-users, encapsulating backend-specific handles (e.g. `GraphNodeHandle` for JIT GPU computation, or `VipsImage` for CPU processing).
 
 ### Vips is the Ground Truth
 Chromors tests heavily rely on cross-backend validation. Operations running on the GPU MUST produce identical mathematical results as `libvips` within a strict tolerance limit. 
 
 ### Data Kinds
 Not everything is an image. Chromors treats different memory topologies as explicit structs:
-* `ImageKind`: Colorimetric picture data (e.g., RGBA pixels).
-* `Mask2DKind`: Floating-point weight grids (e.g., convolution kernels).
-* `HistogramKind`: Atomic bin counts.
-* `LutKind`: 1D lookup tables.
-* `Fft2DKind`: Complex-valued frequency planes.
-* `VectorGraphicsKind`: Resolution-independent paths and curves.
+* `ImageType`: Colorimetric picture data (e.g., RGBA pixels).
+* `Mask2DType`: Floating-point weight grids (e.g., convolution kernels).
+* `HistogramType`: Atomic bin counts.
+* `LutType`: 1D lookup tables.
+* `Fft2DType`: Complex-valued frequency planes.
+* `FeaturesType`: Arbitrary point features or reduction lists.
 
 ## Building & Testing
 
