@@ -181,7 +181,7 @@ impl Lower<GpuBackend> for Gamma<GpuBackend> {
         cx.param_block(ParamBlock::new()
             .param("exponent", self.exponent.unwrap_or(1.0) as f32)
         );
-        cx.kernel("ops.gamma", "gamma_kernel");
+        cx.kernel("ops.icc", "gamma_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }

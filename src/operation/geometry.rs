@@ -232,7 +232,7 @@ impl Lower<GpuBackend> for Resize<GpuBackend> {
             .param("inv_hscale", (1.0 / hscale) as f32)
             .param("inv_vscale", (1.0 / vscale) as f32)
         );
-        cx.kernel("ops.resample", "resize_kernel");
+        cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -243,7 +243,7 @@ impl Lower<GpuBackend> for Reduce<GpuBackend> {
             .param("inv_hscale", self.horizontal as f32)
             .param("inv_vscale", self.vertical as f32)
         );
-        cx.kernel("ops.resample", "resize_kernel");
+        cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -254,7 +254,7 @@ impl Lower<GpuBackend> for ReduceHorizontal<GpuBackend> {
             .param("inv_hscale", self.shrink as f32)
             .param("inv_vscale", 1.0f32)
         );
-        cx.kernel("ops.resample", "resize_kernel");
+        cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -265,7 +265,7 @@ impl Lower<GpuBackend> for ReduceVertical<GpuBackend> {
             .param("inv_hscale", 1.0f32)
             .param("inv_vscale", self.shrink as f32)
         );
-        cx.kernel("ops.resample", "resize_kernel");
+        cx.kernel("ops.geometry", "resize_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -336,7 +336,7 @@ impl Lower<GpuBackend> for Embed<GpuBackend> {
             .param("bg_g", bg[1] as f32)
             .param("bg_b", bg[2] as f32)
         );
-        cx.kernel("ops.geometry_extended", "embed_kernel");
+        cx.kernel("ops.geometry", "embed_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -499,7 +499,7 @@ impl Lower<GpuBackend> for Rot45<GpuBackend> {
             .param("in_w", in_spec.width as u32)
             .param("in_h", in_spec.height as u32)
         );
-        cx.kernel("ops.geometry_extended", "rotate_kernel");
+        cx.kernel("ops.geometry", "rotate_kernel");
         cx.output(out_spec.output(cx.wu()));
     }
 }
@@ -573,7 +573,7 @@ impl Lower<GpuBackend> for Rotate<GpuBackend> {
             .param("in_w", in_spec.width as u32)
             .param("in_h", in_spec.height as u32)
         );
-        cx.kernel("ops.geometry_extended", "rotate_kernel");
+        cx.kernel("ops.geometry", "rotate_kernel");
         cx.output(out_spec.output(cx.wu()));
     }
 }
@@ -708,7 +708,7 @@ impl Lower<GpuBackend> for Gravity<GpuBackend> {
             .param("bg_g", bg[1] as f32)
             .param("bg_b", bg[2] as f32)
         );
-        cx.kernel("ops.geometry_extended", "embed_kernel");
+        cx.kernel("ops.geometry", "embed_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -842,7 +842,7 @@ impl Lower<GpuBackend> for Thumbnail<GpuBackend> {
             .param("inv_hscale", inv_hscale)
             .param("inv_vscale", inv_vscale)
         );
-        cx.kernel("ops.resample", "resize_kernel");
+        cx.kernel("ops.geometry", "resize_kernel");
         cx.output(out_spec.output(cx.wu()));
     }
 }
@@ -892,7 +892,7 @@ impl Lower<GpuBackend> for Shrink<GpuBackend> {
             .param("h_factor", self.horizontal.ceil() as u32)
             .param("v_factor", self.vertical.ceil() as u32)
         );
-        cx.kernel("ops.shrink", "shrink_kernel");
+        cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -1074,7 +1074,7 @@ impl Lower<GpuBackend> for ShrinkHorizontal<GpuBackend> {
             .param("h_factor", self.shrink as u32)
             .param("v_factor", 1u32)
         );
-        cx.kernel("ops.shrink", "shrink_kernel");
+        cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -1122,7 +1122,7 @@ impl Lower<GpuBackend> for ShrinkVertical<GpuBackend> {
             .param("h_factor", 1u32)
             .param("v_factor", self.shrink as u32)
         );
-        cx.kernel("ops.shrink", "shrink_kernel");
+        cx.kernel("ops.geometry", "shrink_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -1326,7 +1326,7 @@ impl Lower<GpuBackend> for Grid<GpuBackend> {
             .param("tile_height", self.tile_height as u32)
             .param("across", self.across as u32)
         );
-        cx.kernel("ops.geometry_extended", "grid_kernel");
+        cx.kernel("ops.geometry", "grid_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }

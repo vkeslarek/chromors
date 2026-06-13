@@ -1,28 +1,5 @@
 import lib.region;
-
-public void maplut_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 input, R2 lut, RWRegion output, uint lut_width, int band) {
-    float4 c = input.read(idx);
-    float4 res;
-    // For each channel, map it via LUT. LUT image has width = lut_width, height = 1.
-    // The channel's float value is [0, 1] mapped to [0, lut_width - 1].
-    for (int i = 0; i < 4; i++) {
-        uint idx_lut = uint(clamp(c[i], 0.0, 1.0) * float(lut_width - 1));
-        float4 lut_val = lut.read(uint2(idx_lut, 0));
-        res[i] = lut_val[band >= 0 ? band : i];
-    }
-    output.write(idx, res);
-}
-
-// ── Invertlut ────────────────────────────────────────────────────────────────
-//
-// `lut` holds `height` rows of `(x, y0, y1, y2)` packed into float4 — column
-// 0 is the target value (vips' "in" matrix column 0), columns 1.. are the
-// real-value vertices per output band (vips' "in" matrix columns 1..bands).
-// Rows are assumed pre-sorted by column 0 (vips sorts internally; the GPU
-// port skips that step and requires sorted input).
-//
-// For each output band `bi` and output index `idx.x` (`k`), this mirrors
-// `vips_invertlut`'s piecewise-linear inversion + head/tail extrapolation.
+import lib.color.params;
 
 public void invertlut_kernel<R1: IRegion>(
     uint2 idx, R1 lut, RWRegion output,
@@ -91,6 +68,66 @@ public void invertlut_kernel<R1: IRegion>(
     }
 
     output.write(idx, result);
+}
+
+public void saturation_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float amount)
+{
+    float4 c = input.read(idx);
+    float l = _luma(c.rgb);
+    c.rgb = lerp(float3(l, l, l), c.rgb, amount);
+    output.write(idx, c);
+}
+
+public void passthrough_kernel<R: IRegion>(uint2 idx, R input, RWRegion output)
+{
+    output.write(idx, input.read(idx));
+}
+
+public void msb_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int band) {
+    float4 c = input.read(idx);
+    // Vips `msb` extracts the most-significant byte.
+    // For 8-bit formats, floor(c.rgb * 255.0) is the MSB.
+    // We scale it back to [0,1] for the working space.
+    // Note: this is an approximation valid only for 8-bit source data.
+    float4 msb = floor(c * 255.0) / 255.0;
+    float4 res;
+    if (band >= 0) {
+        float val = msb[band % 4];
+        res = float4(val, val, val, msb.a);
+    } else {
+        res = msb;
+    }
+    output.write(idx, res);
+}
+
+public void exposure_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float gain, float preserve)
+{
+    float4 c = input.read(idx);
+    float3 boosted = c.rgb * gain;
+    if (preserve > 0.0)
+    {
+        float3 soft  = boosted / (1.0 + boosted);
+        float3 hard  = min(boosted, 1.0);
+        c.rgb = lerp(hard, soft, preserve);
+    }
+    else
+    {
+        c.rgb = boosted;
+    }
+    output.write(idx, c);
+}
+
+public void maplut_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 input, R2 lut, RWRegion output, uint lut_width, int band) {
+    float4 c = input.read(idx);
+    float4 res;
+    // For each channel, map it via LUT. LUT image has width = lut_width, height = 1.
+    // The channel's float value is [0, 1] mapped to [0, lut_width - 1].
+    for (int i = 0; i < 4; i++) {
+        uint idx_lut = uint(clamp(c[i], 0.0, 1.0) * float(lut_width - 1));
+        float4 lut_val = lut.read(uint2(idx_lut, 0));
+        res[i] = lut_val[band >= 0 ? band : i];
+    }
+    output.write(idx, res);
 }
 
 public void recomb_kernel<R1: IRegion, R2: IRegion>(uint2 idx, R1 input, R2 matrix, RWRegion output, uint n) {
@@ -183,3 +220,4 @@ public void case5_kernel<R1: IRegion, R2: IRegion, R3: IRegion, R4: IRegion, R5:
     }
     output.write(idx, res);
 }
+

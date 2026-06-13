@@ -6,3 +6,4 @@ public void opacity_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, floa
     c.a *= amount;
     output.write(idx, c);
 }
+

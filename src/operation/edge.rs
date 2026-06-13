@@ -119,21 +119,21 @@ impl Lower<VipsBackend> for Invert<VipsBackend> {
 
 impl Lower<GpuBackend> for Invert<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.kernel("ops.invert", "invert_kernel");
+        cx.kernel("ops.edge", "invert_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Sign<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.kernel("ops.unary", "sign_kernel");
+        cx.kernel("ops.edge", "sign_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for Abs<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.kernel("ops.unary", "abs_kernel");
+        cx.kernel("ops.edge", "abs_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -254,7 +254,7 @@ impl<B: Backend> Operation<B> for Hypot<B> where Hypot<B>: Lower<B> {
 
 impl Lower<GpuBackend> for Hypot<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.kernel("ops.arithmetic", "hypot_kernel");
+        cx.kernel("ops.edge", "hypot_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }

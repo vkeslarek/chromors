@@ -85,7 +85,7 @@ impl Lower<GpuBackend> for Sharpen<GpuBackend> {
         let sigma = self.sigma.unwrap_or(0.5) as f32 / scale;
         let m1 = self.smooth.unwrap_or(1.0) as f32;
         cx.param_block(ParamBlock::new().param("sigma", sigma).param("m1", m1));
-        cx.kernel("ops.gaussian_blur", "sharpen_kernel");
+        cx.kernel("ops.filters", "sharpen_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -174,7 +174,7 @@ where
 impl Lower<GpuBackend> for Median<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new().param("sz", self.size as u32));
-        cx.kernel("ops.convolution", "median_kernel");
+        cx.kernel("ops.filters", "median_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -366,7 +366,7 @@ impl Lower<GpuBackend> for Blur<GpuBackend> {
         // Single-pass 2D kernel (not separable H/V): a separable fused
         // two-step pass would have the V step read NEIGHBOR threads' H
         // output, which a single dispatch can't order across workgroups.
-        cx.kernel("ops.gaussian_blur", "blur_kernel");
+        cx.kernel("ops.filters", "blur_kernel");
         cx.param("sigma", sigma);
         cx.param("radius", gauss_radius(sigma));
         cx.output(self.output_spec().output(cx.wu()));

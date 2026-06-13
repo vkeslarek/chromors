@@ -1,9 +1,5 @@
 import lib.region;
 
-// Porter-Duff compositing — premultiplied formulation matching engine.
-// `mode` matches vips VipsBlendMode: 0 Clear ... 13 Saturate.
-// `bg` = base (dst), `fg` = overlay (src).
-
 public void compose_kernel<R1: IRegion, R2: IRegion>(
     uint2 idx, R1 bg, R2 fg, RWRegion output, uint mode, int ox, int oy)
 {
@@ -46,16 +42,6 @@ public void compose_kernel<R1: IRegion, R2: IRegion>(
     float3 result_rgb = (aR > 0.0) ? (R / aR) : float3(0.0);
     output.write(idx, float4(result_rgb, aR));
 }
-
-// ── Spatial join (vips_join) ──────────────────────────────────────────────────
-//
-// Stitches two images side-by-side (horizontal) or one-on-top-of-the-other
-// (vertical).  `shim` is a pixel gap between them.  Pixels outside both
-// images are filled with `(bg_r, bg_g, bg_b, 0.0)`.
-//
-// `src0_w` / `src0_h` — dimensions of the first image in this output.
-// For horizontal join: src1_x = src0_w + shim, src1_y = 0.
-// For vertical join:   src1_x = 0, src1_y = src0_h + shim.
 
 public void join_kernel<R1: IRegion, R2: IRegion>(
     uint2 idx, R1 src0, R2 src1, RWRegion output,
@@ -105,12 +91,6 @@ public void join_kernel<R1: IRegion, R2: IRegion>(
     output.write(idx, col);
 }
 
-// ── Spatial insert (vips_insert) ──────────────────────────────────────────────
-//
-// Pastes `sub` into `main` at position (x, y).  Pixels within `sub`'s bounds
-// (shifted by x,y) are read from `sub`; everywhere else reads from `main`.
-// Background pixels fall through to `(bg_r, bg_g, bg_b, 0.0)`.
-
 public void insert_kernel<R1: IRegion, R2: IRegion>(
     uint2 idx, R1 main, R2 sub, RWRegion output,
     int x, int y,
@@ -138,3 +118,4 @@ public void insert_kernel<R1: IRegion, R2: IRegion>(
     }
     output.write(idx, col);
 }
+

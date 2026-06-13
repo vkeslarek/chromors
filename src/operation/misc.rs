@@ -540,7 +540,7 @@ impl Lower<GpuBackend> for Invertlut<GpuBackend> {
                 .param("size", size)
                 .param("bands", bands),
         );
-        cx.kernel("ops.data_driven", "invertlut_kernel");
+        cx.kernel("ops.misc", "invertlut_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -895,7 +895,7 @@ impl Lower<VipsBackend> for Saturation<VipsBackend> {
 impl Lower<GpuBackend> for Saturation<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new().param("amount", self.amount));
-        cx.kernel("ops.saturation", "saturation_kernel");
+        cx.kernel("ops.misc", "saturation_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -903,7 +903,7 @@ impl Lower<GpuBackend> for Saturation<GpuBackend> {
 impl Lower<GpuBackend> for Cast<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         // Cast is just a codec change in output_spec.
-        cx.kernel("ops.passthrough", "passthrough_kernel");
+        cx.kernel("ops.misc", "passthrough_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -912,7 +912,7 @@ impl Lower<GpuBackend> for Msb<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         // Warning: MSB is currently implemented as an 8-bit scale extraction.
         cx.param_block(ParamBlock::new().param("band", self.band.unwrap_or(-1)));
-        cx.kernel("ops.unary", "msb_kernel");
+        cx.kernel("ops.misc", "msb_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -925,7 +925,7 @@ impl Lower<GpuBackend> for Exposure<GpuBackend> {
                 .param("gain", gain)
                 .param("preserve", self.preserve),
         );
-        cx.kernel("ops.exposure", "exposure_kernel");
+        cx.kernel("ops.misc", "exposure_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -937,7 +937,7 @@ impl Lower<GpuBackend> for Brightness<GpuBackend> {
                 .param("gain", self.value)
                 .param("preserve", 0.0f32),
         );
-        cx.kernel("ops.exposure", "exposure_kernel");
+        cx.kernel("ops.misc", "exposure_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -949,7 +949,7 @@ impl Lower<GpuBackend> for Maplut<GpuBackend> {
                 .param("lut_width", self.lut.spec.entries as u32)
                 .param("band", self.band.unwrap_or(-1)),
         );
-        cx.kernel("ops.data_driven", "maplut_kernel");
+        cx.kernel("ops.misc", "maplut_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -957,7 +957,7 @@ impl Lower<GpuBackend> for Maplut<GpuBackend> {
 impl Lower<GpuBackend> for Recomb<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new().param("n", self.input.spec.format.channel_count() as u32));
-        cx.kernel("ops.data_driven", "recomb_kernel");
+        cx.kernel("ops.misc", "recomb_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -965,7 +965,7 @@ impl Lower<GpuBackend> for Recomb<GpuBackend> {
 impl Lower<GpuBackend> for Ifthenelse<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(ParamBlock::new().param("blend", self.blend.unwrap_or(false) as u32));
-        cx.kernel("ops.data_driven", "ifthenelse_kernel");
+        cx.kernel("ops.misc", "ifthenelse_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -974,12 +974,12 @@ impl Lower<GpuBackend> for Case<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let n = self.cases.len();
         match n {
-            0 => cx.kernel("ops.passthrough", "passthrough_kernel"), // Fallback for 0 cases
-            1 => cx.kernel("ops.data_driven", "case1_kernel"),
-            2 => cx.kernel("ops.data_driven", "case2_kernel"),
-            3 => cx.kernel("ops.data_driven", "case3_kernel"),
-            4 => cx.kernel("ops.data_driven", "case4_kernel"),
-            _ => cx.kernel("ops.data_driven", "case5_kernel"), // Hard cap fallback
+            0 => cx.kernel("ops.misc", "passthrough_kernel"), // Fallback for 0 cases
+            1 => cx.kernel("ops.misc", "case1_kernel"),
+            2 => cx.kernel("ops.misc", "case2_kernel"),
+            3 => cx.kernel("ops.misc", "case3_kernel"),
+            4 => cx.kernel("ops.misc", "case4_kernel"),
+            _ => cx.kernel("ops.misc", "case5_kernel"), // Hard cap fallback
         };
         cx.output(self.output_spec().output(cx.wu()));
     }

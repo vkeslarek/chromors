@@ -1,5 +1,41 @@
 import lib.region;
 
+public void resize_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float inv_hscale, float inv_vscale) {
+    // Standard pixel-center convention
+    float sx = (float(idx.x) + 0.5) * inv_hscale - 0.5;
+    float sy = (float(idx.y) + 0.5) * inv_vscale - 0.5;
+
+    // Floor to get the top-left texel index
+    float fx = floor(sx);
+    float fy = floor(sy);
+    int2 origin = int2(fx, fy);
+
+    // Fractional parts for blending
+    float wx = sx - fx;
+    float wy = sy - fy;
+
+    // Read the 4 neighboring pixels (clamped by the region bounds implicitly if we use read_clamped or just safe bounds)
+    // Actually, `input.read(uint2)` takes uint2. We should max(0, origin) or rely on `input.read_clamped(origin)` if it exists.
+    // Wait, the region interface only provides `read(uint2)`. Negative coords will wrap/underflow unless handled.
+    // VIPS handles this via the demand() halo, but we need to ensure idx >= 0.
+    uint2 p00 = uint2(max(0, origin.x), max(0, origin.y));
+    uint2 p10 = uint2(max(0, origin.x + 1), max(0, origin.y));
+    uint2 p01 = uint2(max(0, origin.x), max(0, origin.y + 1));
+    uint2 p11 = uint2(max(0, origin.x + 1), max(0, origin.y + 1));
+
+    float4 c00 = input.read(p00);
+    float4 c10 = input.read(p10);
+    float4 c01 = input.read(p01);
+    float4 c11 = input.read(p11);
+
+    // Bilinear interpolation
+    float4 c0 = lerp(c00, c10, wx);
+    float4 c1 = lerp(c01, c11, wx);
+    float4 res = lerp(c0, c1, wy);
+
+    output.write(idx, res);
+}
+
 public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox, int oy, uint in_w, uint in_h, uint extend_mode, float bg_r, float bg_g, float bg_b) {
     int sx = int(idx.x) - ox;
     int sy = int(idx.y) - oy;
@@ -78,11 +114,23 @@ public void rotate_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float
     output.write(idx, res);
 }
 
-// ── Grid ─────────────────────────────────────────────────────────────────────
-//
-// Re-tiles `in_w`-wide x `tile_height`-high horizontal strips of the input
-// (stacked top-to-bottom) into an `across`-wide x N-down grid of tiles, in
-// scan order (matches vips_grid).
+public void shrink_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint h_factor, uint v_factor)
+{
+    uint sx0 = idx.x * h_factor;
+    uint sy0 = idx.y * v_factor;
+
+    float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+    uint count = 0u;
+
+    for (uint dy = 0u; dy < v_factor; dy++) {
+        for (uint dx = 0u; dx < h_factor; dx++) {
+            sum += input.read_clamped(int2(int(sx0 + dx), int(sy0 + dy)));
+            count += 1u;
+        }
+    }
+
+    output.write(idx, sum / float(count));
+}
 
 public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint in_w, uint tile_height, uint across) {
     uint col = idx.x / in_w;
@@ -94,3 +142,4 @@ public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint in
 
     output.write(idx, input.read(uint2(sx, sy)));
 }
+
