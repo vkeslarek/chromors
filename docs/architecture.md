@@ -863,43 +863,60 @@ overwriting it. The kernel does `InterlockedAdd` directly into
 
 Two GPU-specific mechanisms ensure a fused pass stays within hardware limits.
 Both live entirely in `backend/gpu/pass.rs` — the agnostic core (`node.rs`,
-`work_unit.rs`, `Backend` trait) is untouched.
+`work_unit.rs`) is untouched. `Backend::materialize` provides the seam:
+`GpuBackend` overrides it to route through `pass::gpu_materialize`, while
+other backends inherit the default (`node::materialize`).
 
-#### 5.7.1 Binding budget enforcement
+#### 5.7.1 CutFinder — binding budget enforcement (BFS)
+
+Pipeline: **DAG → BFS analysis → find cuts → parallel pre-materialize →
+rebuild DAG with wrappers → standard materialize on reduced DAG.**
 
 A fused pass needs `2 + W + S` storage buffer bindings (`target` + `params` +
-`W` work temps + `S` source inputs). `pass::binding_count(n_steps, n_sources,
-needs_scratch)` computes this. `GpuBuilder::finish` calls
-`pass::exceeds_binding_limit(...)` — if the count exceeds
-`ctx.max_storage_buffers`, the pass cannot execute and returns an error.
+`W` work temps + `S` source inputs). When the full DAG would exceed
+`ctx.max_storage_buffers`, `pass::find_cuts` walks the DAG **breadth-first**
+from the root, grouping nodes by BFS level:
 
-> **Future work (CutFinder):** When the binding budget is exceeded, a
-> `CutFinder` will walk the accumulated step graph **breadth-first** from the
-> root to find the widest independent frontier of steps. Steps beyond the
-> frontier are dispatched first (as independent sub-passes, in parallel via
-> rayon), their results become new source buffers, and the remaining steps
-> execute in a second pass. BFS maximizes the number of independent sub-passes
-> at each level, which maximizes rayon parallelism.
+```
+Level 0: root (Op7)
+Level 1: Op5, Op6          ← independent at this level
+Level 2: Op1, Op2, Op3, Op4
+Level 3: S1, S2, S3, S4, S5, S6, S7, S8
+```
+
+For each candidate cut depth (shallow first), it computes what the remaining
+pass would look like if everything at that depth were pre-materialized and
+replaced by sources. The **shallowest** cut that fits is chosen — this
+maximizes the **width** of independent sub-trees at the cut level, which
+maximizes rayon parallelism.
+
+Cut subgraphs are pre-materialized **in parallel** via `rayon::par_iter`.
+Each result is wrapped as a `BufferImageSource` (a `Source<GpuBackend>` backed
+by the pre-materialized `GpuBuffer`). The DAG is then **rebuilt** with
+lightweight wrapper nodes:
+
+- **`StubInput`** — implements `AnyInput<GpuBackend>`, holds a rebuilt child
+  node + its Kind. Points `inputs()` at new (possibly cut-replaced) children.
+- **`RebuiltOp`** — implements `AnyOperation<GpuBackend>`, wraps the original
+  op. Delegates `lower`/`demand_erased`/`output_kind`/`dyn_hash` unchanged;
+  only overrides `inputs()` with `StubInput`s. `GraphWalk` traverses the
+  rebuilt tree naturally — no modifications to the walker.
+
+Unchanged subtrees share the original `Arc<Node>` (structural sharing).
+The rebuild is recursive — if a cut subgraph still exceeds limits, it cuts
+again.
+
+`GpuBuilder::finish` retains a binding-count assertion as a safety net: if
+the CutFinder failed to reduce the pass, it fails loudly rather than
+submitting an invalid bind group.
 
 #### 5.7.2 Demand tiling (buffer-size enforcement)
-
-When the output buffer exceeds the device's `max_storage_buffer_binding_size`
-(a hard Vulkan/Metal/DX12 limit, typically 128 MB–2 GB), the root `WorkUnit`
-is split into smaller tiles via the agnostic `WorkUnit::split` method (§3.2),
-each tile is materialized through a full `materialize` call in parallel (via
-rayon), and the results are stitched into one output buffer via GPU-side
-`copy_buffer_to_buffer`.
 
 `WorkUnit::split(max_bytes, calc_bytes)` (in `work_unit.rs`) is **pure
 geometry** — no GPU types. It bisects `Region` along the longest axis and
 `Range` at the midpoint, repeatedly, until every tile's byte cost (evaluated
 by the caller-provided `calc_bytes` closure) fits under `max_bytes`. `Atomic`
 work units cannot be subdivided and return `Err(InvalidWorkUnit)`.
-
-`pass::tile_and_dispatch(ctx, root, root_wu, spec, ctx_arc)` orchestrates
-the tiling: it checks whether tiling is needed, calls `WorkUnit::split`,
-dispatches tiles in parallel via `rayon::par_iter`, and stitches the
-per-tile `GpuBuffer` results into a single output buffer.
 
 ---
 

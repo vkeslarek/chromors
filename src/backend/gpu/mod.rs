@@ -435,6 +435,18 @@ impl crate::backend::Backend for GpuBackend {
     type Ctx = GpuContext;
     type Payload = GpuBuffer;
     type Builder = GpuBuilder;
+
+    /// GPU-specific materialization: analyzes the DAG for binding budget
+    /// violations, pre-materializes staging cuts in parallel via rayon, and
+    /// re-runs with a reduced DAG. Falls through to the standard walk when
+    /// no cuts are needed.
+    fn materialize(
+        ctx: &std::sync::Arc<GpuContext>,
+        root: &std::sync::Arc<crate::node::Node<GpuBackend>>,
+        wu: &WorkUnit,
+    ) -> Result<crate::buffer::Buffer<GpuBackend>, Error> {
+        pass::gpu_materialize(ctx, root, wu)
+    }
 }
 
 impl Builder<GpuBackend> for GpuBuilder {
@@ -451,7 +463,10 @@ impl Builder<GpuBackend> for GpuBuilder {
             return Err(e);
         }
 
-        // ── Binding budget check (diagnostic, future CutFinder integration) ──
+        // Binding budget: the CutFinder (pass::gpu_materialize) should have
+        // already split the DAG so this pass fits. If it still doesn't, that's
+        // a bug in the CutFinder — fail loudly rather than silently submitting
+        // an invalid bind group.
         let n_bindings = pass::binding_count(
             self.steps.len(),
             self.source_buffers.len(),
@@ -460,8 +475,7 @@ impl Builder<GpuBackend> for GpuBuilder {
         if n_bindings > self.ctx.max_storage_buffers as usize {
             return Err(Error::Backend(format!(
                 "fused pass requires {} storage buffer bindings but the device \
-                 supports at most {} — pass splitting (CutFinder) needed but not \
-                 yet implemented for this graph shape",
+                 supports at most {} — CutFinder failed to reduce the pass",
                 n_bindings, self.ctx.max_storage_buffers
             )));
         }

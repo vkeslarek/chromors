@@ -1,52 +1,51 @@
 //! GPU pass splitting and parallel dispatch.
 //!
-//! When a fused pass would exceed the device's `max_storage_buffers_per_shader_stage`
-//! limit, or when the output buffer exceeds `max_storage_buffer_binding_size`, this
-//! module splits the work into multiple smaller passes that each stay within limits.
+//! Pipeline: **DAG → BFS analysis → cuts → rebuild with wrappers → shaders → dispatches**
 //!
-//! ## CutFinder — binding-budget enforcement
+//! When a fused pass would exceed the device's `max_storage_buffers_per_shader_stage`,
+//! this module splits the work:
 //!
-//! A fused pass needs `2 + work_buffers + sources` bindings (target + params +
-//! one work temp per step + one source per input). `CutFinder` walks the
-//! accumulated `GpuBuilder` state **breadth-first** from the root step to
-//! discover the widest independent frontier of steps that can execute in
-//! parallel. When adding a frontier level would exceed the binding budget, a
-//! **staging cut** is placed: those steps are dispatched first (independently,
-//! in parallel via rayon), their results become new source buffers, and the
-//! remaining steps execute in a second pass.
+//! 1. **Analyze** the immutable DAG via BFS, counting sources and ops per level.
+//! 2. **Find cuts** — the shallowest BFS depth where splitting brings the
+//!    remaining pass under the binding budget.
+//! 3. **Pre-materialize** each cut subgraph independently (parallel via rayon).
+//! 4. **Rebuild** the DAG with lightweight wrapper nodes (`RebuiltOp`) that
+//!    swap the cut children for `BufferImageSource` leaves. The wrapper
+//!    delegates `lower`/`demand`/`output_kind`/`dyn_hash` to the original op —
+//!    only `inputs()` is overridden. `GraphWalk` traverses the rebuilt tree
+//!    naturally, no modifications needed.
+//! 5. **Materialize** the reduced DAG through the standard `node::materialize`.
 //!
-//! ## Demand tiling — buffer-size enforcement
-//!
-//! When the output `byte_size` exceeds the device's
-//! `max_storage_buffer_binding_size`, the root `WorkUnit` is split into tiles
-//! (via the agnostic `WorkUnit::split`), each tile is materialized
-//! independently (in parallel via rayon), and the results are stitched into
-//! one output buffer.
-//!
-//! Both mechanisms are **entirely GPU-specific** — the agnostic `node.rs`,
-//! `work_unit.rs`, and `Backend` trait are untouched.
+//! Everything here is **GPU-specific** — the agnostic core is untouched.
 
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::Hasher;
 use std::sync::Arc;
+
+use crate::backend::Backend;
+use crate::buffer::Buffer;
 use crate::error::Error;
+use crate::io::Source;
 use crate::kind::AnyKind;
-use crate::work_unit::WorkUnit;
+use crate::node::{Node, NodeId};
+use crate::operation::{AnyInput, AnyOperation};
+use crate::work_unit::{Region, WorkUnit, WorkUnitFor};
+
 use super::buffer::GpuBuffer;
 use super::context::GpuContext;
+use super::view::RegionParams;
+use super::{GpuBackend, GpuBuilder, GpuView};
 
-/// Count the total number of storage buffer bindings a fused pass would need.
-///
+// ── Binding budget helpers ───────────────────────────────────────────────────
+
+/// Total storage buffer bindings a fused pass needs.
 /// Layout: `target(1) + params(1) + work_buffers(W) + sources(S)`.
-/// - `W` = number of kernel steps that write a working temp (all steps if the
-///   output uses the codec scratch sandwich; all-but-last if the final step
-///   writes the target directly).
-/// - `S` = number of distinct source inputs.
 pub fn binding_count(n_steps: usize, n_sources: usize, needs_scratch: bool) -> usize {
     let work = if needs_scratch { n_steps } else { n_steps.saturating_sub(1) };
     2 + work + n_sources
 }
 
-/// Check if the current builder state would exceed the device binding limit.
-/// Returns `true` if the pass needs to be split.
+/// True if the pass would exceed the device binding limit.
 pub fn exceeds_binding_limit(
     n_steps: usize,
     n_sources: usize,
@@ -56,127 +55,344 @@ pub fn exceeds_binding_limit(
     binding_count(n_steps, n_sources, needs_scratch) > max_storage_buffers as usize
 }
 
-/// Split a root `WorkUnit` into tiles that each fit under the device's
-/// `max_storage_buffer_binding_size`, then dispatch each tile through a
-/// full `materialize` call in parallel (via rayon), stitching the results
-/// into a single output buffer.
+// ── DAG wrapper nodes ────────────────────────────────────────────────────────
+
+/// A lightweight `AnyInput` that holds a rebuilt child node + its Kind.
+/// Used by `RebuiltOp` to point `inputs()` at new (possibly cut-replaced) children.
+struct StubInput {
+    node: Arc<Node<GpuBackend>>,
+    kind: Arc<dyn AnyKind>,
+}
+
+impl AnyInput<GpuBackend> for StubInput {
+    fn src(&self) -> &Arc<Node<GpuBackend>> {
+        &self.node
+    }
+    fn spec(&self) -> &dyn AnyKind {
+        self.kind.as_ref()
+    }
+}
+
+/// Wrapper around an existing `AnyOperation` that overrides `inputs()` to
+/// return rebuilt children (with cut nodes replaced by `BufferImageSource`
+/// leaves). All other behavior delegates to the original op unchanged.
 ///
-/// Returns `None` if no tiling is needed (the output fits in one buffer).
-/// Returns `Some(buffer)` with the stitched result if tiling was performed.
-pub fn tile_and_dispatch(
-    ctx: &GpuContext,
-    root: &Arc<crate::node::Node<super::GpuBackend>>,
-    root_wu: &WorkUnit,
-    spec: &Arc<dyn AnyKind>,
-    ctx_arc: &Arc<GpuContext>,
-) -> Result<Option<Arc<GpuBuffer>>, Error> {
-    let out_bytes = spec.byte_size(root_wu);
-    let max_buf_size = ctx.device.limits().max_storage_buffer_binding_size as u64;
+/// `GraphWalk` calls `node.inputs()` → gets our `StubInput`s → traverses the
+/// rebuilt tree naturally. `lower()` delegates to the original op, which
+/// interacts with `GpuBuilder` via `cx.kernel()`/`cx.param()`/`cx.output()`
+/// — the builder resolves inputs by `NodeId` from `enter()`, which receives
+/// the correct rebuilt NodeIds from the walk.
+struct RebuiltOp {
+    original: Arc<dyn AnyOperation<GpuBackend>>,
+    inputs: Vec<StubInput>,
+}
 
-    if out_bytes <= max_buf_size {
-        return Ok(None);
+impl AnyOperation<GpuBackend> for RebuiltOp {
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
+        self.inputs.iter().map(|i| i as &dyn AnyInput<GpuBackend>).collect()
     }
 
-    // Split the WorkUnit into tiles that each fit under the buffer limit.
-    let tiles = root_wu.split(max_buf_size, |wu| spec.byte_size(wu))?;
-
-    if tiles.len() == 1 {
-        return Ok(None);
+    fn demand_erased(&self, out: &WorkUnit) -> Vec<Option<WorkUnit>> {
+        self.original.demand_erased(out)
     }
 
-    tracing::info!(
-        "pass::tile_and_dispatch: splitting {} byte output into {} tiles (limit: {} bytes)",
-        out_bytes, tiles.len(), max_buf_size
-    );
-
-    // Materialize each tile in parallel via rayon.
-    use rayon::prelude::*;
-    let tile_results: Vec<Result<(WorkUnit, crate::buffer::Buffer<super::GpuBackend>), Error>> =
-        tiles.par_iter().map(|tile_wu| {
-            let buf = crate::node::materialize::<super::GpuBackend>(ctx_arc, root, tile_wu)?;
-            Ok((tile_wu.clone(), buf))
-        }).collect();
-
-    // Collect results and stitch into one buffer.
-    let mut tile_buffers = Vec::with_capacity(tile_results.len());
-    for result in tile_results {
-        tile_buffers.push(result?);
+    fn output_kind(&self) -> Arc<dyn AnyKind> {
+        self.original.output_kind()
     }
 
-    // Allocate the final output buffer.
-    let total_bytes = out_bytes.max(16);
-    let out_buffer = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("tiled_output_stitched"),
-        size: total_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    }));
+    fn lower(&self, cx: &mut GpuBuilder) {
+        self.original.lower(cx)
+    }
 
-    // Copy each tile into its correct offset in the output buffer.
-    let mut encoder = ctx.device.create_command_encoder(
-        &wgpu::CommandEncoderDescriptor { label: Some("tile_stitch_encoder") },
-    );
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        self.original.dyn_hash(state)
+    }
+}
 
-    for (tile_wu, tile_buf) in &tile_buffers {
-        let (dst_offset, tile_bytes) = tile_copy_params(root_wu, tile_wu, spec.as_ref());
-        encoder.copy_buffer_to_buffer(
-            &tile_buf.payload.buffer,
-            0,
-            &out_buffer,
-            dst_offset,
-            tile_bytes,
+// ── BufferImageSource — staging cut result as a DAG leaf ─────────────────────
+
+/// A GPU source backed by a pre-materialized `GpuBuffer`. Created by the
+/// CutFinder when a subgraph is pre-dispatched and its result injected as a
+/// new source leaf. The buffer contains pixel data in the format described
+/// by its `ImageKind`.
+pub struct BufferImageSource {
+    spec: Arc<crate::data::image::ImageKind>,
+    buffer: Arc<GpuBuffer>,
+}
+
+impl Source<GpuBackend> for BufferImageSource {
+    type Kind = crate::data::image::ImageKind;
+
+    fn spec(&self) -> Arc<crate::data::image::ImageKind> {
+        self.spec.clone()
+    }
+
+    fn fetch(
+        &self,
+        _ctx: &GpuContext,
+        _wu: &Region,
+    ) -> Result<Buffer<GpuBackend>, Error> {
+        Ok(Buffer {
+            payload: self.buffer.clone(),
+            spec: self.spec.clone(),
+        })
+    }
+
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let geom = RegionParams::tight(self.spec.width, self.spec.height);
+        cx.input(
+            self.spec.input(),
+            geom.into_block("region_in_{slot}"),
+            self.buffer.clone(),
         );
     }
 
-    ctx.queue.submit(std::iter::once(encoder.finish()));
-
-    Ok(Some(GpuBuffer::from_raw(out_buffer, total_bytes)))
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_usize(Arc::as_ptr(&self.buffer) as usize);
+    }
 }
 
-/// Compute the (dst_offset, byte_count) for copying a tile's buffer into the
-/// stitched output. For Region tiles: offset = row-major position in the full
-/// image; for Range: linear offset; for Atomic: (0, full_size).
-fn tile_copy_params(root_wu: &WorkUnit, tile_wu: &WorkUnit, spec: &dyn AnyKind) -> (u64, u64) {
-    let tile_bytes = spec.byte_size(tile_wu);
-    match (root_wu, tile_wu) {
-        (WorkUnit::Region(root_r), WorkUnit::Region(tile_r)) => {
-            // For Region tiling, compute the byte-per-pixel and row stride.
-            let total_bytes = spec.byte_size(root_wu);
-            let root_pixels = (root_r.w.max(0) as u64) * (root_r.h.max(0) as u64);
-            if root_pixels == 0 {
-                return (0, tile_bytes);
-            }
-            let bpp = total_bytes / root_pixels;
-            let row_stride = root_r.w.max(0) as u64 * bpp;
+// ── BFS DAG analysis ─────────────────────────────────────────────────────────
 
-            // Tile origin relative to root origin.
-            let dx = (tile_r.x - root_r.x) as u64;
-            let dy = (tile_r.y - root_r.y) as u64;
+/// BFS analysis result: nodes grouped by level, source/op counts.
+struct DagAnalysis {
+    /// Nodes at each BFS level (level 0 = root, deepest = sources).
+    levels: Vec<Vec<Arc<Node<GpuBackend>>>>,
+    n_sources: usize,
+    n_ops: usize,
+}
 
-            // For contiguous row-major tiles split along one axis, the tiles
-            // are contiguous in memory if split vertically (same width as root).
-            // For horizontal splits, rows aren't contiguous — but our split
-            // always produces full-width strips (splits along the longest axis,
-            // so a landscape image splits horizontally into full-width strips).
-            //
-            // Since our split guarantees tile.w == root.w (vertical strips) or
-            // tile.h == root.h (horizontal strips), and the tile buffer is
-            // tightly packed, the offset is the start of the first tile row.
-            let offset = dy * row_stride + dx * bpp;
-            (offset, tile_bytes)
+/// BFS from the root, grouping nodes by depth level. Deduplicates diamonds.
+fn analyze_dag(root: &Arc<Node<GpuBackend>>) -> DagAnalysis {
+    let mut visited = HashSet::new();
+    let mut levels: Vec<Vec<Arc<Node<GpuBackend>>>> = Vec::new();
+    let mut queue = VecDeque::new();
+    let mut n_sources = 0usize;
+    let mut n_ops = 0usize;
+
+    visited.insert(NodeId::of(root));
+    queue.push_back((root.clone(), 0usize));
+
+    while let Some((node, depth)) = queue.pop_front() {
+        while levels.len() <= depth {
+            levels.push(Vec::new());
         }
-        (WorkUnit::Range(root_r), WorkUnit::Range(tile_r)) => {
-            let total_bytes = spec.byte_size(root_wu);
-            let total_elems = (root_r.end - root_r.start).max(0) as u64;
-            if total_elems == 0 {
-                return (0, tile_bytes);
+        levels[depth].push(node.clone());
+
+        match &*node {
+            Node::Source(_) => n_sources += 1,
+            Node::Op(_) => n_ops += 1,
+        }
+
+        for input in node.inputs() {
+            let child = input.src().clone();
+            if visited.insert(NodeId::of(&child)) {
+                queue.push_back((child, depth + 1));
             }
-            let elem_size = total_bytes / total_elems;
-            let offset = (tile_r.start - root_r.start) as u64 * elem_size;
-            (offset, tile_bytes)
         }
-        _ => (0, tile_bytes),
     }
+
+    DagAnalysis { levels, n_sources, n_ops }
+}
+
+/// Find nodes whose subgraphs should be pre-materialized (staging cuts).
+///
+/// BFS from root, accumulating binding cost level by level. At each candidate
+/// cut depth, compute what the remaining pass would look like if everything
+/// at that depth and below were replaced by sources. Return the shallowest
+/// cut that brings the remaining pass under budget. BFS maximizes the width
+/// of independent sub-trees at the cut level → maximizes rayon parallelism.
+fn find_cuts(
+    root: &Arc<Node<GpuBackend>>,
+    max_bindings: u32,
+) -> Vec<Arc<Node<GpuBackend>>> {
+    let analysis = analyze_dag(root);
+    let full_bindings = binding_count(analysis.n_ops, analysis.n_sources, true);
+
+    if full_bindings <= max_bindings as usize {
+        return vec![];
+    }
+
+    let is_op = |n: &Arc<Node<GpuBackend>>| matches!(&**n, Node::Op(_));
+    let is_source = |n: &Arc<Node<GpuBackend>>| matches!(&**n, Node::Source(_));
+
+    // Try each BFS depth as a candidate cut level (shallow first).
+    for cut_depth in 1..analysis.levels.len() {
+        let ops_above: usize = analysis.levels[..cut_depth]
+            .iter()
+            .flatten()
+            .filter(|n| is_op(n))
+            .count();
+
+        let sources_above: usize = analysis.levels[..cut_depth]
+            .iter()
+            .flatten()
+            .filter(|n| is_source(n))
+            .count();
+
+        // Op nodes at the cut depth become new sources after pre-materialization.
+        let cut_ops: Vec<_> = analysis.levels[cut_depth]
+            .iter()
+            .filter(|n| is_op(n))
+            .cloned()
+            .collect();
+
+        let cut_sources = analysis.levels[cut_depth]
+            .iter()
+            .filter(|n| is_source(n))
+            .count();
+
+        let remaining_sources = sources_above + cut_sources + cut_ops.len();
+        let remaining_bindings = binding_count(ops_above, remaining_sources, true);
+
+        if remaining_bindings <= max_bindings as usize {
+            return cut_ops;
+        }
+    }
+
+    // Fallback: cut at the deepest op level.
+    analysis
+        .levels
+        .iter()
+        .rev()
+        .flat_map(|level| level.iter())
+        .filter(|n| is_op(n))
+        .take(1)
+        .cloned()
+        .collect()
+}
+
+// ── DAG rebuild ──────────────────────────────────────────────────────────────
+
+/// Recursively rebuild the DAG, replacing cut nodes with `BufferImageSource`
+/// leaves. Unchanged subtrees share the original `Arc<Node>`. Only paths
+/// that contain a replacement get new `RebuiltOp` wrapper nodes.
+fn rebuild_dag(
+    node: &Arc<Node<GpuBackend>>,
+    replacements: &HashMap<NodeId, Arc<Node<GpuBackend>>>,
+) -> Arc<Node<GpuBackend>> {
+    let node_id = NodeId::of(node);
+
+    if let Some(replacement) = replacements.get(&node_id) {
+        return replacement.clone();
+    }
+
+    let Node::Op(op) = &**node else {
+        return node.clone(); // Source leaf — no children to rebuild.
+    };
+
+    let original_inputs = op.inputs();
+    let mut any_changed = false;
+
+    let rebuilt_children: Vec<Arc<Node<GpuBackend>>> = original_inputs
+        .iter()
+        .map(|input| {
+            let child = input.src();
+            let rebuilt = rebuild_dag(child, replacements);
+            if !Arc::ptr_eq(child, &rebuilt) {
+                any_changed = true;
+            }
+            rebuilt
+        })
+        .collect();
+
+    if !any_changed {
+        return node.clone(); // No replacements in this subtree.
+    }
+
+    // Build StubInputs pointing to the rebuilt children.
+    let stubs: Vec<StubInput> = rebuilt_children
+        .into_iter()
+        .zip(original_inputs.iter())
+        .map(|(child, orig_input)| StubInput {
+            kind: orig_input.spec().as_any()
+                .downcast_ref::<crate::data::image::ImageKind>()
+                .map(|k| Arc::new(k.clone()) as Arc<dyn AnyKind>)
+                .unwrap_or_else(|| child.output_kind()),
+            node: child,
+        })
+        .collect();
+
+    Arc::new(Node::Op(Arc::new(RebuiltOp {
+        original: op.clone(),
+        inputs: stubs,
+    })))
+}
+
+// ── GPU materialization with cuts ────────────────────────────────────────────
+
+/// GPU-specific materialization entry point.
+///
+/// Pipeline: DAG → BFS analysis → find cuts → parallel pre-materialize →
+/// rebuild DAG with wrappers → standard materialize on reduced DAG.
+///
+/// Called by `GpuBackend::materialize` (the `Backend` trait override).
+pub(crate) fn gpu_materialize(
+    ctx: &Arc<GpuContext>,
+    root: &Arc<Node<GpuBackend>>,
+    wu: &WorkUnit,
+) -> Result<Buffer<GpuBackend>, Error> {
+    let max_bindings = ctx.max_storage_buffers;
+    let cuts = find_cuts(root, max_bindings);
+
+    if cuts.is_empty() {
+        return crate::node::materialize::<GpuBackend>(ctx, root, wu);
+    }
+
+    tracing::info!(
+        "pass: {} staging cuts at max {} bindings",
+        cuts.len(),
+        max_bindings,
+    );
+
+    // Pre-materialize each cut subgraph in parallel via rayon.
+    // Each cut is independent (BFS guarantees same-level nodes don't
+    // depend on each other) → maximum parallelism.
+    use rayon::prelude::*;
+
+    let cut_results: Vec<Result<(NodeId, Arc<Node<GpuBackend>>), Error>> = cuts
+        .par_iter()
+        .map(|cut_node| {
+            let cut_id = NodeId::of(cut_node);
+
+            // Recursive: if the subgraph still exceeds limits, it'll cut again.
+            let buf = gpu_materialize(ctx, cut_node, wu)?;
+
+            // Wrap the result as a BufferImageSource leaf.
+            let img_kind = buf
+                .spec
+                .as_any()
+                .downcast_ref::<crate::data::image::ImageKind>()
+                .ok_or_else(|| {
+                    Error::Backend(format!(
+                        "staging cut produces {:?}, only ImageKind supported",
+                        buf.spec
+                    ))
+                })?;
+
+            let source = Arc::new(BufferImageSource {
+                spec: Arc::new(img_kind.clone()),
+                buffer: buf.payload,
+            });
+
+            let source_node: Arc<Node<GpuBackend>> = Arc::new(Node::Source(
+                source as Arc<dyn crate::io::AnySource<GpuBackend>>,
+            ));
+
+            Ok((cut_id, source_node))
+        })
+        .collect();
+
+    // Collect and build the replacement map.
+    let mut replacements: HashMap<NodeId, Arc<Node<GpuBackend>>> = HashMap::new();
+    for result in cut_results {
+        let (cut_id, source_node) = result?;
+        replacements.insert(cut_id, source_node);
+    }
+
+    // Rebuild the DAG with wrapper nodes.
+    let new_root = rebuild_dag(root, &replacements);
+
+    // Materialize the reduced DAG (should now fit in budget).
+    crate::node::materialize::<GpuBackend>(ctx, &new_root, wu)
 }

@@ -84,7 +84,7 @@ impl<K: Kind, B: Backend> Data<K, B> {
     /// `Target<Out = Buffer<B>>` that never downloads.
     pub(crate) fn materialize(&self, wu: K::WorkUnit) -> Result<Buffer<B>, Error> {
         use crate::work_unit::WorkUnitFor;
-        materialize::<B>(&self.ctx, &self.root, &wu.erase())
+        B::materialize(&self.ctx, &self.root, &wu.erase())
     }
 
     /// Read-only access to this handle's backend context (e.g. a Source
