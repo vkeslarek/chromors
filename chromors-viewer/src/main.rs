@@ -2,6 +2,7 @@
 
 mod app;
 mod gpu;
+mod editor;
 
 fn main() {
     tracing_subscriber::fmt()

@@ -38,6 +38,16 @@ pub(crate) fn ensure_init() {
     });
 }
 
+/// Eagerly initialise libvips at load time, before `main` (and before any test
+/// thread spawns). Since vips is the entry point for virtually every image file,
+/// paying init up front is free and removes any first-touch race entirely. The
+/// `ensure_init` guards at each vips entry point remain as a cheap fallback
+/// (`Once` is one relaxed atomic once initialised).
+#[ctor::ctor]
+fn vips_auto_init() {
+    ensure_init();
+}
+
 pub(crate) fn vips_error() -> String {
     unsafe {
         let buf = crate::ffi::vips_error_buffer();
