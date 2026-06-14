@@ -1,0 +1,16 @@
+[package]
+name = "chromors-viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+poc = { path = "../poc" }
+chromors-viewport = { path = "../chromors-viewport" }
+tao = "0.33"
+wgpu = { version = "29.0.3", features = ["spirv"] }
+pollster = "0.4.0"
+bytemuck = "1"
+vello = "0.9.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rfd = "0.17.2"

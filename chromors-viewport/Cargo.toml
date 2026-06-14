@@ -1,0 +1,13 @@
+[package]
+name = "chromors-viewport"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+poc = { path = "../poc" }
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = { version = "29.0.3", features = ["spirv"] }
+rayon = "1.12.0"
+vello = "0.9.0"
+tracing = "0.1.44"
+half = { version = "2", features = ["bytemuck"] }
