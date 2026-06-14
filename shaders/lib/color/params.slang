@@ -1,35 +1,31 @@
-// lib/color/params.slang — Uniform parameters for the XYZ-hub colour pipeline.
+// lib/color/params.slang — uniform parameters for the XYZ(D50)-hub colour
+// pipeline (`color_convert`, lib/color/convert.slang).
 //
-// Must mirror the Rust `ColorConvertParams` in
-// `crates/pixors-shader/src/kernel/color.rs`.
+// Must mirror the Rust `ConvertParams` (#[repr(C)] Pod,
+// `src/backend/gpu/color_params.rs`) byte-for-byte: std430 scalar-array
+// stride == element size, so `float a[12]`/`float b[12]` need no padding to
+// match Rust's `[f32; 12]`.
 
-import lib.region;
-import lib.pixel;
 import lib.color.transfer;
 import lib.color.model;
 
 struct ColorConvertParams
 {
-    BufferRegion src_region;
-    uint  out_width;
-    uint  out_height;
     TransferFn transfer_src;
     TransferFn transfer_dst;
 
-    // src linear RGB → CIE XYZ (D50 hub). Row-major, each row padded to vec4.
-    float a00; float a01; float a02; float _pa0;
-    float a10; float a11; float a12; float _pa1;
-    float a20; float a21; float a22; float _pa2;
+    // src linear RGB -> CIE XYZ (D50 hub). 3 rows, each padded to 4 floats.
+    float a[12];
+    // CIE XYZ (D50 hub) -> dst linear RGB. 3 rows, each padded to 4 floats.
+    float b[12];
 
-    // CIE XYZ (D50 hub) → dst linear RGB. Row-major, each row padded to vec4.
-    float b00; float b01; float b02; float _pb0;
-    float b10; float b11; float b12; float _pb1;
-    float b20; float b21; float b22; float _pb2;
+    // 0 = straight/none, 1 = premultiplied (see `AlphaState::to_shader`).
+    uint alpha_src;
+    uint alpha_dst;
 
-    AlphaPolicy   alpha_policy_src;
-    AlphaPolicy   alpha_policy_dst;
-    ColorModel    src_model;
-    ColorModel    dst_model;
-    ChannelLayout src_channels;
-    ChannelLayout dst_channels;
+    ColorModel model_src;
+    ColorModel model_dst;
+
+    uint nchan_src;
+    uint nchan_dst;
 };

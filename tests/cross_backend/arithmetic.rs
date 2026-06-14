@@ -8,11 +8,11 @@ fn convert_roundtrip() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     let vips_res = vips_img
-        .cast(PixelFormat::RgbaF32, None)
-        .cast(PixelFormat::Rgba8, None);
+        .cast_storage(Storage::F32, None)
+        .cast_storage(Storage::U8, None);
     let gpu_res = gpu_img
-        .cast(PixelFormat::RgbaF32, None)
-        .cast(PixelFormat::Rgba8, None);
+        .cast_storage(Storage::F32, None)
+        .cast_storage(Storage::U8, None);
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -33,17 +33,17 @@ fn sandwich_acescg_roundtrip() {
     let radius = (sigma * 3.0).ceil() as usize;
 
     let vips_res = vips_img
-        .cast(PixelFormat::RgbaF32, None)
+        .cast_storage(Storage::F32, None)
         .blur(sigma)
-        .cast(PixelFormat::Rgba8, None);
+        .cast_storage(Storage::U8, None);
 
     let gpu_res = gpu_img
-        .cast(PixelFormat::RgbaF32, None)
+        .cast_storage(Storage::F32, None)
         .blur(sigma)
-        .cast(PixelFormat::Rgba8, None);
+        .cast_storage(Storage::U8, None);
 
     let (w, h) = (vips_img.width() as usize, vips_img.height() as usize);
-    let bands = vips_img.format().channel_count() as usize;
+    let bands = vips_img.layout().channel_count() as usize;
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -340,7 +340,7 @@ fn complex2_matches_vips() {
 }
 
 #[test]
-#[ignore = "BUG: panics at tests/common/mod.rs:126 (`assert_eq!(af.len(), bf.len(), \"length mismatch\")` inside rms_f32). vips_materialize_f32 computes pixel_count from img.format().channel_count(), but vips complexform output is a complex-typed image where each 'band' is a 2-float (re,im) pair -- channel_count() likely reports 1 band while bytes_per_pixel covers 2 floats, so vips_materialize_f32 only extracts the real component (w*h floats) while poc_materialize's GPU output is w*h*2 (or w*h*4 if stored as RGBA float with re/im in two channels), causing the length mismatch. Needs a complex-aware readback helper that extracts both re/im components from vips before comparing"]
+#[ignore = "BUG: panics at tests/common/mod.rs:126 (`assert_eq!(af.len(), bf.len(), \"length mismatch\")` inside rms_f32). vips_materialize_f32 computes pixel_count from img.layout().channel_count(), but vips complexform output is a complex-typed image where each 'band' is a 2-float (re,im) pair -- channel_count() likely reports 1 band while bytes_per_pixel covers 2 floats, so vips_materialize_f32 only extracts the real component (w*h floats) while poc_materialize's GPU output is w*h*2 (or w*h*4 if stored as RGBA float with re/im in two channels), causing the length mismatch. Needs a complex-aware readback helper that extracts both re/im components from vips before comparing"]
 fn complexform_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

@@ -1,22 +1,29 @@
-// lib/codecs.slang — Pixel codec implementations
+// lib/codecs.slang — Storage codec implementations
 //
-// IPixelCodec interface + U8, U16, F16, F32 codecs.
-// Used by color.slang, blur.slang, mip_downsample.slang.
+// `IStorageCodec` interface + U8, U16, F16, F32 codecs. Pure quantizers:
+// bytes <-> normalized float4 (+ a 5th `extra` channel for 5-band layouts
+// such as CmykA). They know only `(storage, channel count)` — never the
+// color model, transfer function, or any matrix. Color math lives in the
+// `Convert` operation / the view-wrap color wrappers, not here.
 
 import lib.pixel;
 
-// ── IPixelCodec interface ─────────────────────────────────────────────────────
+// ── IStorageCodec interface ───────────────────────────────────────────────────
 
-// Output buffers are typed `Atomic<uint>`: sub-word formats (Rgb8, Gray8, …)
-// pack several channels into one u32, and adjacent pixels share a word, so
-// concurrent writes must be atomic read-modify-write. Word-aligned formats
-// (Rgba8, F32) just `store` whole words. Input/decode reads from a plain
-// `RWStructuredBuffer<uint>` (a separate src buffer, no contention).
-interface IPixelCodec
+// Output buffers are typed `Atomic<uint>`: sub-word formats (1/2/3-byte
+// strides, …) pack several channels into one u32, and adjacent pixels share
+// a word, so concurrent writes must be atomic read-modify-write. Word-aligned
+// formats (4-channel u8, f32) just `store` whole words. Input/decode reads
+// from a plain `StructuredBuffer<uint>` (a separate src buffer, no
+// contention).
+interface IStorageCodec
 {
-    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint channels);
-    static float  decode_extra(StructuredBuffer<uint> buf, uint idx, uint channels);
-    static void   encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, ChannelLayout channels);
+    // Decode up to 4 channels into rgba (missing channels => 0, alpha => 1 if absent).
+    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint nchan);
+    // 5th channel (e.g. CmykA's K) or 1.0 if nchan < 5.
+    static float  decode_extra(StructuredBuffer<uint> buf, uint idx, uint nchan);
+    static void   encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint nchan);
+    static void   encode_extra(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float v, uint nchan);
 };
 
 // ── Byte-level helpers (shared across codecs) ─────────────────────────────────
@@ -143,271 +150,133 @@ void _write_f16(RWStructuredBuffer<Atomic<uint> > buf, uint bo, float v)
 }
 
 // ── U8Codec ──────────────────────────────────────────────────────────────────
+// 1 byte per sample.
 
-struct U8Codec : IPixelCodec
+struct U8Codec : IStorageCodec
 {
-    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::Rgba)
-            return rgba8_unpack(buf[idx]);
-
-        if (ch == ChannelLayout::Rgb) {
-            uint b  = idx * 3u;
-            uint wi = b / 4u;
-            uint w0 = buf[wi], w1 = buf[wi + 1u];
-            uint s0 = (b % 4u) * 8u;
-            uint s1 = ((b + 1u) % 4u) * 8u;  uint wb1 = (b + 1u) / 4u == wi ? w0 : w1;
-            uint s2 = ((b + 2u) % 4u) * 8u;  uint wb2 = (b + 2u) / 4u == wi ? w0 : w1;
-            return float4(
-                float((w0  >> s0) & 0xFFu) / 255.0,
-                float((wb1 >> s1) & 0xFFu) / 255.0,
-                float((wb2 >> s2) & 0xFFu) / 255.0,
-                1.0
-            );
-        }
-
-        if (ch == ChannelLayout::Gray) {
-            float v = float((buf[idx / 4u] >> ((idx % 4u) * 8u)) & 0xFFu) / 255.0;
-            return float4(v, v, v, 1.0);
-        }
-
-        if (ch == ChannelLayout::CmykA) {
-            uint b = idx * 5u;
-            return float4(
-                float(byte_buf(b    , buf)) / 255.0,
-                float(byte_buf(b + 1u, buf)) / 255.0,
-                float(byte_buf(b + 2u, buf)) / 255.0,
-                float(byte_buf(b + 3u, buf)) / 255.0
-            );
-        }
-
-        // ChannelLayout::GrayA
-        uint b = idx * 2u;
-        uint w = buf[b / 4u];
-        float v = float((w >> ( b      % 4u) * 8u) & 0xFFu) / 255.0;
-        float a = float((w >> ((b + 1u)% 4u) * 8u) & 0xFFu) / 255.0;
-        return float4(v, v, v, a);
+        uint base = idx * nchan;
+        float4 c = float4(0.0, 0.0, 0.0, 1.0);
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            c[k] = float(byte_buf(base + k, buf)) / 255.0;
+        return c;
     }
 
-
-    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::CmykA)
-            return float(byte_buf(idx * 5u + 4u, buf)) / 255.0;
-        return 1.0;
+        return (nchan >= 5u) ? float(byte_buf(idx * nchan + 4u, buf)) / 255.0 : 1.0;
     }
 
-    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint ch)
+    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint nchan)
     {
-        if (ch == ChannelLayout::Rgba) { buf[idx].store(rgba8_pack(c)); return; }
+        uint base = idx * nchan;
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            _write_byte(buf, base + k, uint(saturate(c[k]) * 255.0 + 0.5));
+    }
 
-        if (ch == ChannelLayout::Rgb) {
-            uint b = idx * 3u;
-            _write_byte(buf, b,      uint(saturate(c.r) * 255.0 + 0.5));
-            _write_byte(buf, b + 1u, uint(saturate(c.g) * 255.0 + 0.5));
-            _write_byte(buf, b + 2u, uint(saturate(c.b) * 255.0 + 0.5));
-            return;
-        }
-
-        if (ch == ChannelLayout::Gray) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            _write_byte(buf, idx, uint(v * 255.0 + 0.5));
-            return;
-        }
-
-        // ChannelLayout::GrayA
-        float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-        _write_byte(buf, idx * 2u,      uint(v             * 255.0 + 0.5));
-        _write_byte(buf, idx * 2u + 1u, uint(saturate(c.a) * 255.0 + 0.5));
+    static void encode_extra(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float v, uint nchan)
+    {
+        if (nchan >= 5u)
+            _write_byte(buf, idx * nchan + 4u, uint(saturate(v) * 255.0 + 0.5));
     }
 };
 
 // ── U16Codec ─────────────────────────────────────────────────────────────────
+// 2 bytes per sample.
 
-struct U16Codec : IPixelCodec
+struct U16Codec : IStorageCodec
 {
-    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = _u16_norm(buf, idx * 2u);
-            return float4(v, v, v, 1.0);
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = _u16_norm(buf, idx * 4u);
-            float a = _u16_norm(buf, idx * 4u + 2u);
-            return float4(v, v, v, a);
-        }
-        if (ch == ChannelLayout::CmykA) {
-            uint b = idx * 10u;
-            return float4(
-                _u16_norm(buf, b),
-                _u16_norm(buf, b + 2u),
-                _u16_norm(buf, b + 4u),
-                _u16_norm(buf, b + 6u)
-            );
-        }
-        uint b = idx * (ch == ChannelLayout::Rgba ? 8u : 6u);
-        return float4(
-            _u16_norm(buf, b),
-            _u16_norm(buf, b + 2u),
-            _u16_norm(buf, b + 4u),
-            (ch == ChannelLayout::Rgba) ? _u16_norm(buf, b + 6u) : 1.0
-        );
+        uint base = idx * nchan * 2u;
+        float4 c = float4(0.0, 0.0, 0.0, 1.0);
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            c[k] = _u16_norm(buf, base + k * 2u);
+        return c;
     }
 
-    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::CmykA)
-            return _u16_norm(buf, idx * 10u + 8u);
-        return 1.0;
+        return (nchan >= 5u) ? _u16_norm(buf, idx * nchan * 2u + 8u) : 1.0;
     }
 
-    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint ch)
+    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            _write_u16(buf, idx * 2u, uint(v * 65535.0 + 0.5));
-            return;
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            _write_u16(buf, idx * 4u,      uint(v             * 65535.0 + 0.5));
-            _write_u16(buf, idx * 4u + 2u, uint(saturate(c.a) * 65535.0 + 0.5));
-            return;
-        }
-        uint b = idx * (ch == ChannelLayout::Rgba ? 8u : 6u);
-        _write_u16(buf, b,      uint(saturate(c.r) * 65535.0 + 0.5));
-        _write_u16(buf, b + 2u, uint(saturate(c.g) * 65535.0 + 0.5));
-        _write_u16(buf, b + 4u, uint(saturate(c.b) * 65535.0 + 0.5));
-        if (ch == ChannelLayout::Rgba)
-            _write_u16(buf, b + 6u, uint(saturate(c.a) * 65535.0 + 0.5));
+        uint base = idx * nchan * 2u;
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            _write_u16(buf, base + k * 2u, uint(saturate(c[k]) * 65535.0 + 0.5));
+    }
+
+    static void encode_extra(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float v, uint nchan)
+    {
+        if (nchan >= 5u)
+            _write_u16(buf, idx * nchan * 2u + 8u, uint(saturate(v) * 65535.0 + 0.5));
     }
 };
 
 // ── F16Codec ─────────────────────────────────────────────────────────────────
-// Uses _f16_at / _write_f16 for correct byte-level access at any alignment.
+// 2 bytes per sample, IEEE-754 half float. Not saturated on encode (HDR-safe).
 
-struct F16Codec : IPixelCodec
+struct F16Codec : IStorageCodec
 {
-    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = _f16_at(buf, idx * 2u);
-            return float4(v, v, v, 1.0);
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = _f16_at(buf, idx * 4u);
-            float a = _f16_at(buf, idx * 4u + 2u);
-            return float4(v, v, v, a);
-        }
-        if (ch == ChannelLayout::CmykA) {
-            uint b = idx * 10u;
-            return float4(
-                _f16_at(buf, b),
-                _f16_at(buf, b + 2u),
-                _f16_at(buf, b + 4u),
-                _f16_at(buf, b + 6u)
-            );
-        }
-        uint stride = (ch == ChannelLayout::Rgba) ? 8u : 6u;
-        uint b = idx * stride;
-        return float4(
-            _f16_at(buf, b),
-            _f16_at(buf, b + 2u),
-            _f16_at(buf, b + 4u),
-            (ch == ChannelLayout::Rgba) ? _f16_at(buf, b + 6u) : 1.0
-        );
+        uint base = idx * nchan * 2u;
+        float4 c = float4(0.0, 0.0, 0.0, 1.0);
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            c[k] = _f16_at(buf, base + k * 2u);
+        return c;
     }
 
-    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::CmykA)
-            return _f16_at(buf, idx * 10u + 8u);
-        return 1.0;
+        return (nchan >= 5u) ? _f16_at(buf, idx * nchan * 2u + 8u) : 1.0;
     }
 
-    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint ch)
+    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            _write_f16(buf, idx * 2u, v);
-            return;
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            _write_f16(buf, idx * 4u,      v);
-            _write_f16(buf, idx * 4u + 2u, saturate(c.a));
-            return;
-        }
-        uint stride = (ch == ChannelLayout::Rgba) ? 8u : 6u;
-        uint b = idx * stride;
-        _write_f16(buf, b,      c.r);
-        _write_f16(buf, b + 2u, c.g);
-        _write_f16(buf, b + 4u, c.b);
-        if (ch == ChannelLayout::Rgba)
-            _write_f16(buf, b + 6u, c.a);
+        uint base = idx * nchan * 2u;
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            _write_f16(buf, base + k * 2u, c[k]);
+    }
+
+    static void encode_extra(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float v, uint nchan)
+    {
+        if (nchan >= 5u)
+            _write_f16(buf, idx * nchan * 2u + 8u, v);
     }
 };
 
 // ── F32Codec ─────────────────────────────────────────────────────────────────
+// 4 bytes per sample, one word each. Not saturated on encode (HDR-safe).
 
-struct F32Codec : IPixelCodec
+struct F32Codec : IStorageCodec
 {
-    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float4 decode(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = asfloat(buf[idx]);
-            return float4(v, v, v, 1.0);
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = asfloat(buf[idx * 2u]);
-            float a = asfloat(buf[idx * 2u + 1u]);
-            return float4(v, v, v, a);
-        }
-        if (ch == ChannelLayout::CmykA) {
-            uint wi = idx * 5u;
-            return float4(
-                asfloat(buf[wi]),
-                asfloat(buf[wi + 1u]),
-                asfloat(buf[wi + 2u]),
-                asfloat(buf[wi + 3u])
-            );
-        }
-        uint stride = (ch == ChannelLayout::Rgba) ? 4u : 3u;
-        uint wi     = idx * stride;
-        return float4(
-            asfloat(buf[wi]),
-            asfloat(buf[wi + 1u]),
-            asfloat(buf[wi + 2u]),
-            (ch == ChannelLayout::Rgba) ? asfloat(buf[wi + 3u]) : 1.0
-        );
+        uint base = idx * nchan;
+        float4 c = float4(0.0, 0.0, 0.0, 1.0);
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            c[k] = asfloat(buf[base + k]);
+        return c;
     }
 
-    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint ch)
+    static float decode_extra(StructuredBuffer<uint> buf, uint idx, uint nchan)
     {
-        if (ch == ChannelLayout::CmykA)
-            return asfloat(buf[idx * 5u + 4u]);
-        return 1.0;
+        return (nchan >= 5u) ? asfloat(buf[idx * nchan + 4u]) : 1.0;
     }
 
-    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint ch)
+    static void encode(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float4 c, uint nchan)
     {
-        if (ch == ChannelLayout::Gray) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            buf[idx].store(asuint(v));
-            return;
-        }
-        if (ch == ChannelLayout::GrayA) {
-            float v = saturate(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
-            buf[idx * 2u]      = asuint(v);
-            buf[idx * 2u + 1u].store(asuint(saturate(c.a)));
-            return;
-        }
-        uint stride = (ch == ChannelLayout::Rgba) ? 4u : 3u;
-        uint wi     = idx * stride;
-        buf[wi]      = asuint(c.r);
-        buf[wi + 1u].store(asuint(c.g));
-        buf[wi + 2u].store(asuint(c.b));
-        if (ch == ChannelLayout::Rgba) buf[wi + 3u].store(asuint(c.a));
+        uint base = idx * nchan;
+        for (uint k = 0u; k < min(nchan, 4u); k++)
+            buf[base + k].store(asuint(c[k]));
+    }
+
+    static void encode_extra(RWStructuredBuffer<Atomic<uint> > buf, uint idx, float v, uint nchan)
+    {
+        if (nchan >= 5u)
+            buf[idx * nchan + 4u].store(asuint(v));
     }
 };

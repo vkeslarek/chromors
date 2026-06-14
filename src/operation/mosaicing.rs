@@ -368,8 +368,7 @@ where
         ImageKind {
             width: right - left,
             height: bottom - top,
-            format: input.format,
-            color_space: input.color_space,
+            layout: input.layout,
         }
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {

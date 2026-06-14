@@ -103,12 +103,9 @@ where
     // as input, collapsed to a single band.
     fn output_spec(&self) -> ImageKind {
         let input = &*self.input.spec;
-        ImageKind {
-            width: input.width,
-            height: input.height,
-            format: input.with_band_count(1),
-            color_space: input.color_space,
-        }
+        let mut spec = input.clone();
+        spec.set_band_count(1);
+        spec
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }

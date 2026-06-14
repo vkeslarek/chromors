@@ -279,3 +279,5 @@ pub mod stats;
 pub use stats::*;
 pub mod reinterpret;
 pub use reinterpret::*;
+pub mod color;
+pub use color::*;

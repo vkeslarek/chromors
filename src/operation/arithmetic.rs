@@ -475,7 +475,7 @@ impl Lower<GpuBackend> for MinPair<GpuBackend> {
 }
 impl Lower<GpuBackend> for Remainder<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let src_max = self.left.spec.format.component_max_f64() as f32;
+        let src_max = self.left.spec.layout.component_max_f64() as f32;
         cx.param_block(ParamBlock::scalar("src_max", src_max));
         cx.kernel("ops.arithmetic", "remainder_kernel");
         cx.output(self.output_spec().output(cx.wu()));
@@ -503,7 +503,7 @@ impl Lower<GpuBackend> for Math<GpuBackend> {
 }
 impl Lower<GpuBackend> for Round<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let src_max = self.input.spec.format.component_max_f64() as f32;
+        let src_max = self.input.spec.layout.component_max_f64() as f32;
         // Field order must match round_kernel's parameter order exactly --
         // kernel args are bound positionally from this block.
         cx.param_block(
@@ -710,10 +710,7 @@ impl Lower<VipsBackend> for Linear<VipsBackend> {
         op.set_image("in", input_handle.ptr);
         op.set_array_double("a", &self.a);
         op.set_array_double("b", &self.b);
-        if self.input.spec.format == crate::pixel::format::PixelFormat::Rgba8
-            || self.input.spec.format == crate::pixel::format::PixelFormat::Rgb8
-            || self.input.spec.format == crate::pixel::format::PixelFormat::Gray8
-        {
+        if self.input.spec.layout.storage == crate::pixel::Storage::U8 {
             op.set_bool("uchar", true);
         }
         let out_handle = op.run().unwrap();
@@ -726,7 +723,7 @@ impl Lower<GpuBackend> for Linear<GpuBackend> {
         let mut b_arr = [0.0f32; 4];
         let a_len = self.a.len();
         let b_len = self.b.len();
-        let src_max = self.input.spec.format.component_max_f64();
+        let src_max = self.input.spec.layout.component_max_f64();
         for i in 0..4 {
             a_arr[i] = self.a[i.min(a_len.saturating_sub(1))] as f32;
             b_arr[i] = (self.b[i.min(b_len.saturating_sub(1))] / src_max) as f32;
@@ -788,7 +785,7 @@ impl Lower<GpuBackend> for Math2Const<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let mut c_arr = [0.0f32; 4];
         let c_len = self.c.len();
-        let src_max = self.input.spec.format.component_max_f64() as f32;
+        let src_max = self.input.spec.layout.component_max_f64() as f32;
         for i in 0..4 {
             c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
         }
@@ -847,7 +844,7 @@ impl Lower<GpuBackend> for RemainderConst<GpuBackend> {
         for i in 0..4 {
             c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
         }
-        let src_max = self.input.spec.format.component_max_f64() as f32;
+        let src_max = self.input.spec.layout.component_max_f64() as f32;
         cx.param_block(
             ParamBlock::new()
                 .param("src_max", src_max)

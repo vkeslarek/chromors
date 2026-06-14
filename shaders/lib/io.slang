@@ -118,3 +118,14 @@ struct RotateReader {
         return read(uint2(idx));
     }
 }
+
+// ── Generic copy ─────────────────────────────────────────────────────────────
+
+/// Datatype-agnostic "materialize a wrapped read" kernel: copies `input` to
+/// `output` unchanged. All the work happens in the `R`/`W` wrappers nested
+/// around `input`/`output` by `cx.read_wrap`/`cx.write_wrap` (§5.5-§5.12) —
+/// e.g. `Convert` nests a `ColorReadView` around `input` so this copy lands
+/// already-converted pixels.
+void copy_kernel<R : IRegion, W : IWritableRegion>(uint2 idx, R input, W output) {
+    output.write(idx, input.read(idx));
+}

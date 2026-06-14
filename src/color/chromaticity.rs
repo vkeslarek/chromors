@@ -20,6 +20,14 @@ pub struct Chromaticity {
 
 impl Eq for Chromaticity {} // safe: f32 values are compile-time constants, never NaN
 
+impl std::hash::Hash for Chromaticity {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // safe: f32 values are compile-time constants, never NaN
+        self.x.to_bits().hash(state);
+        self.y.to_bits().hash(state);
+    }
+}
+
 impl Chromaticity {
     /// Creates a new chromaticity point with the given `x` and `y` coordinates.
     pub const fn new(x: f32, y: f32) -> Self {

@@ -6,7 +6,7 @@ use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{IntoVipsBandFormat, IntoVipsEnum, VipsBackend, VipsBuilder};
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation, OperationBoolean, OperationRelational};
-use crate::pixel::PixelFormat;
+use crate::pixel::PixelLayout;
 use crate::work_unit::{Region, WorkUnit};
 
 /// Pixel access pattern hint for cache operations.
@@ -26,7 +26,7 @@ impl IntoVipsEnum for Access {
 
 pub struct Cast<B: Backend> {
     pub input: Input<ImageKind, B>,
-    pub format: PixelFormat,
+    pub target: PixelLayout,
     pub shift: Option<bool>,
 }
 
@@ -42,12 +42,10 @@ where
         vec![Some(WorkUnit::Region(out.clone()))]
     }
     fn output_spec(&self) -> ImageKind {
-        let mut spec = (*self.input.spec).clone();
-        spec.format = self.format;
-        spec
+        self.input.spec.with_layout(self.target)
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
-        state.write_i32(self.format.into_vips_band_format());
+        state.write(format!("{:?}", self.target).as_bytes());
         if let Some(v) = self.shift {
             state.write_u8(v as u8);
         }
@@ -59,7 +57,7 @@ impl Lower<VipsBackend> for Cast<VipsBackend> {
         let input_handle = cx.input(self.input.src());
         let mut op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         op.set_image("in", input_handle.ptr);
-        op.set_int("format", self.format.into_vips_band_format());
+        op.set_int("format", self.target.storage.into_vips_band_format());
         if let Some(v) = self.shift {
             op.set_bool("shift", v);
         }
@@ -439,7 +437,7 @@ impl Lower<VipsBackend> for Recomb<VipsBackend> {
         // the same band format/byte layout.
         let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         cast_op.set_image("in", out_handle.ptr);
-        cast_op.set_int("format", self.input.spec.format.into_vips_band_format());
+        cast_op.set_int("format", self.input.spec.layout.storage.into_vips_band_format());
         cast_op.set_bool("shift", false);
         let cast_handle = cast_op.run().unwrap();
         cx.emit(cast_handle);
@@ -956,7 +954,7 @@ impl Lower<GpuBackend> for Maplut<GpuBackend> {
 
 impl Lower<GpuBackend> for Recomb<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.param_block(ParamBlock::new().param("n", self.input.spec.format.channel_count() as u32));
+        cx.param_block(ParamBlock::new().param("n", self.input.spec.layout.channel_count() as u32));
         cx.kernel("ops.misc", "recomb_kernel");
         cx.output(self.output_spec().output(cx.wu()));
     }
@@ -989,12 +987,17 @@ impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where
     Cast<B>: crate::operation::Lower<B>,
 {
-    pub fn cast(&self, format: PixelFormat, shift: Option<bool>) -> Self {
+    pub fn cast(&self, target: PixelLayout, shift: Option<bool>) -> Self {
         self.push(Cast {
             input: self.as_input(),
-            format,
+            target,
             shift,
         })
+    }
+
+    /// Casts only the sample storage, keeping model/alpha/color-space.
+    pub fn cast_storage(&self, storage: crate::pixel::Storage, shift: Option<bool>) -> Self {
+        self.cast(self.spec.layout.with_storage(storage), shift)
     }
 }
 
@@ -1333,7 +1336,7 @@ impl Lower<GpuBackend> for BooleanConst<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let mut c_arr = [0.0f32; 4];
         let c_len = self.c.len();
-        let src_max = self.input.spec.format.component_max_f64() as f32;
+        let src_max = self.input.spec.layout.component_max_f64() as f32;
         for i in 0..4 {
             c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
         }
@@ -1393,7 +1396,7 @@ impl Lower<GpuBackend> for RelationalConst<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let mut c_arr = [0.0f32; 4];
         let c_len = self.c.len();
-        let src_max = self.input.spec.format.component_max_f64() as f32;
+        let src_max = self.input.spec.layout.component_max_f64() as f32;
         for i in 0..4 {
             c_arr[i] = self.c[i.min(c_len.saturating_sub(1))] as f32;
         }

@@ -51,8 +51,8 @@ fn sandwich_acescg_composite() {
     let base = common::rgba();
     let overlay = common::rgba();
 
-    let base_f = base.cast(PixelFormat::RgbaF32, None);
-    let overlay_f = overlay.cast(PixelFormat::RgbaF32, None);
+    let base_f = base.cast_storage(Storage::F32, None);
+    let overlay_f = overlay.cast_storage(Storage::F32, None);
     let vips_comp = base_f.push(Composite2 {
         base: base_f.as_input(),
         overlay: overlay_f.as_input(),
@@ -61,12 +61,12 @@ fn sandwich_acescg_composite() {
         y: None,
         premultiplied: Some(false),
     });
-    let vips_res = vips_comp.cast(PixelFormat::Rgba8, None);
+    let vips_res = vips_comp.cast_storage(Storage::U8, None);
 
     let gpu_base = common::vips_to_gpu(&base, &ctx);
     let gpu_overlay = common::vips_to_gpu(&overlay, &ctx);
-    let gpu_base_f = gpu_base.cast(PixelFormat::RgbaF32, None);
-    let gpu_overlay_f = gpu_overlay.cast(PixelFormat::RgbaF32, None);
+    let gpu_base_f = gpu_base.cast_storage(Storage::F32, None);
+    let gpu_overlay_f = gpu_overlay.cast_storage(Storage::F32, None);
     let gpu_comp = gpu_base_f.push(Composite2 {
         base: gpu_base_f.as_input(),
         overlay: gpu_overlay_f.as_input(),
@@ -75,7 +75,7 @@ fn sandwich_acescg_composite() {
         y: None,
         premultiplied: Some(false),
     });
-    let gpu_res = gpu_comp.cast(PixelFormat::Rgba8, None);
+    let gpu_res = gpu_comp.cast_storage(Storage::U8, None);
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);

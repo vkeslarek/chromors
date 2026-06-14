@@ -125,7 +125,7 @@ fn recomb_matches_vips() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let bands = vips_img.format().channel_count() as i32;
+    let bands = vips_img.layout().channel_count() as i32;
 
     let vips_matrix = Mask2D::<VipsBackend>::identity(bands);
     let gpu_matrix = Mask2D::<GpuBackend>::identity(ctx.clone(), bands);

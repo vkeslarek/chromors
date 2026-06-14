@@ -10,8 +10,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `component` | [`Component`] trait — numeric channel abstraction |
-//! | `format` | [`PixelFormat`] enum — all supported pixel layouts |
-//! | `meta` | [`PixelMeta`] — compressed pixel descriptor (format + space + alpha) |
+//! | `meta` | [`PixelLayout`] — storage × model × alpha × color-space descriptor |
 //! | `rgb` | [`Rgb`] — three-channel RGB pixels |
 //! | `rgba` | [`Rgba`] — four-channel RGBA pixels |
 //! | `cmyk` | [`Cmyk`], [`CmykA`] — CMYK pixel types |
@@ -55,6 +54,46 @@ impl AlphaPolicy {
             AlphaPolicy::Straight => 0,
             AlphaPolicy::PremultiplyOnPack => 1,
             AlphaPolicy::OpaqueDrop => 2,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Alpha state — whether an image HAS an alpha channel, and how it's stored
+// ---------------------------------------------------------------------------
+
+/// Whether a [`PixelLayout`] carries an alpha channel, and if so whether it is
+/// straight or premultiplied.
+///
+/// `AlphaState` describes what an image *has*; [`AlphaPolicy`] describes what
+/// a conversion's destination *should produce*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AlphaState {
+    /// No alpha channel.
+    None = 0,
+    /// Straight (non-premultiplied) alpha channel present.
+    Straight = 1,
+    /// Premultiplied alpha channel present.
+    Premultiplied = 2,
+}
+
+impl AlphaState {
+    /// `1` if an alpha channel is present, `0` otherwise.
+    pub const fn extra_channels(self) -> usize {
+        match self {
+            AlphaState::None => 0,
+            AlphaState::Straight | AlphaState::Premultiplied => 1,
+        }
+    }
+
+    /// Bridge to the existing shader `AlphaPolicy` discriminant
+    /// (Straight=0, PremultiplyOnPack=1, OpaqueDrop=2). `None` reads as
+    /// `Straight` since there is no alpha to premultiply.
+    pub const fn to_shader(self) -> u32 {
+        match self {
+            AlphaState::None | AlphaState::Straight => 0,
+            AlphaState::Premultiplied => 1,
         }
     }
 }
@@ -127,7 +166,6 @@ pub trait Pixel: Copy + Pod {
 // ---------------------------------------------------------------------------
 
 pub mod cmyk;
-pub mod format;
 pub mod gray;
 pub mod hsv;
 pub mod lab;
@@ -139,22 +177,23 @@ mod pack;
 pub mod rgb;
 pub mod rgba;
 pub mod scrgb;
+pub mod storage;
 pub mod xyz;
 pub mod ycbcr;
 pub mod yxy;
 
 pub use cmyk::{Cmyk, CmykA};
-pub use format::PixelFormat;
 pub use gray::{Gray, GrayAlpha};
 pub use hsv::Hsv;
 pub use lab::Lab;
 pub use lch::LCh;
-pub use meta::PixelMeta;
+pub use meta::{PixelLayout, layout_with_bands};
 pub use oklab::Oklab;
 pub use oklch::OkLCh;
 pub use rgb::Rgb;
 pub use rgba::Rgba;
 pub use scrgb::ScRgb;
+pub use storage::Storage;
 pub use xyz::Xyz;
 pub use ycbcr::YCbCr;
 pub use yxy::Yxy;
@@ -174,6 +213,13 @@ mod tests {
         let p = AlphaPolicy::PremultiplyOnPack;
         let _q = p;
         assert_eq!(p, AlphaPolicy::PremultiplyOnPack);
+    }
+
+    #[test]
+    fn alpha_state_extra_channels() {
+        assert_eq!(AlphaState::None.extra_channels(), 0);
+        assert_eq!(AlphaState::Straight.extra_channels(), 1);
+        assert_eq!(AlphaState::Premultiplied.extra_channels(), 1);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod color_params;
 pub mod compile;
 pub mod context;
 pub mod emit;
@@ -37,6 +38,9 @@ pub enum BaseInput {
 pub struct StepInput {
     pub base: BaseInput,
     pub adapter: Option<ViewAdapter>,
+    /// Zero-cost read-side wraps (§5.5-§5.10), outermost last. Set by
+    /// [`GpuBuilder::read_wrap`] on this step's inputs.
+    pub read_wraps: Vec<ResolvedWrap>,
 }
 
 /// Element type of a step's working temp buffer (`work_{s}`) — a data-driven
@@ -129,6 +133,21 @@ pub struct GpuBuilder {
     /// each adapter a unique `ChainParams` field prefix (`a{n}_...`).
     adapter_count: usize,
 
+    /// Count of distinct read/write wraps resolved so far this pass — used to
+    /// assign each wrap a unique `ChainParams` field prefix (`w{n}_...`),
+    /// analogous to `adapter_count`'s `a{n}`.
+    wrap_count: usize,
+    /// Index into `steps` of the *current* node's first kernel step, set by
+    /// `kernel_with_temp` the moment `cur_started` flips true. `read_wrap`
+    /// wraps this step's inputs (the node's graph-input reads). Cleared at
+    /// the start of every `enter`.
+    cur_first_step: Option<usize>,
+    /// Write-side wraps (§5.5-§5.10) for the *current* node's output, set by
+    /// `write_wrap`. If this node is the DAG root, the emitter nests these
+    /// around the codec sandwich's encode view. Cleared at the start of every
+    /// `enter` — only the root's (lowered last) survive to `emit_slang`.
+    write_wraps: Vec<ResolvedWrap>,
+
     ctx: Arc<GpuContext>,
     error: Option<Error>,
     current_wu: Option<WorkUnit>,
@@ -161,6 +180,9 @@ impl GpuBuilder {
             pending_params: Vec::new(),
             cur_output_adapter: None,
             adapter_count: 0,
+            wrap_count: 0,
+            cur_first_step: None,
+            write_wraps: Vec::new(),
             ctx,
             error: None,
             current_wu: None,
@@ -207,6 +229,8 @@ impl GpuBuilder {
         self.current_wu = Some(wu.clone());
         self.cur_node = Some(node_key);
         self.cur_started = false;
+        self.cur_first_step = None;
+        self.write_wraps.clear();
         self.cur_output_adapter = None;
         self.cur_inputs = input_keys
             .iter()
@@ -217,11 +241,13 @@ impl GpuBuilder {
                     StepInput {
                         base: BaseInput::Source(si),
                         adapter: None,
+                        read_wraps: Vec::new(),
                     }
                 } else if let Some(&st) = self.last_step_of.get(k) {
                     StepInput {
                         base: BaseInput::Step(st),
                         adapter: None,
+                        read_wraps: Vec::new(),
                     }
                 } else {
                     // Pruned/absent input reached a consumer — shouldn't happen
@@ -229,6 +255,7 @@ impl GpuBuilder {
                     StepInput {
                         base: BaseInput::Source(0),
                         adapter: None,
+                        read_wraps: Vec::new(),
                     }
                 }
             })
@@ -284,6 +311,7 @@ impl GpuBuilder {
         self.cur_output_adapter = Some(StepInput {
             base: BaseInput::Source(slot),
             adapter: None,
+            read_wraps: Vec::new(),
         });
         self
     }
@@ -305,11 +333,13 @@ impl GpuBuilder {
     ) -> &mut Self {
         let inputs = if !self.cur_started {
             self.cur_started = true;
+            self.cur_first_step = Some(self.steps.len());
             self.cur_inputs.clone()
         } else {
             vec![StepInput {
                 base: BaseInput::Step(self.steps.len() - 1),
                 adapter: None,
+                read_wraps: Vec::new(),
             }]
         };
         let params = std::mem::take(&mut self.pending_params);
@@ -379,6 +409,7 @@ impl GpuBuilder {
             StepInput {
                 base: input.base,
                 adapter: Some(resolved),
+                read_wraps: Vec::new(),
             }
         };
         if let Some(k) = self.cur_node {
@@ -403,6 +434,65 @@ impl GpuBuilder {
             self.alias_adapters.insert(k, input.clone());
         }
         self.cur_output_adapter = Some(input);
+        self
+    }
+
+    /// Assign `w` a unique `ChainParams` field prefix (`w{n}_...`), merge its
+    /// params into `ChainParams`, and substitute `{params}` in its `ctor`
+    /// with the resulting field access. `{inner}`/`{value}` are left for the
+    /// nesting site (`read_wrap`/`write_wrap`/`emit_slang`) to fill in.
+    fn resolve_wrap(&mut self, w: ReadWrap) -> ResolvedWrap {
+        let n = self.wrap_count;
+        self.wrap_count += 1;
+        let prefix = format!("w{n}");
+        let fields: Vec<(String, &'static str)> = w
+            .params
+            .fields
+            .iter()
+            .map(|(name, ty)| (format!("{prefix}_{name}"), *ty))
+            .collect();
+        let params_expr = fields
+            .first()
+            .map(|(name, _)| format!("params[0].{name}"))
+            .unwrap_or_default();
+        self.params.fields.extend(fields);
+        self.params
+            .field_sizes
+            .extend(w.params.field_sizes.iter().copied());
+        self.params.bytes.extend_from_slice(&w.params.bytes);
+        ResolvedWrap {
+            wrapper: w.wrapper.into_owned(),
+            ctor: w.ctor.replace("{params}", &params_expr),
+            module: w.module,
+        }
+    }
+
+    /// Wrap the current node's first kernel step's input(s) in a zero-cost
+    /// read-side view (§5.5-§5.10) — e.g. `Convert`'s `ColorReadView`. Stacks:
+    /// the last call is the outermost wrap. Must be called after `kernel`/
+    /// `kernel_with_temp`.
+    pub fn read_wrap(&mut self, w: ReadWrap) -> &mut Self {
+        let resolved = self.resolve_wrap(w);
+        let Some(step_idx) = self.cur_first_step else {
+            self.fail(Error::Backend(
+                "read_wrap: no kernel step on current node".into(),
+            ));
+            return self;
+        };
+        for inp in &mut self.steps[step_idx].inputs {
+            inp.read_wraps.push(resolved.clone());
+        }
+        self
+    }
+
+    /// Wrap the current node's output (the codec sandwich's encode view) in a
+    /// zero-cost write-side view (§5.5-§5.10) — e.g. `Convert`'s
+    /// `ColorWriteSink`. Stacks: the last call is the outermost wrap. If this
+    /// node isn't the DAG root, the wraps are discarded (overwritten by the
+    /// next `enter`).
+    pub fn write_wrap(&mut self, w: WriteWrap) -> &mut Self {
+        let resolved = self.resolve_wrap(w);
+        self.write_wraps.push(resolved);
         self
     }
 
@@ -486,6 +576,82 @@ pub trait GpuView: Kind {
     /// resolved output WorkUnit — Region-shaped Kinds (images) use it to size
     /// their `region_out` geometry.
     fn output(&self, wu: &WorkUnit) -> OutputWrap;
+}
+
+/// Maps a [`crate::pixel::Storage`] to the Slang `IStorageCodec` type the
+/// emitter splices into `CodecRegion<C, N>` / `RWCodecRegion<C, N>`. GPU-owned
+/// (`docs/native-color-management.md` §3.6) — `Storage` itself stays agnostic;
+/// this trait is the only place that knows Slang type names.
+pub trait GpuStorageCodec {
+    fn gpu_codec(&self) -> &'static str;
+}
+
+impl GpuStorageCodec for crate::pixel::Storage {
+    fn gpu_codec(&self) -> &'static str {
+        match self {
+            crate::pixel::Storage::U8 => "U8Codec",
+            crate::pixel::Storage::U16 => "U16Codec",
+            crate::pixel::Storage::F16 => "F16Codec",
+            crate::pixel::Storage::F32 => "F32Codec",
+        }
+    }
+}
+
+/// Maps a [`crate::color::model::ColorModel`] to the Slang `ColorModel` enum
+/// value `color_convert` switches on (`shaders/lib/color/model.slang`,
+/// rewritten in step 5 to the same 12-variant set as the Rust enum).
+/// GPU-owned (`docs/native-color-management.md` §3.6).
+pub trait GpuModelId {
+    fn gpu_model(&self) -> u32;
+}
+
+impl GpuModelId for crate::color::model::ColorModel {
+    fn gpu_model(&self) -> u32 {
+        use crate::color::model::ColorModel as M;
+        match self {
+            M::Rgb => 0,
+            M::Gray => 1,
+            M::Cmyk => 2,
+            M::YCbCr => 3,
+            M::Lab => 4,
+            M::Xyz => 5,
+            M::Yxy => 6,
+            M::Lch => 7,
+            M::Hsv => 8,
+            M::Oklab => 9,
+            M::Oklch => 10,
+            M::ScRgb => 11,
+            M::Multiband(_) => 12,
+        }
+    }
+}
+
+/// Maps a [`crate::color::transfer::TransferFn`] to the Slang `TransferFn`
+/// enum value (`shaders/lib/color/transfer.slang`). The variant order is
+/// identical on both sides, so this is just the discriminant.
+/// GPU-owned (`docs/native-color-management.md` §3.6).
+pub trait GpuTransferId {
+    fn gpu_transfer(&self) -> u32;
+}
+
+impl GpuTransferId for crate::color::transfer::TransferFn {
+    fn gpu_transfer(&self) -> u32 {
+        *self as u32
+    }
+}
+
+/// Maps a [`crate::pixel::AlphaState`] to the Slang `AlphaPolicy` enum value
+/// (`shaders/lib/pixel.slang`: `Straight=0, PremultiplyOnPack=1, OpaqueDrop=2`).
+/// GPU-owned (`docs/native-color-management.md` §3.6) — delegates to the
+/// existing `AlphaState::to_shader` bridge (§3.3).
+pub trait GpuAlphaId {
+    fn gpu_alpha(&self) -> u32;
+}
+
+impl GpuAlphaId for crate::pixel::AlphaState {
+    fn gpu_alpha(&self) -> u32 {
+        self.to_shader()
+    }
 }
 
 impl crate::backend::Backend for GpuBackend {

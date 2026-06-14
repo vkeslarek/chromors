@@ -65,3 +65,18 @@ The engine must allow behavior injection without requiring core library recompil
 * [ ] Allow consuming applications (like Pixors) to pass their own `.slang` code (custom operations).
 * [ ] Create an interface for the Slang compiler within Chromors to inject arbitrary logic (e.g., complex *Color Grading* nodes built visually in the user's UI) into the fused pipeline.
 * [ ] Validate inputs and outputs of external shaders against Chromors' type system (Kinds).
+
+
+## INTEGRATE INTO ROADMAP:
+GPU-Native Generators (Procedural Sources)
+
+libvips exposes a create family of operations that synthesize image data from parameters alone (constants, ramps, coordinate fields, noise, test patterns, kernel/LUT/frequency-mask builders). A generator has zero image inputs — its value at (x, y) for a given region and LOD is a pure function of the coordinate and a parameter set.
+
+Because there are no input pixels, generating these on the CPU and uploading the buffer to VRAM is pure waste. Generators must instead be implemented as Slang compute kernels that write their region directly in VRAM, participating fully in JIT fusion. This is the single biggest "free win" available to the engine.
+
+Why GPU-native is more correct, not just faster
+
+
+Region/LOD native. Because the output is a pure function of coordinates, a generator is evaluated lazily per requested Region at any Lod — no full-canvas materialization ever. A zone plate or gradient pulled at Lod(3) computes only the downsampled region. Generators become first-class citizens of the tile/preview pipeline, effectively resolution-independent, infinite-canvas sources that cost only what you pull.
+Fusion. A generator is the first stage of a fused pipeline. gaussnoise → add → blur collapses into far fewer dispatches because the noise is produced in-register at the point of use rather than read back from a materialized buffer.
+Tiling-correct noise. Sequential CPU RNGs are fundamentally incompatible with a tiled engine: pull(A) then pull(B) would not reconstruct pull(A ∪ B). GPU generators use a counter-based, coordinate-keyed RNG (PCG / Philox style, keyed by (x, y, seed)), making noise deterministic and independent of how the canvas is tiled. This is a property libvips cannot offer for free.

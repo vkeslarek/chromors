@@ -183,23 +183,23 @@ pub trait RegionProcessor {
     fn process<P: Pixel>(&self, src: &RegionView<P>, dst: &mut RegionViewMut<P>);
 }
 
-/// Dispatch `$body!(ConcretePixel)` for the region's pixel format, or return an
-/// "unsupported format" error.
+/// Dispatch `$body!(ConcretePixel)` for the region's `(Storage, bands)`, or
+/// return an "unsupported format" error.
 #[macro_export]
 macro_rules! dispatch_format {
-    ($fmt:expr, $body:ident) => {
-        match $fmt {
-            $crate::pixel::PixelFormat::Rgba8 => $body!($crate::pixel::Rgba<u8>),
-            $crate::pixel::PixelFormat::Rgba16 => $body!($crate::pixel::Rgba<u16>),
-            $crate::pixel::PixelFormat::RgbaF16 => $body!($crate::pixel::Rgba<$crate::pixel::f16>),
-            $crate::pixel::PixelFormat::RgbaF32 => $body!($crate::pixel::Rgba<f32>),
-            $crate::pixel::PixelFormat::Rgb8 => $body!($crate::pixel::Rgb<u8>),
-            $crate::pixel::PixelFormat::Rgb16 => $body!($crate::pixel::Rgb<u16>),
-            $crate::pixel::PixelFormat::RgbF16 => $body!($crate::pixel::Rgb<$crate::pixel::f16>),
-            $crate::pixel::PixelFormat::RgbF32 => $body!($crate::pixel::Rgb<f32>),
-            other => {
+    ($storage:expr, $bands:expr, $body:ident) => {
+        match ($storage, $bands) {
+            ($crate::pixel::Storage::U8, 3) => $body!($crate::pixel::Rgb<u8>),
+            ($crate::pixel::Storage::U8, 4) => $body!($crate::pixel::Rgba<u8>),
+            ($crate::pixel::Storage::U16, 3) => $body!($crate::pixel::Rgb<u16>),
+            ($crate::pixel::Storage::U16, 4) => $body!($crate::pixel::Rgba<u16>),
+            ($crate::pixel::Storage::F16, 3) => $body!($crate::pixel::Rgb<$crate::pixel::f16>),
+            ($crate::pixel::Storage::F16, 4) => $body!($crate::pixel::Rgba<$crate::pixel::f16>),
+            ($crate::pixel::Storage::F32, 3) => $body!($crate::pixel::Rgb<f32>),
+            ($crate::pixel::Storage::F32, 4) => $body!($crate::pixel::Rgba<f32>),
+            (storage, bands) => {
                 return Err($crate::error::Error::Vips(format!(
-                    "working sandwich: unsupported format {other:?}; convert to an RGB(A) format first"
+                    "working sandwich: unsupported storage {storage:?} x{bands} bands; convert to an RGB(A) format first"
                 )));
             }
         }
@@ -221,6 +221,6 @@ pub fn execute_processor<R: RegionProcessor>(
             processor.process(&src, &mut dst);
         }};
     }
-    dispatch_format!(input.format(), go);
+    dispatch_format!(input.storage(), input.bands(), go);
     Ok(())
 }

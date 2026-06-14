@@ -85,60 +85,29 @@ bypass the bridge.
 
 ## 4. THE INVARIANTS (non-negotiable)
 
-1. **Data is always backend-resident.** No `residency` field, no host `Buffer`
-   variant. The ONLY way to host is `Target::extract`. `Data::materialize` is
-   `pub(crate)` — never make it public, never `.download()` outside a `Target`.
+Full text + rationale + section pointers: **`docs/architecture.md` §11.1**.
+Condensed:
 
-2. **The materializer is type-blind.** It walks `Arc<dyn AnyKind>` and **must
-   never** read a `View`/`ParamBlock` from a Kind, nor downcast to a concrete
-   Kind. Views/params are **injected by the node inside `lower`** (concrete-type
-   site). You cannot cross-cast `dyn AnyKind` → `dyn GpuView` — do not try.
-
-3. **One closed enum only: `Shape` (Region/Range/Atomic).** It is per-*shape*
-   (3 materialize strategies), NOT per-datatype. The single allowed `match` over
-   shapes lives in `work_unit.rs` (`WorkUnit::union`). Adding a datatype must
-   add ZERO match arms anywhere. Adding a Slang wrapper type must add ZERO Rust
-   enum variants.
-
-4. **Adding a datatype is additive: one new file in `src/data/`.** No central
-   enum, no `emit.rs` match, no edit to `AnyKind`/`Operation`/`Backend`.
-
-5. **Adding a backend is additive.** A new `impl Backend` + its `Builder` + the
-   per-backend capability trait (`GpuView`-equivalent). Existing ops gain it by
-   writing one `Lower<NewBackend>` each; the structural `Operation<B>` impl is
-   untouched.
-
-6. **A Kind only supports a backend if it implements that backend's
-   capability.** `HistogramKind` has `GpuView` and not `VipsBand` ⇒
-   `Data<HistogramKind, VipsBackend>` does not compile. This is the intended
-   mechanism — never add a runtime "unsupported backend" error.
-
-7. **Region/dimensional math lives on the typed `WorkUnit`s** (`Region::bounding`,
-   `Region::tile_aligned`), exposed to the generic engine via `WorkUnit::union`
-   (the 3-arm shape switch). The materializer calls `wu.union(other)`; it does
-   not do rect math itself.
-
-8. **The DAG is immutable and arena-free.** `push` wraps a NEW `Arc<Node>`. No
-   `Mutex`, no `NodeId`, no central `Graph`. Diamonds dedup by `Arc::as_ptr`.
-   Every walk must dedup and MUST use the generic `GraphWalk<'a, B>` object
-   from `src/node.rs` (owns `demands` map + `lowered` set). Loose traversal
-   functions are strictly forbidden. `Node<B>` provides delegated methods
-   (`lower()`, `output_kind()`, `inputs()`, `demand_erased()`) so you NEVER
-   `match` on `Node::Op` vs `Node::Source` during materialization.
-
-9. **The only engine-owned cache is the GPU pipeline cache (keyed by IR-text
-   hash XOR the `.slang` source fingerprint), with LRU.** The fingerprint is
-   mandatory: a kernel body never appears in the emitted `main()`, so without it
-   an edited shader keeps a stale cached pipeline. No data/tile cache in the
-   engine — that's a caller-side `Cached` source adapter (interactive=yes,
-   batch=no).
-
-10. **Color/format conversion is an `Operation`, never an implicit fusion
-    step.** All GPU codecs live in Slang; Rust only picks the wrapper string.
-
-→ `docs/architecture.md` §3.5/§4 (#1,#2,#8), §3.2 (#3,#7), §7/§8 (#4,#5,#6),
-§5.1 (#9), §8/§5.3 (#10) for the mechanics behind each invariant, and §11 for
-a one-page cheat sheet linking invariants to FORBIDDEN patterns.
+1. Data is always backend-resident — only exit is `Target::extract`;
+   `Data::materialize` stays `pub(crate)`.
+2. The materializer is type-blind — never reads `View`/`ParamBlock` off a
+   Kind, never downcasts; those are injected inside `lower`.
+3. One closed shape-enum only (`Region`/`Range`/`Atomic`), matched once in
+   `WorkUnit::union`. New datatypes/wrappers add ZERO match arms/variants.
+4. Adding a datatype = one new file in `src/data/`. No central enum/match.
+5. Adding a backend = new `impl Backend`+`Builder`+capability trait; existing
+   ops gain it via one `Lower<NewBackend>` each.
+6. A Kind supports a backend only if it implements that backend's capability
+   trait — missing impl ⇒ compile error, never a runtime "unsupported" error.
+7. Region/dimensional math lives on typed `WorkUnit`s, exposed via
+   `WorkUnit::union` — the materializer never does rect math itself.
+8. The DAG is immutable/arena-free (`push` = new `Arc<Node>`, dedup by
+   `Arc::as_ptr`). Every walk uses `GraphWalk<'a, B>` — no loose traversal
+   functions, no `match Node::Op vs Node::Source` during materialization.
+9. The only engine-owned cache is the GPU pipeline cache, keyed by IR-text
+   hash XOR `.slang` source fingerprint, LRU. No data/tile cache in-engine.
+10. Color/format conversion is an `Operation` (Slang codec), never an
+    implicit fusion step.
 
 ---
 
@@ -187,22 +156,19 @@ Full recipes with worked examples (`ImageKind`/`HistogramKind`,
 
 ## 6. FORBIDDEN — delete on sight, never write
 
-- ❌ `trait Operation<Input> { fn execute(&self, input) }` (eager, old chromors).
-  We use lazy `Operation<B>` + `Lower<B>`. There is no `execute`.
-- ❌ A backend-generic `Image2D<B>` *handle struct* of its own. The handle is
-  `Data<ImageKind, B>`; `Image2D<B>` is only a `type` alias of it.
-- ❌ `view`/`params`/`Role`/`View`/`ParamBlock`/`TempSpec` on `AnyKind`,
-  `Kind`, `Operation`, `WorkUnit`, or anything in §2-AGNOSTIC.
-- ❌ The materializer (or any agnostic code) calling `GpuView`/`VipsBand`, or
-  `downcast_ref::<ConcreteKind>()` to pick a view/codec.
-- ❌ A central `match` / enum over datatypes (`ValueKind`, `InputEncoder`,
-  `OutputDecoder`, `WriteMode` as closed Rust enums that grow per datatype).
-  Slang wrapper choice is a string from `GpuView::view`, not a Rust enum.
-- ❌ A persistent `Graph` struct, `NodeId` arena, or `Arc<Mutex<Graph>>`.
-- ❌ An engine-owned tile/region/value cache. Only the pipeline (shader) cache.
-- ❌ Making `Data::materialize` public, or downloading outside a `Target`.
-- ❌ A walk without pointer-dedup (causes duplicated lowering on diamonds).
-- ❌ A `wu` parameter on `Lower::lower`.
+Full list + per-item invariant pointers: **`docs/architecture.md` §11.2**.
+Condensed — if you find any of these, it's a bug to delete, not a pattern:
+
+- ❌ eager `Operation::execute` (old chromors) — lazy `Operation<B>`+`Lower<B>` only.
+- ❌ a hand-written `Image2D<B>` handle struct — it's a `type` alias of `Data<ImageKind,B>`.
+- ❌ `View`/`ParamBlock`/`Role`/`TempSpec` on anything in §2's AGNOSTIC column.
+- ❌ materializer/agnostic code calling `GpuView`/`VipsBand` or `downcast_ref::<ConcreteKind>()`.
+- ❌ a central `match`/enum over datatypes (`ValueKind`, `InputEncoder`, ...).
+- ❌ a persistent `Graph`/`NodeId` arena/`Arc<Mutex<Graph>>`.
+- ❌ an engine-owned tile/region/value cache (pipeline cache only).
+- ❌ public `Data::materialize`, or downloading outside a `Target`.
+- ❌ a walk without pointer-dedup.
+- ❌ a `wu` parameter on `Lower::lower`.
 
 ---
 

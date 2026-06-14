@@ -7,7 +7,7 @@ use poc::data::mask2d::Mask2D;
 use poc::operation::composite::{BlendMode, Composite2};
 use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend};
 use poc::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
-use poc::pixel::PixelFormat;
+use poc::pixel::Storage;
 
 /// Read a vips image whose runtime pixels are FLOAT (e.g. promoted by
 /// `linear`) but whose `format()` metadata still reports the pre-promotion
@@ -19,7 +19,7 @@ fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
     use poc::io::Target;
     use poc::work_unit::{Lod, Region};
     let (w, h) = (img.width(), img.height());
-    let bands = img.format().channel_count() as usize;
+    let bands = img.layout().channel_count() as usize;
     let target = poc::data::image::RamImageTarget;
     let bytes = img
         .pull(
@@ -44,6 +44,7 @@ fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
 
 mod arithmetic;
 mod bands;
+mod color;
 mod composite;
 mod edge;
 mod filters;
@@ -51,4 +52,5 @@ mod geometry;
 mod icc;
 mod misc;
 mod opacity;
+mod pixel;
 mod stats;

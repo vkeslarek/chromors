@@ -15,7 +15,7 @@ fn blur_matches_vips() {
     let gpu_res = gpu_img.blur(sigma);
 
     let (w, h) = (vips_img.width() as usize, vips_img.height() as usize);
-    let bands = vips_img.format().channel_count() as usize;
+    let bands = vips_img.layout().channel_count() as usize;
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
@@ -32,8 +32,8 @@ fn convert_identity_is_lossless() {
     let vips_img = common::rgba();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let vips_res = vips_img.cast(PixelFormat::Rgba8, None);
-    let gpu_res = gpu_img.cast(PixelFormat::Rgba8, None);
+    let vips_res = vips_img.cast_storage(Storage::U8, None);
+    let gpu_res = gpu_img.cast_storage(Storage::U8, None);
 
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);

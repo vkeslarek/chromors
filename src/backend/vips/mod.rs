@@ -1,5 +1,6 @@
 pub mod custom;
 pub mod gobject;
+pub mod working;
 
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -54,16 +55,6 @@ pub trait IntoVipsBandFormat {
 pub trait FromVipsBandFormat: Sized {
     /// Reconstruct from a `VipsBandFormat` integer and band count.
     fn from_vips_band_format(raw: i32, bands: i32) -> Self;
-}
-
-pub trait IntoVipsInterpretation {
-    /// Map this color space to a `VipsInterpretation` enum integer.
-    fn into_vips_interpretation(self) -> i32;
-}
-
-pub trait FromVipsInterpretation: Sized {
-    /// Reconstruct a color space from a `VipsInterpretation` integer.
-    fn from_vips_interpretation(raw: i32) -> Self;
 }
 
 /// Plain marker struct for the libvips backend.

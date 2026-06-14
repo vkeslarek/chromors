@@ -1,10 +1,11 @@
 pub mod chromaticity;
 pub mod cie;
-pub mod convert;
 pub mod detect;
 pub mod error;
+pub mod intent;
 pub mod matrix;
 pub mod model;
+pub mod pipeline;
 pub mod primaries;
 pub mod space;
 pub mod transfer;

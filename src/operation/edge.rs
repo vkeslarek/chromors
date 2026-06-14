@@ -26,7 +26,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.format.to_f32();
+        spec.layout = spec.layout.to_f32();
         spec
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
@@ -65,7 +65,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.format.to_f32();
+        spec.layout = spec.layout.to_f32();
         spec
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
@@ -104,7 +104,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.format.to_f32();
+        spec.layout = spec.layout.to_f32();
         spec
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
@@ -356,10 +356,7 @@ impl crate::data::image::Image2D<GpuBackend> {
             3,
             &[-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0],
         );
-        let f_input = self.cast(
-            crate::pixel::format::PixelFormat::to_f32(self.format()),
-            None,
-        );
+        let f_input = self.cast_storage(crate::pixel::Storage::F32, None);
         let gx = self.push(Convolution {
             input: f_input.as_input(),
             mask: mask_gx.as_input(),
@@ -395,10 +392,7 @@ impl crate::data::image::Image2D<GpuBackend> {
             3,
             &[-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         );
-        let f_input = self.cast(
-            crate::pixel::format::PixelFormat::to_f32(self.format()),
-            None,
-        );
+        let f_input = self.cast_storage(crate::pixel::Storage::F32, None);
         let gx = self.push(Convolution {
             input: f_input.as_input(),
             mask: mask_gx.as_input(),
@@ -434,10 +428,7 @@ impl crate::data::image::Image2D<GpuBackend> {
             3,
             &[-3.0, -10.0, -3.0, 0.0, 0.0, 0.0, 3.0, 10.0, 3.0],
         );
-        let f_input = self.cast(
-            crate::pixel::format::PixelFormat::to_f32(self.format()),
-            None,
-        );
+        let f_input = self.cast_storage(crate::pixel::Storage::F32, None);
         let gx = self.push(Convolution {
             input: f_input.as_input(),
             mask: mask_gx.as_input(),

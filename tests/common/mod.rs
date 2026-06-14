@@ -164,7 +164,7 @@ pub fn rms_f32(a: &[u8], b: &[u8]) -> f64 {
 pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
     use poc::io::Target;
     let (w, h) = (img.width(), img.height());
-    let bands = img.format().channel_count() as usize;
+    let bands = img.layout().channel_count() as usize;
     let target = poc::data::image::RamImageTarget;
     let bytes = img
         .pull(
@@ -178,7 +178,7 @@ pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
             },
         )
         .unwrap();
-    let bps = img.format().bytes_per_pixel() as usize / img.format().channel_count() as usize;
+    let bps = img.layout().bytes_per_pixel() as usize / img.layout().channel_count() as usize;
     let pixel_count = w as usize * h as usize * bands;
     match bps {
         1 => bytes

@@ -53,7 +53,8 @@ use crate::color::space::ColorSpace;
 use crate::data::image::ImageKind;
 use crate::error::Error;
 use crate::io::{Source, Target};
-use crate::pixel::format::PixelFormat;
+use crate::color::model::ColorModel;
+use crate::pixel::{AlphaState, PixelLayout, Storage};
 use crate::work_unit::Region;
 use std::sync::Arc;
 
@@ -80,12 +81,16 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
     type Kind = ImageKind;
 
     fn spec(&self) -> Arc<ImageKind> {
-        Arc::new(ImageKind {
-            color_space: ColorSpace::SRGB,
-            format: PixelFormat::Rgba8,
-            width: self.vector_graphics.spec.width.max(1.0) as i32,
-            height: self.vector_graphics.spec.height.max(1.0) as i32,
-        })
+        Arc::new(ImageKind::new(
+            PixelLayout {
+                storage: Storage::U8,
+                model: ColorModel::Rgb,
+                alpha: AlphaState::Straight,
+                color_space: ColorSpace::SRGB,
+            },
+            self.vector_graphics.spec.width.max(1.0) as i32,
+            self.vector_graphics.spec.height.max(1.0) as i32,
+        ))
     }
 
     fn fetch(
@@ -100,7 +105,7 @@ impl Source<GpuBackend> for VectorGraphicsImageSource {
 
         let spec: Arc<ImageKind> = <VectorGraphicsImageSource as Source<GpuBackend>>::spec(self);
         let pixel_count = (spec.width * spec.height) as usize;
-        let bytes_per_pixel = spec.format.bytes_per_pixel() as usize;
+        let bytes_per_pixel = spec.layout.bytes_per_pixel() as usize;
         let size = pixel_count * bytes_per_pixel;
 
         let vec = vec![0u8; size];
@@ -157,12 +162,16 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
     type Kind = ImageKind;
 
     fn spec(&self) -> Arc<ImageKind> {
-        Arc::new(ImageKind {
-            color_space: ColorSpace::SRGB,
-            format: PixelFormat::Rgba8,
-            width: self.vector_graphics.spec.width.max(1.0) as i32,
-            height: self.vector_graphics.spec.height.max(1.0) as i32,
-        })
+        Arc::new(ImageKind::new(
+            PixelLayout {
+                storage: Storage::U8,
+                model: ColorModel::Rgb,
+                alpha: AlphaState::Straight,
+                color_space: ColorSpace::SRGB,
+            },
+            self.vector_graphics.spec.width.max(1.0) as i32,
+            self.vector_graphics.spec.height.max(1.0) as i32,
+        ))
     }
 
     fn fetch(
@@ -175,7 +184,7 @@ impl Source<VipsBackend> for VectorGraphicsImageSource {
 
         let spec: Arc<ImageKind> = <VectorGraphicsImageSource as Source<VipsBackend>>::spec(self);
         let pixel_count = (spec.width * spec.height) as usize;
-        let bytes_per_pixel = spec.format.bytes_per_pixel() as usize;
+        let bytes_per_pixel = spec.layout.bytes_per_pixel() as usize;
         let size = pixel_count * bytes_per_pixel;
         let mut vec = vec![0u8; size];
 

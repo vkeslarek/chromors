@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// The three components are independent: you can mix any primaries with any
 /// white point and any transfer function. Predefined combinations for common
 /// standards are provided as associated constants (e.g. [`Self::SRGB`]).
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ColorSpace {
     primaries: RgbPrimaries,
     white_point: WhitePoint,
@@ -171,18 +171,102 @@ impl ColorSpace {
     pub const REC2100_HLG: Self = Self::new(RgbPrimaries::Bt2020, WhitePoint::D65, TransferFn::Hlg);
 }
 
-impl crate::backend::vips::IntoVipsInterpretation for ColorSpace {
-    fn into_vips_interpretation(self) -> i32 {
-        let (p, wp, t) = (self.primaries, self.white_point, self.transfer);
-        match (p, wp, t) {
-            (RgbPrimaries::Bt709, WhitePoint::D65, TransferFn::SrgbGamma)
-            | (RgbPrimaries::Bt709, WhitePoint::D65, TransferFn::Rec709Gamma)
-            | (RgbPrimaries::Bt709, WhitePoint::D65, TransferFn::Gamma22) => 22,
-            (RgbPrimaries::Bt709, WhitePoint::D65, TransferFn::Linear)
-            | (_, _, TransferFn::Linear) => 28,
-            _ => 22,
-        }
+/// Maps `(model, color_space)` to the closest **faithful** `VipsInterpretation`,
+/// or `None` when no faithful vips interpretation exists for this pair — the
+/// caller then takes the CPU custom-region path
+/// (`docs/native-color-management.md` §6.1.4). Replaces the lossy
+/// `IntoVipsInterpretation` collapse (22/28-only) for the `Convert` op.
+pub fn to_vips_interpretation(model: super::model::ColorModel, cs: ColorSpace) -> Option<i32> {
+    use super::model::ColorModel;
+    use crate::ffi::{
+        VipsInterpretation_VIPS_INTERPRETATION_B_W as B_W,
+        VipsInterpretation_VIPS_INTERPRETATION_CMYK as CMYK,
+        VipsInterpretation_VIPS_INTERPRETATION_LAB as LAB,
+        VipsInterpretation_VIPS_INTERPRETATION_XYZ as XYZ,
+        VipsInterpretation_VIPS_INTERPRETATION_sRGB as SRGB,
+        VipsInterpretation_VIPS_INTERPRETATION_scRGB as SC_RGB,
+    };
+    match model {
+        ColorModel::Gray => Some(B_W),
+        ColorModel::Lab => Some(LAB),
+        ColorModel::Xyz => Some(XYZ),
+        ColorModel::Cmyk => Some(CMYK),
+        ColorModel::ScRgb => Some(SC_RGB),
+        ColorModel::Rgb if cs == ColorSpace::SRGB => Some(SRGB),
+        ColorModel::Rgb if cs == ColorSpace::LINEAR_SRGB => Some(SC_RGB),
+        _ => None,
     }
+}
+
+/// Maps a vips `VipsInterpretation` + band count to `(ColorModel, AlphaState,
+/// ColorSpace)` — the inverse of [`to_vips_interpretation`], used by
+/// `FileImageSource` to detect a faithful `PixelLayout` on import
+/// (`docs/native-color-management.md` §7/§9, replaces the lossy
+/// `FromVipsInterpretation` which only yielded sRGB/linear). The returned
+/// `ColorSpace` is a sensible default for the model; callers refine it
+/// further via ICC-profile/chromaticity detection (`crate::color::detect`)
+/// when `model` is RGB-family.
+pub fn from_vips_interpretation(
+    interp: i32,
+    bands: i32,
+) -> (super::model::ColorModel, crate::pixel::AlphaState, ColorSpace) {
+    use super::model::ColorModel;
+    use crate::ffi::{
+        VipsInterpretation_VIPS_INTERPRETATION_B_W as B_W,
+        VipsInterpretation_VIPS_INTERPRETATION_CMYK as CMYK,
+        VipsInterpretation_VIPS_INTERPRETATION_GREY16 as GREY16,
+        VipsInterpretation_VIPS_INTERPRETATION_HSV as HSV,
+        VipsInterpretation_VIPS_INTERPRETATION_LAB as LAB,
+        VipsInterpretation_VIPS_INTERPRETATION_LABQ as LABQ,
+        VipsInterpretation_VIPS_INTERPRETATION_LABS as LABS,
+        VipsInterpretation_VIPS_INTERPRETATION_LCH as LCH,
+        VipsInterpretation_VIPS_INTERPRETATION_RGB as RGB,
+        VipsInterpretation_VIPS_INTERPRETATION_RGB16 as RGB16,
+        VipsInterpretation_VIPS_INTERPRETATION_XYZ as XYZ,
+        VipsInterpretation_VIPS_INTERPRETATION_YXY as YXY,
+        VipsInterpretation_VIPS_INTERPRETATION_sRGB as SRGB,
+        VipsInterpretation_VIPS_INTERPRETATION_scRGB as SC_RGB,
+    };
+    use crate::pixel::AlphaState;
+
+    // D50-referenced connection space, used as the default `color_space` for
+    // Lab/Xyz/Lch/Yxy layouts (primaries are meaningless there, but the white
+    // point pins the XYZ hub conversion per `PixelLayout::color_space` docs).
+    let connection = ColorSpace::new(RgbPrimaries::Bt709, WhitePoint::D50, TransferFn::Linear);
+
+    let (model, default_cs) = match interp {
+        B_W | GREY16 => (ColorModel::Gray, ColorSpace::SRGB),
+        XYZ => (ColorModel::Xyz, connection),
+        LAB | LABS | LABQ => (ColorModel::Lab, connection),
+        LCH => (ColorModel::Lch, connection),
+        YXY => (ColorModel::Yxy, connection),
+        CMYK => (ColorModel::Cmyk, ColorSpace::SRGB),
+        SC_RGB => (ColorModel::ScRgb, ColorSpace::LINEAR_SRGB),
+        SRGB | RGB | RGB16 => (ColorModel::Rgb, ColorSpace::SRGB),
+        HSV => (ColorModel::Hsv, ColorSpace::SRGB),
+        // MULTIBAND, HISTOGRAM, MATRIX, FOURIER, CMC, ERROR, and anything
+        // unrecognised: fall back to band-count-driven guess
+        // (`crate::pixel::layout_with_bands`'s mapping).
+        _ => {
+            return match bands {
+                1 => (ColorModel::Gray, AlphaState::None, ColorSpace::SRGB),
+                3 => (ColorModel::Rgb, AlphaState::None, ColorSpace::SRGB),
+                4 => (ColorModel::Rgb, AlphaState::Straight, ColorSpace::SRGB),
+                n => (
+                    ColorModel::Multiband(n.clamp(0, 255) as u8),
+                    AlphaState::None,
+                    ColorSpace::SRGB,
+                ),
+            };
+        }
+    };
+
+    let alpha = if bands > model.color_channels() as i32 {
+        AlphaState::Straight
+    } else {
+        AlphaState::None
+    };
+    (model, alpha, default_cs)
 }
 
 impl ColorSpace {
@@ -232,16 +316,6 @@ impl ColorSpace {
             14 => Some(ColorSpace::REC2100_PQ),
             15 => Some(ColorSpace::REC2100_HLG),
             _ => None,
-        }
-    }
-}
-
-impl crate::backend::vips::FromVipsInterpretation for ColorSpace {
-    fn from_vips_interpretation(raw: i32) -> Self {
-        match raw {
-            22 => ColorSpace::SRGB,
-            28 => ColorSpace::LINEAR_SRGB,
-            _ => ColorSpace::SRGB,
         }
     }
 }

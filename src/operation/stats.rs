@@ -50,14 +50,13 @@ where
         let input = &*self.input.spec;
         let bands = match self.band {
             Some(_) => 1,
-            None => input.format.channel_count() as i32,
+            None => input.layout.channel_count() as i32,
         };
-        ImageKind {
-            width: 256,
-            height: 1,
-            format: input.with_band_count(bands),
-            color_space: input.color_space,
-        }
+        let mut spec = input.clone();
+        spec.width = 256;
+        spec.height = 1;
+        spec.set_band_count(bands);
+        spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         if let Some(v) = self.band {
@@ -202,8 +201,7 @@ where
         ImageKind {
             width: input.width,
             height: input.width,
-            format: input.format,
-            color_space: input.color_space,
+            layout: input.layout,
         }
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
@@ -306,7 +304,7 @@ where
     fn output_spec(&self) -> ImageKind {
         let input = &*self.input.spec;
         let bins = self.bins.unwrap_or(10);
-        let bands = input.format.channel_count() as i32;
+        let bands = input.layout.channel_count() as i32;
         // TODO: for bands > 2, vips flattens the extra dimensions into
         // height (bins^(bands-1)); this only covers the bands == 2 case
         // precisely (and bands == 1, where height collapses to 1).
@@ -315,12 +313,11 @@ where
         } else {
             bins.pow((bands - 1) as u32)
         };
-        ImageKind {
-            width: bins,
-            height,
-            format: input.with_band_count(1),
-            color_space: input.color_space,
-        }
+        let mut spec = input.clone();
+        spec.width = bins;
+        spec.height = height;
+        spec.set_band_count(1);
+        spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         if let Some(v) = self.bins {

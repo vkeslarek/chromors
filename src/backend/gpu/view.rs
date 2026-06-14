@@ -80,6 +80,13 @@ impl SlangScalar for i32 {
     const SLANG_TY: &'static str = "int";
 }
 
+/// A `#[repr(C)] Pod` struct that also names its Slang-side struct type, so
+/// [`ParamBlock::from_pod`] can append it as ONE named field (no per-field
+/// flattening needed — std430 scalar/array layouts agree with `repr(C)` here).
+pub trait SlangPod: bytemuck::Pod {
+    const SLANG_TY: &'static str;
+}
+
 /// One std430 buffer containing geometry params (from Kind) and scalar configs (from Operation).
 /// `field_sizes` mirrors `fields` 1:1 — the byte length each field occupies in
 /// `bytes` — so fields can be located/removed by name without a type-name ↔
@@ -120,6 +127,13 @@ impl ParamBlock {
         self.bytes.extend_from_slice(bytemuck::bytes_of(&value));
         self
     }
+
+    /// A single field of `value`'s Slang struct type ([`SlangPod::SLANG_TY`]),
+    /// named `name` — for read/write-wrap param blocks (`ColorConvertParams`,
+    /// §5.5/§6.1.3) whose `repr(C)` layout already matches std430.
+    pub fn from_pod<T: SlangPod>(name: &str, value: &T) -> Self {
+        Self::new().field(name, T::SLANG_TY, *value)
+    }
 }
 
 /// A zero-cost Slang view interposed between a producer (a source decode or a
@@ -144,6 +158,44 @@ pub struct ViewAdapter {
     /// Slang module defining the wrapper struct (currently always `lib.region`,
     /// which the emitter imports unconditionally).
     pub module: &'static str,
+}
+
+/// A zero-cost read-side wrap, nested around a step input's existing view
+/// (§5.5-§5.10) — e.g. `ColorReadView<{inner}>` performing `Convert`'s color
+/// math on every sample. Unlike [`ViewAdapter`] (one per node, resolved via
+/// `GpuBuilder::adapt`), any number of `ReadWrap`s can stack on one input,
+/// each nesting outside the last.
+///
+/// `wrapper`/`ctor` carry the same placeholders as [`ViewAdapter`]:
+/// - `{inner}` (wrapper only) — the wrapped view's Slang type.
+/// - `{value}` (ctor only) — the wrapped view's variable/expression.
+/// - `{params}` — replaced by [`super::GpuBuilder::read_wrap`] /
+///   [`super::GpuBuilder::write_wrap`] with this wrap's `ChainParams` field
+///   access (`params[0].w{n}_{field}`).
+#[derive(Debug, Clone)]
+pub struct ReadWrap {
+    pub wrapper: Cow<'static, str>,
+    pub ctor: Cow<'static, str>,
+    pub params: ParamBlock,
+    /// Slang module defining the wrapper struct, if not already covered by
+    /// [`super::emit::CORE_MODULES`].
+    pub module: Option<&'static str>,
+}
+
+/// A zero-cost write-side wrap — the output-side counterpart of [`ReadWrap`],
+/// nested around the codec sandwich's encode view (`ColorWriteSink<{inner}>`).
+/// Same template placeholders as `ReadWrap`.
+pub type WriteWrap = ReadWrap;
+
+/// A [`ReadWrap`]/[`WriteWrap`] after [`super::GpuBuilder::resolve_wrap`] has
+/// assigned its unique `ChainParams` field prefix and substituted `{params}`.
+/// Only `{inner}` (wrapper) and `{value}` (ctor) remain, for the emitter to
+/// fill in at the nesting site.
+#[derive(Debug, Clone)]
+pub struct ResolvedWrap {
+    pub wrapper: String,
+    pub ctor: String,
+    pub module: Option<&'static str>,
 }
 
 /// The `BufferRegion { stride, x, y, w, h }` geometry of one buffer slot —

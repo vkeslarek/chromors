@@ -26,9 +26,9 @@ where
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
         // If it didn't have alpha, it now does (same codec, +1 band).
-        let channels = spec.format.channel_count();
+        let channels = spec.layout.channel_count();
         if channels == 1 || channels == 3 {
-            spec.format = spec.with_band_count(channels as i32 + 1);
+            spec.set_band_count(channels as i32 + 1);
         }
         spec
     }

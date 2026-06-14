@@ -11,38 +11,57 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, RegionParams, View};
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
-use crate::backend::vips::{VipsBackend, VipsBand, VipsBuilder};
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuStorageCodec, GpuView};
+use crate::backend::vips::{FromVipsBandFormat, IntoVipsBandFormat, VipsBackend, VipsBand, VipsBuilder};
+use crate::color::model::ColorModel;
 use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
 use crate::node::Data;
-use crate::pixel::format::PixelFormat;
+use crate::pixel::{AlphaState, PixelLayout, Storage, layout_with_bands};
 use crate::work_unit::{Region, WorkUnit, WorkUnitFor};
 
 // ── Kind ──────────────────────────────────────────────────────────────────────
 
-/// Image metadata: pixel encoding (`format` + `color_space`) and extent
+/// Image metadata: pixel layout (storage/model/alpha/color space) and extent
 /// (`width`/`height`). Backend-agnostic — the same value tags an image whether
 /// it ends up on the GPU or on libvips.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageKind {
-    pub format: PixelFormat,
-    pub color_space: ColorSpace,
+    pub layout: PixelLayout,
     pub width: i32,
     pub height: i32,
 }
 
 impl ImageKind {
-    pub fn new(format: PixelFormat, color_space: ColorSpace, width: i32, height: i32) -> Self {
+    pub fn new(layout: PixelLayout, width: i32, height: i32) -> Self {
         Self {
-            format,
-            color_space,
+            layout,
             width,
             height,
         }
     }
     pub fn dims(&self) -> (i32, i32) {
         (self.width, self.height)
+    }
+
+    pub fn color_space(&self) -> ColorSpace {
+        self.layout.color_space
+    }
+
+    /// Returns a copy of this `ImageKind` with `layout` swapped in (extent
+    /// preserved) — `Convert`'s `output_spec` (§6.1).
+    pub fn with_layout(&self, layout: PixelLayout) -> Self {
+        Self {
+            layout,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    /// Replaces `layout` in place with the `count`-band derivation of the
+    /// current layout (`docs/native-color-management.md` §6.3).
+    pub fn set_band_count(&mut self, count: i32) {
+        self.layout = layout_with_bands(self.layout, count as usize);
     }
 }
 
@@ -51,16 +70,17 @@ impl AnyKind for ImageKind {
         self
     }
     fn byte_size(&self, wu: &WorkUnit) -> u64 {
-        let bpp = self.format.bytes_per_pixel() as u64;
+        let bpp = self.layout.bytes_per_pixel() as u64;
         match wu {
             WorkUnit::Region(r) => (r.w.max(0) as u64) * (r.h.max(0) as u64) * bpp,
             _ => 0,
         }
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
-        // PixelFormat / ColorSpace are foreign types without `Hash`; a compact
-        // Debug proxy is fine for this datatype's identity in the POC.
-        state.write(format!("{:?}/{:?}", self.format, self.color_space).as_bytes());
+        // `PixelLayout` is `Hash`, but `dyn Hasher` doesn't implement the
+        // `Hasher` bound `Hash::hash` requires; a compact Debug proxy is fine
+        // for this datatype's identity in the POC.
+        state.write(format!("{:?}", self.layout).as_bytes());
         state.write_i32(self.width);
         state.write_i32(self.height);
     }
@@ -72,18 +92,23 @@ impl Kind for ImageKind {
 
 impl GpuView for ImageKind {
     /// Decode wrapper: kernels read the image through a `CodecRegion` that
-    /// unpacks the pixel format to working `float4` on `read`.
+    /// unpacks the raw storage to working `float4` on `read`. Storage-only —
+    /// the codec knows only `(storage, channel_count)`, never the color model.
     fn input(&self) -> View {
         View::new(
             "uint",
-            format!("CodecRegion<{}, {}>", self.codec(), self.layout()),
+            format!(
+                "CodecRegion<{}, {}>",
+                self.layout.storage.gpu_codec(),
+                self.layout.channel_count()
+            ),
             "{ {buf}, {params}[0].region_in_{slot} }",
         )
     }
 
     /// The image codec sandwich: the kernel writes working `float4` to an
     /// `RWRegion` scratch; afterwards an `RWCodecRegion` encodes it back into
-    /// the pixel-format target. Both this encode and the `input` decode are the
+    /// the raw storage target. Both this encode and the `input` decode are the
     /// image's own concern — the emitter and ops know nothing of codecs.
     fn output(&self, wu: &WorkUnit) -> OutputWrap {
         let r = Region::typed(wu).expect("ImageKind::output: Region-shaped WorkUnit");
@@ -92,7 +117,11 @@ impl GpuView for ImageKind {
             dest: OutBuffer::Scratch,
             encode: Some(View::new(
                 "Atomic<uint>",
-                format!("RWCodecRegion<{}, {}>", self.codec(), self.layout()),
+                format!(
+                    "RWCodecRegion<{}, {}>",
+                    self.layout.storage.gpu_codec(),
+                    self.layout.channel_count()
+                ),
                 "{ {buf}, {region} }",
             )),
             params: RegionParams::tight(r.w, r.h).into_block("region_out"),
@@ -100,65 +129,9 @@ impl GpuView for ImageKind {
     }
 }
 
-impl ImageKind {
-    /// Returns the corresponding codec name for this format (`"U8Codec"`, `"U16Codec"`, `"F32Codec"`).
-    fn codec(&self) -> &'static str {
-        match self.format {
-            PixelFormat::RgbaF32
-            | PixelFormat::RgbF32
-            | PixelFormat::GrayF32
-            | PixelFormat::GrayAF32 => "F32Codec",
-            PixelFormat::Rgba16
-            | PixelFormat::Rgb16
-            | PixelFormat::Gray16
-            | PixelFormat::GrayA16 => "U16Codec",
-            _ => "U8Codec",
-        }
-    }
-    /// `CH` = the `ChannelLayout` enum value (uint) the codec switches on.
-    fn layout(&self) -> u32 {
-        match self.format {
-            PixelFormat::Rgba8 | PixelFormat::Rgba16 | PixelFormat::RgbaF32 => 0,
-            PixelFormat::Rgb8 | PixelFormat::Rgb16 | PixelFormat::RgbF32 => 1,
-            PixelFormat::Gray8 | PixelFormat::Gray16 | PixelFormat::GrayF32 => 2,
-            PixelFormat::GrayA8 | PixelFormat::GrayA16 | PixelFormat::GrayAF32 => 3,
-            _ => 0,
-        }
-    }
-
-    /// The format with `count` bands, same sample type as `self` — used by
-    /// `ExtractBand`/`Bandjoin`'s GPU output spec. Family-aware (byte size
-    /// alone can't disambiguate U16 vs F16, both 2 bytes/sample); only
-    /// U8/U16/F32 codecs exist, so F16-family inputs fall back to F32. Band
-    /// counts outside 1..=4 keep `self.format` (no codec/layout for them).
-    pub fn with_band_count(&self, count: i32) -> PixelFormat {
-        match (self.codec(), count) {
-            ("F32Codec", 1) => PixelFormat::GrayF32,
-            ("F32Codec", 2) => PixelFormat::GrayAF32,
-            ("F32Codec", 3) => PixelFormat::RgbF32,
-            ("F32Codec", 4) => PixelFormat::RgbaF32,
-            ("U16Codec", 1) => PixelFormat::Gray16,
-            ("U16Codec", 2) => PixelFormat::GrayA16,
-            ("U16Codec", 3) => PixelFormat::Rgb16,
-            ("U16Codec", 4) => PixelFormat::Rgba16,
-            (_, 1) => PixelFormat::Gray8,
-            (_, 2) => PixelFormat::GrayA8,
-            (_, 3) => PixelFormat::Rgb8,
-            (_, 4) => PixelFormat::Rgba8,
-            _ => self.format,
-        }
-    }
-}
-
 impl VipsBand for ImageKind {
     fn band_format(&self) -> i32 {
-        // Map the pixel format to a VipsBandFormat enum value. Real mapping
-        // lives in the FFI layer; a coarse byte-width split suffices here.
-        match self.format.bytes_per_pixel() / self.format.channel_count().max(1) {
-            1 => 0,  // VIPS_FORMAT_UCHAR
-            2 => 2,  // VIPS_FORMAT_USHORT
-            _ => 10, // VIPS_FORMAT_FLOAT
-        }
+        self.layout.storage.into_vips_band_format()
     }
 }
 
@@ -181,11 +154,11 @@ impl<B: Backend> Image2D<B> {
     pub fn height(&self) -> i32 {
         self.spec.height
     }
-    pub fn format(&self) -> PixelFormat {
-        self.spec.format
+    pub fn layout(&self) -> PixelLayout {
+        self.spec.layout
     }
     pub fn color_space(&self) -> ColorSpace {
-        self.spec.color_space
+        self.spec.color_space()
     }
 }
 
@@ -214,14 +187,43 @@ impl FileImageSource {
         let height = unsafe { crate::ffi::vips_image_get_height(ptr) };
         let bands = unsafe { crate::ffi::vips_image_get_bands(ptr) };
         let format_raw = unsafe { crate::ffi::vips_image_get_format(ptr) };
+        let interp = unsafe { crate::ffi::vips_image_get_interpretation(ptr) };
+
+        let storage = Storage::from_vips_band_format(format_raw, bands);
+        let (model, alpha, default_cs) =
+            crate::color::space::from_vips_interpretation(interp, bands);
+
+        // For RGB-family models, refine the default color space via an
+        // embedded ICC profile (matrix/TRC profiles only — `docs/native-
+        // color-management.md` §7). Gray/Lab/Xyz/Cmyk/etc keep their
+        // interpretation-derived default.
+        let color_space = if matches!(model, ColorModel::Rgb | ColorModel::ScRgb) {
+            let icc_name = c"icc-profile-data";
+            let mut data: *const std::ffi::c_void = std::ptr::null();
+            let mut len: usize = 0;
+            let has_icc = unsafe {
+                crate::ffi::vips_image_get_blob(ptr, icc_name.as_ptr(), &mut data, &mut len) == 0
+            };
+            if has_icc && !data.is_null() && len > 0 {
+                let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+                let classification = crate::color::detect::IccClassification::classify_icc_profile(bytes);
+                classification.color_space.unwrap_or(default_cs)
+            } else {
+                default_cs
+            }
+        } else {
+            default_cs
+        };
 
         unsafe { crate::ffi::g_object_unref(ptr as *mut std::ffi::c_void) };
 
-        let format =
-            <PixelFormat as crate::backend::vips::FromVipsBandFormat>::from_vips_band_format(
-                format_raw, bands,
-            );
-        let spec = Arc::new(ImageKind::new(format, ColorSpace::SRGB, width, height));
+        let layout = PixelLayout {
+            storage,
+            model,
+            alpha,
+            color_space,
+        };
+        let spec = Arc::new(ImageKind::new(layout, width, height));
 
         Ok(Self {
             spec,
@@ -288,14 +290,18 @@ impl RawFileImageSource {
     ) -> Result<Self, crate::error::Error> {
         let handle = crate::backend::raw::handle::RawHandle::open_with(path, params)?;
 
-        let format = match handle.params().output_bps {
-            16 => PixelFormat::Rgba16,
-            _ => PixelFormat::Rgba8,
+        let storage = match handle.params().output_bps {
+            16 => Storage::U16,
+            _ => Storage::U8,
         };
 
         let spec = Arc::new(ImageKind::new(
-            format,
-            ColorSpace::SRGB,
+            PixelLayout {
+                storage,
+                model: ColorModel::Rgb,
+                alpha: AlphaState::Straight,
+                color_space: ColorSpace::SRGB,
+            },
             handle.raw_width() as i32,
             handle.raw_height() as i32,
         ));
@@ -522,12 +528,16 @@ impl Image2D<GpuBackend> {
         height: i32,
         data: &[f32],
     ) -> Self {
-        let spec = Arc::new(ImageKind {
+        let spec = Arc::new(ImageKind::new(
+            PixelLayout {
+                storage: Storage::F32,
+                model: ColorModel::Gray,
+                alpha: AlphaState::None,
+                color_space: ColorSpace::SRGB,
+            },
             width,
             height,
-            format: crate::pixel::format::PixelFormat::GrayF32,
-            color_space: crate::color::space::ColorSpace::SRGB,
-        });
+        ));
         let src = GpuConstantSource {
             spec: spec.clone(),
             data: data.to_vec(),

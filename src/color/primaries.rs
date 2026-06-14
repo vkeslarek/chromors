@@ -14,7 +14,7 @@ use crate::color::chromaticity::Chromaticity;
 ///
 /// Each variant defines the CIE xy chromaticity coordinates of the red, green,
 /// and blue primaries. Use [`Self::chromaticities()`] to retrieve them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum RgbPrimaries {
     /// No primaries (placeholder — all coordinates are zero).
@@ -127,7 +127,7 @@ impl RgbPrimaries {
 /// Each variant provides the CIE xy chromaticity of the reference illuminant
 /// via [`Self::xy()`], and the corresponding XYZ tristimulus values (with Y=1)
 /// via [`Self::xyz()`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum WhitePoint {
     /// No white point (placeholder — all coordinates are zero).

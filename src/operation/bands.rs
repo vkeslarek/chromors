@@ -29,7 +29,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.with_band_count(1);
+        spec.set_band_count(1);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -76,9 +76,9 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        let bands = spec.format.channel_count() as i32;
+        let bands = spec.layout.channel_count() as i32;
         spec.width /= self.factor as i32;
-        spec.format = spec.with_band_count(bands * self.factor as i32);
+        spec.set_band_count(bands * self.factor as i32);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -126,9 +126,9 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        let bands = spec.format.channel_count() as i32;
+        let bands = spec.layout.channel_count() as i32;
         spec.width *= self.factor as i32;
-        spec.format = spec.with_band_count(bands / self.factor as i32);
+        spec.set_band_count(bands / self.factor as i32);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -167,7 +167,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.with_band_count(1);
+        spec.set_band_count(1);
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -218,7 +218,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.input.spec).clone();
-        spec.format = spec.with_band_count(self.count.unwrap_or(1));
+        spec.set_band_count(self.count.unwrap_or(1));
         spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
@@ -262,7 +262,7 @@ where
     }
     fn output_spec(&self) -> ImageKind {
         let mut spec = (*self.images[0].spec).clone();
-        spec.format = spec.with_band_count(self.images.len() as i32);
+        spec.set_band_count(self.images.len() as i32);
         spec
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
@@ -308,8 +308,8 @@ impl Lower<GpuBackend> for Bandbool<GpuBackend> {
 
 impl Lower<GpuBackend> for Bandfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let in_bands = self.input.spec.format.channel_count() as u32;
-        let out_bands = self.output_spec().format.channel_count() as u32;
+        let in_bands = self.input.spec.layout.channel_count() as u32;
+        let out_bands = self.output_spec().layout.channel_count() as u32;
         // Field order must match bandfold_kernel's parameter order exactly --
         // kernel args are bound positionally from this block.
         cx.param_block(
@@ -325,8 +325,8 @@ impl Lower<GpuBackend> for Bandfold<GpuBackend> {
 
 impl Lower<GpuBackend> for Bandunfold<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        let in_bands = self.input.spec.format.channel_count() as u32;
-        let out_bands = self.output_spec().format.channel_count() as u32;
+        let in_bands = self.input.spec.layout.channel_count() as u32;
+        let out_bands = self.output_spec().layout.channel_count() as u32;
         // Field order must match bandunfold_kernel's parameter order exactly --
         // kernel args are bound positionally from this block.
         cx.param_block(

@@ -6,7 +6,13 @@ use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 
 /// Core Slang libraries imported unconditionally by every fused pass.
-const CORE_MODULES: &[&str] = &["lib.region", "lib.io", "lib.codecs", "lib.pixel"];
+const CORE_MODULES: &[&str] = &[
+    "lib.region",
+    "lib.io",
+    "lib.codecs",
+    "lib.pixel",
+    "lib.color.params",
+];
 
 /// One binding-group-0 entry, in emission/binding order. The single source of
 /// truth for the fused pass's binding layout — used by `emit_slang` (variable
@@ -56,6 +62,11 @@ fn referenced_modules(builder: &GpuBuilder) -> Vec<&'static str> {
             if let Some(a) = &inp.adapter {
                 push(a.module, &mut seen, &mut modules);
             }
+            for w in &inp.read_wraps {
+                if let Some(m) = w.module {
+                    push(m, &mut seen, &mut modules);
+                }
+            }
         }
     }
     if let Some(a) = &builder.cur_output_adapter
@@ -68,6 +79,11 @@ fn referenced_modules(builder: &GpuBuilder) -> Vec<&'static str> {
             push(a.module, &mut seen, &mut modules);
         }
     }
+    for w in &builder.write_wraps {
+        if let Some(m) = w.module {
+            push(m, &mut seen, &mut modules);
+        }
+    }
     modules
 }
 
@@ -76,45 +92,77 @@ fn referenced_modules(builder: &GpuBuilder) -> Vec<&'static str> {
 /// are `    Type var = init;\n` statements to emit before use; `expr` is the
 /// variable name (or `in_{i}`) to read from.
 ///
-/// - `BaseInput::Source(i)` with no adapter → `in_{i}` directly, no decl.
-/// - `BaseInput::Step(j)` with no adapter → declares `{wrapper} {var} = { work_{j}, params[0].domain };`.
-/// - With an adapter → declares the base (as above if `Step`), then wraps it
-///   in the adapter's `wrapper`/`ctor` templates (`{inner}` ← base's Slang
-///   type, `{value}` ← base's variable, `{params}` ← `"params"`).
+/// - `BaseInput::Source(i)` with no adapter/read_wraps → `in_{i}` directly, no decl.
+/// - `BaseInput::Step(j)` → declares `{wrapper} {var} = { work_{j}, params[0].domain };`.
+/// - An adapter (if any) nests next: `{inner}` ← base's Slang type, `{value}`
+///   ← base's expr, `{params}` ← `"params"`.
+/// - Each `read_wrap` (§5.5-§5.10) then nests outermost-last: `{inner}` ←
+///   prior type, `{value}` ← prior expr (its `{params}` access was already
+///   resolved by `GpuBuilder::read_wrap`).
 fn read_expr(builder: &GpuBuilder, input: &StepInput, var: &str) -> (String, String) {
-    match &input.adapter {
-        None => match input.base {
-            BaseInput::Source(i) => (String::new(), format!("in_{i}")),
-            BaseInput::Step(j) => {
-                let wrapper = builder.steps[j].temp_elem.region_wrapper;
-                let decl = format!("    {wrapper} {var} = {{ work_{j}, params[0].domain }};\n");
-                (decl, var.to_string())
+    let mut decl = String::new();
+    let (mut ty, mut expr) = match input.base {
+        BaseInput::Source(i) => (builder.input_views[i].slang.to_string(), format!("in_{i}")),
+        BaseInput::Step(j) => {
+            let wrapper = builder.steps[j].temp_elem.region_wrapper;
+            if input.adapter.is_none() && input.read_wraps.is_empty() {
+                decl.push_str(&format!(
+                    "    {wrapper} {var} = {{ work_{j}, params[0].domain }};\n"
+                ));
+                return (decl, var.to_string());
             }
-        },
-        Some(adapter) => {
-            let (base_slang, base_var, mut decl) = match input.base {
-                BaseInput::Source(i) => (
-                    builder.input_views[i].slang.to_string(),
-                    format!("in_{i}"),
-                    String::new(),
-                ),
-                BaseInput::Step(j) => {
-                    let wrapper = builder.steps[j].temp_elem.region_wrapper;
-                    let base_var = format!("{var}_base");
-                    let decl =
-                        format!("    {wrapper} {base_var} = {{ work_{j}, params[0].domain }};\n");
-                    (wrapper.to_string(), base_var, decl)
-                }
-            };
-            let wrapper_ty = adapter.wrapper.replace("{inner}", &base_slang);
-            let ctor = adapter
-                .ctor
-                .replace("{value}", &base_var)
-                .replace("{params}", "params");
-            decl.push_str(&format!("    {wrapper_ty} {var} = {ctor};\n"));
-            (decl, var.to_string())
+            let v = format!("{var}_base");
+            decl.push_str(&format!(
+                "    {wrapper} {v} = {{ work_{j}, params[0].domain }};\n"
+            ));
+            (wrapper.to_string(), v)
         }
+    };
+
+    if let Some(adapter) = &input.adapter {
+        let wrapper_ty = adapter.wrapper.replace("{inner}", &ty);
+        let ctor = adapter
+            .ctor
+            .replace("{value}", &expr)
+            .replace("{params}", "params");
+        let v = if input.read_wraps.is_empty() {
+            var.to_string()
+        } else {
+            format!("{var}_a")
+        };
+        decl.push_str(&format!("    {wrapper_ty} {v} = {ctor};\n"));
+        ty = wrapper_ty;
+        expr = v;
     }
+
+    let n_wraps = input.read_wraps.len();
+    for (k, w) in input.read_wraps.iter().enumerate() {
+        let wrapper_ty = w.wrapper.replace("{inner}", &ty);
+        let ctor = w.ctor.replace("{value}", &expr);
+        let v = if k + 1 == n_wraps {
+            var.to_string()
+        } else {
+            format!("{var}_w{k}")
+        };
+        decl.push_str(&format!("    {wrapper_ty} {v} = {ctor};\n"));
+        ty = wrapper_ty;
+        expr = v;
+    }
+
+    (decl, expr)
+}
+
+/// Resolve the codec sandwich's encode view to `(type, ctor_expr)`, nesting
+/// any `write_wrap`s (§5.5-§5.10, outermost last) around it — e.g.
+/// `Convert`'s `ColorWriteSink<RWCodecRegion<...>>`.
+fn encode_expr(builder: &GpuBuilder, encode: &View) -> (String, String) {
+    let mut ty = encode.slang.to_string();
+    let mut init = encode.init_expr("target_buffer", "params", "params[0].region_out");
+    for w in &builder.write_wraps {
+        ty = w.wrapper.replace("{inner}", &ty);
+        init = w.ctor.replace("{value}", &init);
+    }
+    (ty, init)
 }
 
 /// Emit one fused Slang compute shader from the builder state collected during
@@ -265,8 +313,8 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
         // Codec sandwich close on the final step (image outputs only): encode
         // the final working temp into the target.
         if is_last && let Some(encode) = &output.encode {
-            let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
-            writeln!(s, "    {} enc = {init};", encode.slang).unwrap();
+            let (ty, init) = encode_expr(builder, encode);
+            writeln!(s, "    {ty} enc = {init};").unwrap();
             if let Some(adapted) = &builder.cur_output_adapter {
                 // The DAG root is a pure view adapter (e.g. swizzle/remap) of
                 // the final working temp: encode through the adapter instead
@@ -286,8 +334,8 @@ pub fn emit_slang(builder: &GpuBuilder, wg_dim: u32) -> String {
     // resolved (and possibly adapted) source read here.
     if n_steps == 0 {
         if let Some(encode) = &output.encode {
-            let init = encode.init_expr("target_buffer", "params", "params[0].region_out");
-            writeln!(s, "    {} enc = {init};", encode.slang).unwrap();
+            let (ty, init) = encode_expr(builder, encode);
+            writeln!(s, "    {ty} enc = {init};").unwrap();
             let input = builder
                 .cur_output_adapter
                 .clone()

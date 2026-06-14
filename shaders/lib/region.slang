@@ -24,21 +24,28 @@ interface IRegion {
     float4 read_clamped(int2 idx);
 }
 
-struct CodecRegion<C: IPixelCodec, let CH: uint> : IRegion {
+/// A region that can be written to. Conformed by every `RW*Region` so a
+/// generic write-side wrapper (`ColorWriteSink<W: IWritableRegion>`, §5.6) can
+/// nest around any of them.
+interface IWritableRegion {
+    void write(uint2 idx, float4 value);
+}
+
+struct CodecRegion<C: IStorageCodec, let N: uint> : IRegion {
     StructuredBuffer<uint> buf;
     BufferRegion view;
 
     float4 read(uint2 idx) {
         if (idx.x >= view.width || idx.y >= view.height) { return float4(0); }
-        return C.decode(buf, region_index(view, idx.x, idx.y), CH);
+        return C.decode(buf, region_index(view, idx.x, idx.y), N);
     }
 
     float4 read_clamped(int2 idx) {
-        return C.decode(buf, region_index_clamped(view, idx.x, idx.y), CH);
+        return C.decode(buf, region_index_clamped(view, idx.x, idx.y), N);
     }
 }
 
-struct RWCodecRegion<C: IPixelCodec, let CH: uint> : IRegion {
+struct RWCodecRegion<C: IStorageCodec, let N: uint> : IRegion, IWritableRegion {
     RWStructuredBuffer<Atomic<uint>> buf;
     BufferRegion view;
 
@@ -47,7 +54,7 @@ struct RWCodecRegion<C: IPixelCodec, let CH: uint> : IRegion {
 
     void write(uint2 idx, float4 value) {
         if (idx.x < view.width && idx.y < view.height) {
-            C.encode(buf, region_index(view, idx.x, idx.y), value, (ChannelLayout)CH);
+            C.encode(buf, region_index(view, idx.x, idx.y), value, N);
         }
     }
 }
@@ -67,7 +74,7 @@ struct Region : IRegion {
     }
 }
 
-struct RWRegion : IRegion {
+struct RWRegion : IRegion, IWritableRegion {
     RWStructuredBuffer<float4> buf;
     BufferRegion view;
 
@@ -219,7 +226,7 @@ struct MaskRegion : IRegion {
     }
 }
 
-struct RWMaskRegion : IRegion {
+struct RWMaskRegion : IRegion, IWritableRegion {
     RWStructuredBuffer<float> buf;
     BufferRegion view;
 

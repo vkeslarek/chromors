@@ -6,6 +6,7 @@
 //! applied so the downstream primary matrix (sRGB→dst) handles them correctly,
 //! which is mathematically equivalent to Lab→XYZ→dst without intermediate loss.
 
+use serde::{Deserialize, Serialize};
 use wide::f32x4;
 
 /// Identifies the color model of a pixel format and provides the corresponding
@@ -97,6 +98,90 @@ impl ColorModelTransform {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ColorModel — what the channels MEAN (the libvips `interpretation` analogue)
+// ---------------------------------------------------------------------------
+
+/// Identifies what an image's channels represent — the interpretation axis,
+/// orthogonal to [`crate::pixel::Storage`] (how a sample is quantized) and
+/// [`crate::pixel::AlphaState`] (whether/how alpha is present).
+///
+/// `ColorModel` is AGNOSTIC: it carries no Slang/vips knowledge. Backend
+/// mappings (`gpu_model`, `to_vips_interpretation`) are trait impls owned by
+/// the respective backend (`CLAUDE.md` §2/§3.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum ColorModel {
+    /// Additive RGB. Meaning fully defined by the attached `ColorSpace`.
+    Rgb = 0,
+    /// Single luminance channel. `ColorSpace` gives its transfer/primaries.
+    Gray = 1,
+    /// Subtractive CMYK (4 color channels).
+    Cmyk = 2,
+    /// Y'CbCr (full-range, centered 0.5). 3 channels.
+    YCbCr = 3,
+    /// CIE L*a*b* (D50 connection). 3 channels.
+    Lab = 4,
+    /// CIE 1931 XYZ tristimulus. 3 channels. The conversion hub.
+    Xyz = 5,
+    /// CIE xyY. 3 channels.
+    Yxy = 6,
+    /// Cylindrical Lab (LCh). 3 channels.
+    Lch = 7,
+    /// HSV (cyclic hue). 3 channels.
+    Hsv = 8,
+    /// Oklab perceptual. 3 channels.
+    Oklab = 9,
+    /// Cylindrical Oklab (OkLCh). 3 channels.
+    Oklch = 10,
+    /// Linear scene-referred RGB ("scRGB"). 3 color channels (alpha via
+    /// `AlphaState`).
+    ScRgb = 11,
+    /// `N` opaque bands with no color meaning (multispectral, masks, data
+    /// planes). No conversion possible except identity.
+    Multiband(u8) = 12,
+}
+
+impl ColorModel {
+    /// Number of *color* channels (excludes alpha). `Multiband(n)` returns `n`.
+    pub const fn color_channels(self) -> usize {
+        match self {
+            ColorModel::Gray => 1,
+            ColorModel::Rgb
+            | ColorModel::YCbCr
+            | ColorModel::Lab
+            | ColorModel::Xyz
+            | ColorModel::Yxy
+            | ColorModel::Lch
+            | ColorModel::Hsv
+            | ColorModel::Oklab
+            | ColorModel::Oklch
+            | ColorModel::ScRgb => 3,
+            ColorModel::Cmyk => 4,
+            ColorModel::Multiband(n) => n as usize,
+        }
+    }
+
+    /// The legacy decode transform (RGB-family + Gray => `None`). `Multiband`
+    /// and the new colorimetric models beyond CMYK/YCbCr/Lab also map to
+    /// `None` here — they are not yet wired into `ColorModelTransform`'s
+    /// SIMD decode path (that happens via the `Convert` op's XYZ-hub math).
+    pub const fn transform(self) -> ColorModelTransform {
+        match self {
+            ColorModel::Cmyk => ColorModelTransform::CmykToRgb,
+            ColorModel::YCbCr => ColorModelTransform::YCbCrToRgb,
+            ColorModel::Lab => ColorModelTransform::LabToRgb,
+            _ => ColorModelTransform::None,
+        }
+    }
+
+    /// Whether this model is convertible via the XYZ hub (`false` for
+    /// `Multiband`).
+    pub const fn is_colorimetric(self) -> bool {
+        !matches!(self, ColorModel::Multiband(_))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +244,32 @@ mod tests {
         assert!(approx(r, 0.5, 1e-5), "r={r}");
         assert!(approx(g, 0.5, 1e-5), "g={g}");
         assert!(approx(b, 0.5, 1e-5), "b={b}");
+    }
+
+    #[test]
+    fn color_model_color_channels() {
+        assert_eq!(ColorModel::Rgb.color_channels(), 3);
+        assert_eq!(ColorModel::Gray.color_channels(), 1);
+        assert_eq!(ColorModel::Cmyk.color_channels(), 4);
+        assert_eq!(ColorModel::Multiband(7).color_channels(), 7);
+    }
+
+    #[test]
+    fn color_model_transform() {
+        assert_eq!(ColorModel::Rgb.transform(), ColorModelTransform::None);
+        assert_eq!(ColorModel::Cmyk.transform(), ColorModelTransform::CmykToRgb);
+        assert_eq!(
+            ColorModel::YCbCr.transform(),
+            ColorModelTransform::YCbCrToRgb
+        );
+        assert_eq!(ColorModel::Lab.transform(), ColorModelTransform::LabToRgb);
+    }
+
+    #[test]
+    fn color_model_is_colorimetric() {
+        assert!(ColorModel::Rgb.is_colorimetric());
+        assert!(ColorModel::Lab.is_colorimetric());
+        assert!(!ColorModel::Multiband(3).is_colorimetric());
     }
 
     #[test]

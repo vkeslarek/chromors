@@ -28,6 +28,7 @@ use std::slice;
 use super::FromVipsBandFormat;
 use crate::error::Error;
 use crate::ffi;
+use crate::pixel::Storage;
 
 // glib's data-with-destructor attach — not in the generated bindings, declared
 // here (links against the already-linked glib).
@@ -45,21 +46,21 @@ unsafe extern "C" {
 pub struct CustomRegion {
     ptr: *mut ffi::VipsRegion,
     psize: usize,
-    format: crate::pixel::PixelFormat,
+    storage: Storage,
+    bands: i32,
 }
 
 impl CustomRegion {
     unsafe fn new(ptr: *mut ffi::VipsRegion) -> Self {
         let im = unsafe { (*ptr).im };
         let bands = unsafe { ffi::vips_image_get_bands(im) };
-        let fmt = crate::pixel::PixelFormat::from_vips_band_format(
-            unsafe { ffi::vips_image_get_format(im) },
-            bands,
-        );
+        let storage =
+            Storage::from_vips_band_format(unsafe { ffi::vips_image_get_format(im) }, bands);
         CustomRegion {
             ptr,
-            psize: fmt.bytes_per_pixel(),
-            format: fmt,
+            psize: storage.bytes_per_sample() * bands as usize,
+            storage,
+            bands,
         }
     }
 
@@ -69,12 +70,17 @@ impl CustomRegion {
         (v.left, v.top, v.width, v.height)
     }
 
-    /// Pixel format of this region.
-    pub fn format(&self) -> crate::pixel::PixelFormat {
-        self.format
+    /// Sample quantization of this region.
+    pub fn storage(&self) -> Storage {
+        self.storage
     }
 
-    /// Bytes per pixel for this region's format.
+    /// Band (channel) count of this region.
+    pub fn bands(&self) -> i32 {
+        self.bands
+    }
+
+    /// Bytes per pixel for this region's storage/band count.
     pub fn pixel_bytes(&self) -> usize {
         self.psize
     }
@@ -122,6 +128,61 @@ impl CustomRegion {
 /// exactly the output's valid rect.
 pub trait VipsCustomOperation: Send + Sync + 'static {
     fn generate(&self, out: &mut CustomRegion, input: &CustomRegion) -> Result<(), Error>;
+}
+
+/// Wires a [`VipsCustomOperation`] into the vips pipeline: creates a new
+/// output image with the same geometry/format/demand hint as `input` and
+/// hooks `op.generate` up as its region generator via `vips_image_generate`.
+/// Lazy and region-driven, like any native vips operation — no full-image
+/// download.
+pub fn run_custom<O: VipsCustomOperation>(
+    input: &super::VipsHandle,
+    op: O,
+) -> Result<super::VipsHandle, Error> {
+    unsafe {
+        let out = ffi::vips_image_new();
+        if out.is_null() {
+            return Err(Error::Backend(super::vips_error()));
+        }
+        if ffi::vips_image_pipelinev(
+            out,
+            ffi::VipsDemandStyle_VIPS_DEMAND_STYLE_THINSTRIP,
+            input.ptr,
+            std::ptr::null_mut::<ffi::VipsImage>(),
+        ) != 0
+        {
+            ffi::g_object_unref(out as ffi::gpointer);
+            return Err(Error::Backend(super::vips_error()));
+        }
+
+        ffi::g_object_ref(input.ptr as ffi::gpointer);
+        let holder = Box::new(CustomHolder {
+            op: Box::new(op),
+            input: input.ptr,
+        });
+        let holder_ptr = Box::into_raw(holder) as *mut c_void;
+        g_object_set_data_full(
+            out as *mut ffi::GObject,
+            c"chromors-custom-op".as_ptr(),
+            holder_ptr,
+            Some(drop_holder),
+        );
+
+        if ffi::vips_image_generate(
+            out,
+            Some(ffi::vips_start_one),
+            Some(generate_tramp),
+            Some(ffi::vips_stop_one),
+            input.ptr as *mut c_void,
+            holder_ptr,
+        ) != 0
+        {
+            ffi::g_object_unref(out as ffi::gpointer);
+            return Err(Error::Backend(super::vips_error()));
+        }
+
+        Ok(super::VipsHandle { ptr: out })
+    }
 }
 
 /// Keeps the boxed op and a ref to the input image alive for the lifetime of
