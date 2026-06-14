@@ -79,6 +79,7 @@ impl Drop for VipsGObject {
 
 impl VipsGObject {
     pub(crate) fn new(name: &[u8]) -> Result<Self, Error> {
+        crate::backend::vips::ensure_init();
         let c_name =
             CStr::from_bytes_with_nul(name).map_err(|_| Error::Vips("bad op name".into()))?;
         let ptr = unsafe { ffi::vips_operation_new(c_name.as_ptr()) };

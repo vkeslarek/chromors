@@ -19,6 +19,25 @@ pub(crate) fn null() -> *const std::ffi::c_void {
     ptr::null()
 }
 
+/// Initialise libvips exactly once, before any other vips call.
+///
+/// libvips registers its GObject type system on first use; that lazy
+/// registration is **not** thread-safe, so two threads racing their first vips
+/// call corrupt the type system ("cannot retrieve class for invalid type" →
+/// SIGSEGV). `vips_init` is otherwise safe to run once up front, and `Once`
+/// gives every other thread the happens-before it needs before touching vips.
+/// Every vips entry point (source construction, `VipsGObject::new`) calls this.
+pub(crate) fn ensure_init() {
+    static VIPS_INIT: std::sync::Once = std::sync::Once::new();
+    VIPS_INIT.call_once(|| {
+        let name = std::ffi::CString::new("chromors").unwrap();
+        let rc = unsafe { crate::ffi::vips_init(name.as_ptr()) };
+        if rc != 0 {
+            panic!("vips_init failed: {}", vips_error());
+        }
+    });
+}
+
 pub(crate) fn vips_error() -> String {
     unsafe {
         let buf = crate::ffi::vips_error_buffer();

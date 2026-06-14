@@ -171,6 +171,7 @@ pub struct FileImageSource {
 
 impl FileImageSource {
     pub fn new(filename: &str) -> Result<Self, crate::error::Error> {
+        crate::backend::vips::ensure_init();
         let c = std::ffi::CString::new(filename)
             .map_err(|_| crate::error::Error::Vips("invalid filename".into()))?;
         let ptr = unsafe {
@@ -654,6 +655,7 @@ impl Source<VipsBackend> for RawImageSource {
         _ctx: &<VipsBackend as Backend>::Ctx,
         wu: &Region,
     ) -> Result<Buffer<VipsBackend>, crate::error::Error> {
+        crate::backend::vips::ensure_init();
         let buf = self.raw_img.materialize(wu.clone())?;
         let mut handle = (*buf.payload).clone();
         let frame = handle.materialize()?;

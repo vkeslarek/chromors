@@ -21,6 +21,7 @@ macro_rules! assert_approx_eq {
 
 pub mod backend;
 pub mod buffer;
+pub mod cache;
 pub mod data;
 pub mod error;
 pub mod io;
