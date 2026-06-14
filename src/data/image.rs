@@ -658,6 +658,25 @@ impl Target<ImageKind, GpuBackend> for RamImageTarget {
     }
 }
 
+/// The viewport exit: extracts the materialized region as a still
+/// GPU-resident `Arc<GpuBuffer>` (clones the Arc, no download). Callers
+/// (e.g. the tile fetcher) `copy_buffer_to_texture` it directly on the
+/// shared device.
+pub struct GpuBufferTarget;
+
+impl Target<ImageKind, GpuBackend> for GpuBufferTarget {
+    type Out = Arc<crate::backend::gpu::GpuBuffer>;
+
+    fn extract(
+        &self,
+        buf: &Buffer<GpuBackend>,
+        _wu: &Region,
+        _ctx: &<GpuBackend as Backend>::Ctx,
+    ) -> Result<Self::Out, crate::error::Error> {
+        Ok(buf.payload.clone())
+    }
+}
+
 impl Target<ImageKind, crate::backend::raw::RawBackend> for RamImageTarget {
     type Out = Vec<u8>;
 

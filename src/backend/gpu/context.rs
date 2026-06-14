@@ -53,21 +53,45 @@ impl GpuContext {
             .map_err(|e| Error::Backend(format!("no GPU adapter: {:?}", e)))?;
 
         let limits = adapter.limits();
-        let max_storage_buffers = limits.max_storage_buffers_per_shader_stage;
-        let max_invocations = limits.max_compute_invocations_per_workgroup;
-        let wg_dim = if max_invocations >= 1024 { 32 } else { 16 };
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("fused-backend"),
-                required_limits: limits,
+                required_limits: limits.clone(),
                 ..Default::default()
             })
             .await
             .map_err(|e| Error::Backend(format!("GPU device error: {:?}", e)))?;
 
-        let device: Arc<wgpu::Device> = Arc::new(device);
-        let queue: Arc<wgpu::Queue> = Arc::new(queue);
+        Ok(Self::from_device_with_cache(
+            Arc::new(device),
+            Arc::new(queue),
+            &limits,
+            cache_size,
+        ))
+    }
+
+    /// Builds a `GpuContext` around an externally-created device/queue (e.g.
+    /// a windowed app's surface device), so the DAG and the presentation
+    /// pipeline share one device and can pass `wgpu::Buffer`/`Texture`
+    /// directly without cross-device copies.
+    pub fn from_device(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        limits: &wgpu::Limits,
+    ) -> Arc<GpuContext> {
+        Self::from_device_with_cache(device, queue, limits, DEFAULT_PIPELINE_CACHE_SIZE)
+    }
+
+    fn from_device_with_cache(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        limits: &wgpu::Limits,
+        cache_size: usize,
+    ) -> Arc<GpuContext> {
+        let max_storage_buffers = limits.max_storage_buffers_per_shader_stage;
+        let max_invocations = limits.max_compute_invocations_per_workgroup;
+        let wg_dim = if max_invocations >= 1024 { 32 } else { 16 };
 
         let device_gc = device.clone();
         std::thread::spawn(move || {
@@ -78,14 +102,13 @@ impl GpuContext {
         });
 
         let cache_cap = NonZeroUsize::new(cache_size.max(1)).unwrap();
-        let ctx = Arc::new(GpuContext {
+        Arc::new(GpuContext {
             device,
             queue,
             pipeline_cache: Arc::new(RwLock::new(LruCache::new(cache_cap))),
             allocated_bytes: AtomicU64::new(0),
             max_storage_buffers,
             wg_dim,
-        });
-        Ok(ctx)
+        })
     }
 }
