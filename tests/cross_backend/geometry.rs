@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "BUG: Shrink::output_spec (src/operation/geometry.rs) returns the input width/height unchanged for both backends, but vips' shrink physically shrinks its output (w/2 * h/2 * bands bytes); GPU materializer sizes its output buffer from output_spec(), so the GPU output cannot be compared byte-for-byte against vips' actually-shrunk image. Fix requires an output_spec change in Shrink."]
 fn shrink_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -11,12 +10,52 @@ fn shrink_matches_vips() {
     let vips_res = vips_img.shrink(2.0, 2.0, None);
     let gpu_res = gpu_img.shrink(2.0, 2.0, None);
 
+    assert_eq!(gpu_res.width(), vips_res.width());
+    assert_eq!(gpu_res.height(), vips_res.height());
+
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
     println!("shrink RMS = {}", rms);
     assert!(rms < 10.0, "shrink diff too high: {}", rms);
+}
+
+#[test]
+fn with_lod_matches_vips_shrink() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let lod = poc::work_unit::Lod(2); // scale_factor = 4
+
+    let vips_res = vips_img.shrink(4.0, 4.0, None);
+    let gpu_res = gpu_img.with_lod(lod);
+
+    assert_eq!(gpu_res.width(), vips_res.width());
+    assert_eq!(gpu_res.height(), vips_res.height());
+    assert_eq!(gpu_res.width(), vips_img.width() / 4);
+    assert_eq!(gpu_res.height(), vips_img.height() / 4);
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("with_lod RMS = {}", rms);
+    assert!(rms < 10.0, "with_lod diff too high: {}", rms);
+}
+
+#[test]
+fn with_lod_zero_is_identity() {
+    let ctx = common::gpu_ctx();
+    let _g = common::vips_serial();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let lod0 = gpu_img.with_lod(poc::work_unit::Lod(0));
+    assert_eq!(lod0.width(), gpu_img.width());
+    assert_eq!(lod0.height(), gpu_img.height());
 }
 
 #[test]

@@ -1168,7 +1168,18 @@ where
         }))]
     }
     fn output_spec(&self) -> ImageKind {
-        (*self.input.spec).clone()
+        let mut spec = (*self.input.spec).clone();
+        let round = |dim: i32, factor: f64| -> i32 {
+            let scaled = dim as f64 / factor;
+            match self.ceil {
+                Some(true) => scaled.ceil() as i32,
+                _ => scaled.floor() as i32,
+            }
+            .max(1)
+        };
+        spec.width = round(spec.width, self.horizontal);
+        spec.height = round(spec.height, self.vertical);
+        spec
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u64(self.horizontal.to_bits());
@@ -1947,6 +1958,16 @@ where
             vertical,
             ceil,
         })
+    }
+
+    /// Downsamples to the given mip level via box `shrink` by
+    /// `lod.scale_factor()`. `Lod(0)` is a no-op (returns `self`).
+    pub fn with_lod(&self, lod: crate::work_unit::Lod) -> Self {
+        let factor = lod.scale_factor();
+        if factor <= 1 {
+            return self.clone();
+        }
+        self.shrink(factor as f64, factor as f64, None)
     }
 }
 
