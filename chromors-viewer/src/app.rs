@@ -1,8 +1,4 @@
-use std::path::PathBuf;
 use std::sync::Arc;
-
-use chromors_viewport::ViewportController;
-use chromors_viewport::ViewportRenderer;
 
 use tao::{
     dpi::PhysicalSize,
@@ -12,43 +8,49 @@ use tao::{
     window::WindowBuilder,
 };
 
+use vello::kurbo::Point;
+use vello::{RenderParams, RendererOptions, Scene};
+
 use crate::gpu::GpuState;
-
 use poc::backend::gpu::GpuContext;
-use poc::backend::vips::VipsBackend;
-use poc::color::space::ColorSpace;
-use poc::data::image::{Image2D as GenImage, VipsImageSource};
-use poc::node::Data;
-use poc::pixel::{AlphaState, PixelLayout, Storage};
 
-use poc::color::model::ColorModel;
+use crate::editor::compile::{EvalCache, evaluate};
+use crate::editor::graph::{NodeGraph, PortAddr, Side};
+use crate::editor::params::ParamValue;
+use crate::editor::registry::NodeKindId;
+use crate::ui::canvas::NodeCanvas;
 
 const INITIAL_W: u32 = 1024;
 const INITIAL_H: u32 = 768;
 
-/// Display layout for the swapchain: straight-alpha sRGB RGBA8.
-fn display_layout() -> PixelLayout {
-    PixelLayout {
-        storage: Storage::U8,
-        model: ColorModel::Rgb,
-        alpha: AlphaState::Straight,
-        color_space: ColorSpace::SRGB,
-    }
+pub enum InteractionState {
+    None,
+    DraggingNode {
+        node: crate::editor::graph::NodeKey,
+        offset: vello::kurbo::Vec2,
+    },
+    DraggingWire {
+        from: PortAddr,
+    },
 }
 
 pub struct ImageViewerApp {
     pub gpu: Option<GpuState>,
     pub window: Option<Arc<tao::window::Window>>,
-    pub viewport: Option<ViewportRenderer>,
     pub gpu_ctx: Option<Arc<GpuContext>>,
-    pub controller: ViewportController,
-    pub last_frame_time: std::time::Instant,
-    pub pending_open: Option<std::sync::mpsc::Receiver<PathBuf>>,
-    pub force_frames: u32,
-    pub ctrl_held: bool,
+    pub vello_renderer: Option<vello::Renderer>,
+    pub blitter: Option<wgpu::util::TextureBlitter>,
+    pub staging: Option<(wgpu::Texture, wgpu::TextureView, u32, u32)>,
+
+    pub canvas: NodeCanvas,
+    pub graph: NodeGraph,
+    pub cache: Option<EvalCache>,
+
+    pub last_cursor: Option<Point>,
+    pub panning: bool,
+
     pub initialized: bool,
-    pub has_image: bool,
-    pub initial_path: Option<PathBuf>,
+    pub interaction: InteractionState,
 }
 
 impl ImageViewerApp {
@@ -56,21 +58,21 @@ impl ImageViewerApp {
         Self {
             gpu: None,
             window: None,
-            viewport: None,
             gpu_ctx: None,
-            controller: ViewportController::new(),
-            last_frame_time: std::time::Instant::now(),
-            pending_open: None,
-            force_frames: 0,
-            ctrl_held: false,
+            vello_renderer: None,
+            blitter: None,
+            staging: None,
+            canvas: NodeCanvas::new(),
+            graph: NodeGraph::new(),
+            cache: None,
+            last_cursor: None,
+            panning: false,
             initialized: false,
-            has_image: false,
-            initial_path: None,
+            interaction: InteractionState::None,
         }
     }
 
-    pub fn run(mut self, initial_path: Option<PathBuf>) {
-        self.initial_path = initial_path;
+    pub fn run(mut self, _initial_path: Option<std::path::PathBuf>) {
         let event_loop = tao::event_loop::EventLoop::new();
         event_loop.run(move |event, elwt, control_flow| {
             *control_flow = ControlFlow::Poll;
@@ -86,128 +88,79 @@ impl ImageViewerApp {
 
         let window = Arc::new(
             WindowBuilder::new()
-                .with_title("chromors-viewport — Ctrl+O to open an image")
+                .with_title("Chromors Node Editor (M2)")
                 .with_inner_size(PhysicalSize::new(INITIAL_W, INITIAL_H))
                 .build(elwt)
                 .unwrap(),
         );
 
         self.window = Some(window.clone());
-
         let gpu = GpuState::init(window);
-        let mut viewport = ViewportRenderer::new(
-            gpu.device.clone(),
-            gpu.queue.clone(),
-            gpu.surface_config.format,
-            chromors_viewport::ViewportBounds {
-                x: 0.0,
-                y: 0.0,
-                width: INITIAL_W as f32,
-                height: INITIAL_H as f32,
+
+        let vello_renderer = vello::Renderer::new(
+            &gpu.device,
+            RendererOptions {
+                use_cpu: false,
+                antialiasing_support: vello::AaSupport::area_only(),
+                num_init_threads: None,
+                pipeline_cache: None,
             },
-        );
-        viewport.resize(INITIAL_W as f32, INITIAL_H as f32);
+        )
+        .expect("Failed to create Vello renderer");
 
         let limits = gpu.device.limits();
-        self.gpu_ctx = Some(GpuContext::from_device(
+        let ctx = GpuContext::from_device(
             Arc::new(gpu.device.clone()),
             Arc::new(gpu.queue.clone()),
             &limits,
-        ));
+        );
+        self.gpu_ctx = Some(ctx.clone());
+
+        self.blitter = Some(
+            wgpu::util::TextureBlitterBuilder::new(&gpu.device, gpu.surface_config.format)
+                .blend_state(wgpu::BlendState::REPLACE)
+                .build(),
+        );
+
+        self.vello_renderer = Some(vello_renderer);
         self.gpu = Some(gpu);
 
-        self.viewport = Some(viewport);
+        // M2: Hard-code two nodes
+        let load = self
+            .graph
+            .add_node(NodeKindId("source.load"), Point::new(100.0, 100.0));
+        self.graph
+            .set_param(load, 0, ParamValue::Path(Some("test.png".into())));
 
-        if let Some(path) = self.initial_path.take() {
-            self.load_image(&path);
-        }
+        let exposure = self
+            .graph
+            .add_node(NodeKindId("color.exposure"), Point::new(400.0, 100.0));
+
+        let _ = self.graph.connect(
+            PortAddr {
+                node: load,
+                side: Side::Out,
+                index: 0,
+            },
+            PortAddr {
+                node: exposure,
+                side: Side::In,
+                index: 0,
+            },
+        );
+
+        self.cache = Some(evaluate(&self.graph, &ctx));
 
         self.request_frame();
     }
 
-    pub fn request_open_file(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.pending_open = Some(rx);
-        std::thread::spawn(move || {
-            if let Some(path) = rfd::FileDialog::new().pick_file() {
-                let _ = tx.send(path);
-            }
-        });
-    }
-
-    pub fn load_image(&mut self, path: &std::path::Path) {
-        if let (Some(ctx), Some(vp)) = (self.gpu_ctx.as_ref(), self.viewport.as_mut()) {
-            vp.clear_images();
-
-            let vips_img = match GenImage::<VipsBackend>::open(path.to_str().expect("invalid path"))
-            {
-                Ok(img) => img,
-                Err(e) => {
-                    tracing::error!(target: "app", "failed to open {path:?}: {e:?}");
-                    return;
-                }
-            };
-            let w = vips_img.width();
-            let h = vips_img.height();
-            tracing::info!(target: "app", "loaded {w}x{h} from {path:?}");
-
-            let src = VipsImageSource::new(vips_img);
-            let gpu_img: GenImage<poc::backend::gpu::GpuBackend> =
-                Data::from_source(Arc::new(src), ctx.clone());
-
-            // A multi-op fused color chain (exercises step-namespaced
-            // param_block fusion). Net effect is mild so the photo stays
-            // recognizable; paired exposures roughly cancel.
-            let processed = gpu_img
-                .exposure(0.3, 0.0)
-                .brightness(1.0) // gain (multiplicative) — 1.0 = neutral
-                .saturation(1.2)
-                .gamma(Some(1.0)) // 1.0 = neutral
-                .linear(vec![1.05, 1.05, 1.05], vec![0.0, 0.0, 0.0])
-                .invert()
-                .invert()
-                .exposure(-0.3, 0.0)
-                .blur(20.0);
-
-            let display_img = processed.convert(display_layout());
-
-            vp.attach_image(display_img);
-            vp.fit();
-            self.has_image = true;
-            self.force_frames = 120;
-            self.request_frame();
-        }
-    }
-
     pub fn render_frame(&mut self) {
-        if let Some(rx) = &self.pending_open
-            && let Ok(path) = rx.try_recv()
-        {
-            self.pending_open = None;
-            self.load_image(&path);
-        }
-
-        let Some(gpu) = self.gpu.as_ref() else {
+        let Some(gpu) = self.gpu.as_mut() else {
             return;
         };
-        let Some(vp) = self.viewport.as_mut() else {
+        let Some(vello_renderer) = self.vello_renderer.as_mut() else {
             return;
         };
-
-        let now = std::time::Instant::now();
-        let dt = now
-            .duration_since(self.last_frame_time)
-            .as_secs_f32()
-            .clamp(0.001, 0.1);
-        self.last_frame_time = now;
-
-        if self.controller.update_physics(vp, dt)
-            && let Some(w) = &self.window
-        {
-            w.request_redraw();
-        }
-
-        vp.prepare();
 
         let output = match gpu.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(tex) => tex,
@@ -221,40 +174,91 @@ impl ImageViewerApp {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-
-        // Clear the swapchain texture. ViewportRenderer::draw() uses LoadOp::Load
-        // (it assumes the texture was already cleared by the host framework).
-        {
-            let _clear_pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08,
-                            g: 0.08,
-                            b: 0.08,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-        }
-
-        vp.draw(
-            &mut enc,
-            &view,
-            0,
-            0,
-            gpu.surface_config.width,
-            gpu.surface_config.height,
+        let mut scene = Scene::new();
+        let rect = vello::kurbo::Rect::new(
+            0.0,
+            0.0,
+            gpu.surface_config.width as f64,
+            gpu.surface_config.height as f64,
         );
 
-        gpu.queue.submit(std::iter::once(enc.finish()));
+        // Solid background
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            vello::kurbo::Affine::IDENTITY,
+            crate::ui::theme::COL_BG,
+            None,
+            &rect,
+        );
+
+        let mut temp_wire = None;
+        if let InteractionState::DraggingWire { from } = self.interaction {
+            if let Some(cursor) = self.last_cursor {
+                temp_wire = Some((from, self.canvas.camera.p2g(cursor)));
+            }
+        }
+
+        self.canvas.draw(
+            &mut self.graph,
+            self.cache.as_ref().unwrap(),
+            rect,
+            &mut scene,
+            temp_wire,
+        );
+
+        let width = gpu.surface_config.width.max(1);
+        let height = gpu.surface_config.height.max(1);
+
+        let needs_resize = self
+            .staging
+            .as_ref()
+            .is_none_or(|s| s.2 != width || s.3 != height);
+        if needs_resize {
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("vello_staging"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let staging_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.staging = Some((texture, staging_view, width, height));
+        }
+
+        let staging_view = &self.staging.as_ref().unwrap().1;
+
+        vello_renderer
+            .render_to_texture(
+                &gpu.device,
+                &gpu.queue,
+                &scene,
+                staging_view,
+                &vello::RenderParams {
+                    base_color: vello::peniko::Color::BLACK,
+                    width,
+                    height,
+                    antialiasing_method: vello::AaConfig::Area,
+                },
+            )
+            .expect("vello render failed");
+
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("blit"),
+            });
+        if let Some(blitter) = self.blitter.as_ref() {
+            blitter.copy(&gpu.device, &mut encoder, staging_view, &view);
+        }
+        gpu.queue.submit(std::iter::once(encoder.finish()));
+
         output.present();
     }
 
@@ -271,105 +275,113 @@ impl ImageViewerApp {
         control_flow: &mut ControlFlow,
     ) {
         match event {
-            Event::NewEvents(StartCause::Init) => {
-                self.init(elwt);
-            }
+            Event::NewEvents(StartCause::Init) => self.init(elwt),
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::Resized(size) => {
                     if let Some(gpu) = self.gpu.as_mut() {
                         gpu.reconfigure(size.width, size.height);
                     }
-                    if let Some(vp) = self.viewport.as_mut() {
-                        vp.bounds.width = size.width as f32;
-                        vp.bounds.height = size.height as f32;
-                        vp.resize(size.width as f32, size.height as f32);
-                    }
                     self.request_frame();
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(vp) = self.viewport.as_mut() {
-                        self.controller.on_mouse_move(
-                            position.x as f32,
-                            position.y as f32,
-                            &mut Default::default(),
-                            vp,
-                        );
+                    let cursor = Point::new(position.x, position.y);
+                    if self.panning {
+                        if let Some(last) = self.last_cursor {
+                            let delta = cursor - last;
+                            self.canvas.camera.pan -= delta / self.canvas.camera.zoom;
+                            self.request_frame();
+                        }
+                    } else if let InteractionState::DraggingNode { node, offset } = self.interaction
+                    {
+                        let g_pos = self.canvas.camera.p2g(cursor);
+                        if let Some(n) = self.graph.nodes.get_mut(node) {
+                            n.pos = g_pos + offset;
+                            n.layout_cache = None;
+                        }
+                        self.request_frame();
+                    } else if let InteractionState::DraggingWire { .. } = self.interaction {
+                        self.request_frame();
                     }
-                    self.request_frame();
+                    self.last_cursor = Some(cursor);
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     if button == MouseButton::Left {
-                        if let Some(vp) = self.viewport.as_mut() {
-                            if state == ElementState::Pressed {
-                                let (x, y) = self.controller.last_cursor.unwrap_or((0.0, 0.0));
-                                self.controller
-                                    .on_mouse_down(x, y, &mut Default::default(), vp);
-                            } else {
-                                self.controller.on_mouse_up(&mut Default::default());
+                        if state == ElementState::Pressed {
+                            let cursor = self.last_cursor.unwrap_or(Point::new(0.0, 0.0));
+                            let g_pos = self.canvas.camera.p2g(cursor);
+                            use crate::ui::canvas::HitResult;
+                            match self.canvas.hit_test(&self.graph, g_pos) {
+                                HitResult::NodeTitle(key) => {
+                                    if let Some(node) = self.graph.nodes.get(key) {
+                                        let offset = node.pos - g_pos;
+                                        self.interaction = InteractionState::DraggingNode {
+                                            node: key,
+                                            offset: vello::kurbo::Vec2::new(offset.x, offset.y),
+                                        };
+                                    }
+                                }
+                                HitResult::Socket(addr) => {
+                                    self.interaction =
+                                        InteractionState::DraggingWire { from: addr };
+                                }
+                                HitResult::None => {}
                             }
+                        } else {
+                            if let InteractionState::DraggingWire { from } = self.interaction {
+                                let cursor = self.last_cursor.unwrap_or(Point::new(0.0, 0.0));
+                                let g_pos = self.canvas.camera.p2g(cursor);
+                                use crate::ui::canvas::HitResult;
+                                if let HitResult::Socket(to) =
+                                    self.canvas.hit_test(&self.graph, g_pos)
+                                {
+                                    if from.node != to.node && from.side != to.side {
+                                        // Connect Out to In
+                                        let (src, dst) = if from.side == Side::Out {
+                                            (from, to)
+                                        } else {
+                                            (to, from)
+                                        };
+                                        let _ = self.graph.connect(src, dst);
+                                        if let Some(ctx) = &self.gpu_ctx {
+                                            self.cache = Some(evaluate(&self.graph, ctx));
+                                        }
+                                    }
+                                }
+                            }
+                            self.interaction = InteractionState::None;
                         }
                         self.request_frame();
                     }
+                    if button == MouseButton::Middle {
+                        self.panning = state == ElementState::Pressed;
+                    }
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    if let Some(vp) = self.viewport.as_mut() {
-                        let dy = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => y * 20.0,
-                            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                            _ => 0.0,
-                        };
-                        let (x, y) = self.controller.last_cursor.unwrap_or((0.0, 0.0));
-                        self.controller.on_scroll(dy, x, y, vp);
-                    }
-                    self.request_frame();
-                }
-                WindowEvent::KeyboardInput { event: ev, .. }
-                    if ev.state == ElementState::Pressed =>
-                {
-                    match ev.physical_key {
-                        KeyCode::KeyF => {
-                            if let Some(vp) = self.viewport.as_mut() {
-                                vp.fit();
-                                self.controller.target_zoom = Some(vp.camera.zoom);
-                            }
-                            self.request_frame();
-                        }
-                        KeyCode::Digit0 => {
-                            if let Some(vp) = self.viewport.as_mut() {
-                                vp.reset();
-                                self.controller.target_zoom = Some(vp.camera.zoom);
-                            }
-                            self.request_frame();
-                        }
-                        KeyCode::KeyO if self.ctrl_held => {
-                            self.request_open_file();
-                        }
-                        KeyCode::KeyQ if self.ctrl_held => {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        _ => {}
+                    let dy = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y as f64 * 20.0,
+                        MouseScrollDelta::PixelDelta(pos) => pos.y as f64,
+                        _ => 0.0,
+                    };
+                    if let Some(cursor) = self.last_cursor {
+                        let g_before = self.canvas.camera.p2g(cursor);
+                        let zoom_factor = 1.05_f64.powf(dy / 20.0);
+                        self.canvas.camera.zoom *= zoom_factor;
+                        let g_after = self.canvas.camera.p2g(cursor);
+                        self.canvas.camera.pan -= g_after - g_before;
+                        self.request_frame();
                     }
                 }
-                WindowEvent::ModifiersChanged(mods) => {
-                    self.ctrl_held = mods.control_key();
+                WindowEvent::KeyboardInput { event: ev, .. } => {
+                    if ev.state == ElementState::Pressed && ev.physical_key == KeyCode::KeyQ {
+                        *control_flow = ControlFlow::Exit;
+                    }
                 }
                 _ => {}
             },
             Event::RedrawRequested(_) => self.render_frame(),
             Event::MainEventsCleared => {
-                if self.force_frames > 0 {
-                    self.force_frames -= 1;
-                    self.request_frame();
-                }
-                let fetching = self.viewport.as_ref().is_some_and(|v| v.is_fetching());
-                let physics_active = self.controller.target_zoom.is_some()
-                    || self.controller.pan_velocity.0.abs() > 1.0
-                    || self.controller.pan_velocity.1.abs() > 1.0
-                    || fetching;
-                if physics_active {
-                    self.request_frame();
-                }
+                // Not continuously rendering in M2, only on input
             }
             _ => {}
         }
