@@ -1,6 +1,10 @@
 import lib.region;
 import lib.color.params;
 
+uint2 compass_rotate90(uint mx, uint my, uint mh) {
+    return uint2(my, mh - 1u - mx);
+}
+
 public void compass_kernel<R1: IRegion, R2: IRegion>(
     uint2 idx, R1 input, R2 mask, RWRegion output,
     uint mask_w, uint mask_h)
@@ -73,28 +77,46 @@ public void morph_kernel<R1: IRegion, R2: IRegion>(
 {
     int hw = int(mask_w) >> 1;
     int hh = int(mask_h) >> 1;
-    bool erode = (morph == 0u);
-    uint4 result = erode ? uint4(255u) : uint4(0u);
 
-    for (uint my = 0u; my < mask_h; my++)
+    float4 val;
+    if (morph == 0u)
     {
-        for (uint mx = 0u; mx < mask_w; mx++)
+        // Erode: min over neighbourhood
+        val = float4(1.0, 1.0, 1.0, 1.0);
+        for (uint my = 0u; my < mask_h; my++)
         {
-            float m = mask.read(uint2(mx, my)).r;
-
-            if (m != 128.0)
+            for (uint mx = 0u; mx < mask_w; mx++)
             {
-                int2 src_pos = int2(idx) + int2(int(mx) - hw, int(my) - hh);
-                float4 src = input.read_clamped(src_pos);
-                float4 raw = clamp(src, 0.0, 1.0) * src_max;
-                uint4 byte_val = uint4(clamp(round(raw), 0.0, 255.0));
-                uint4 cell = (m == 0.0) ? (uint4(255u) - byte_val) : byte_val;
-
-                result = erode ? (result & cell) : (result | cell);
+                float w = mask.read(uint2(mx, my)).r;
+                if (w != 128.0)
+                {
+                    int2 src_pos = int2(idx) + int2(int(mx) - hw, int(my) - hh);
+                    float4 src = input.read_clamped(src_pos);
+                    if (w == 0.0) src = 1.0 - src; // invert for negative mask logic
+                    val = min(val, src);
+                }
             }
         }
     }
-
-    output.write(idx, float4(result) / 255.0);
+    else
+    {
+        // Dilate: max over neighbourhood
+        val = float4(0.0, 0.0, 0.0, 0.0);
+        for (uint my = 0u; my < mask_h; my++)
+        {
+            for (uint mx = 0u; mx < mask_w; mx++)
+            {
+                float w = mask.read(uint2(mx, my)).r;
+                if (w != 128.0)
+                {
+                    int2 src_pos = int2(idx) + int2(int(mx) - hw, int(my) - hh);
+                    float4 src = input.read_clamped(src_pos);
+                    if (w == 0.0) src = 1.0 - src; // invert for negative mask logic
+                    val = max(val, src);
+                }
+            }
+        }
+    }
+    output.write(idx, val);
 }
 

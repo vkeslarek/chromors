@@ -54,3 +54,6 @@ mod misc;
 mod opacity;
 mod pixel;
 mod stats;
+mod viewer_repro;
+mod lod_demand;
+mod chain_bug;

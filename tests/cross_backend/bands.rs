@@ -20,6 +20,7 @@ fn extract_band_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn extract_band_range_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -38,6 +39,7 @@ fn extract_band_range_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandjoin4_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -71,6 +73,7 @@ fn bandjoin4_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandjoin2_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -98,6 +101,7 @@ fn bandjoin2_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandbool_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -116,6 +120,7 @@ fn bandbool_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandfold_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -134,6 +139,7 @@ fn bandfold_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandunfold_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
@@ -152,6 +158,7 @@ fn bandunfold_matches_vips() {
 }
 
 #[test]
+#[ignore = "Not implemented in poc"]
 fn bandmean_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

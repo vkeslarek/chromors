@@ -36,12 +36,12 @@ public void resize_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float
     output.write(idx, res);
 }
 
-public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox, int oy, uint in_w, uint in_h, uint extend_mode, float bg_r, float bg_g, float bg_b) {
-    int sx = int(idx.x) - ox;
-    int sy = int(idx.y) - oy;
+public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox, int oy, int out_x, int out_y, uint in_w, uint in_h, uint extend_mode, float bg_r, float bg_g, float bg_b) {
+    int sx = out_x + int(idx.x) - ox;
+    int sy = out_y + int(idx.y) - oy;
 
     if (sx >= 0 && sx < int(in_w) && sy >= 0 && sy < int(in_h)) {
-        output.write(idx, input.read(uint2(sx, sy)));
+        output.write(idx, input.read(idx));
     } else {
         if (extend_mode == 0) { // Black
             output.write(idx, float4(0.0, 0.0, 0.0, 1.0));
@@ -55,7 +55,7 @@ public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox
             int wy = sy % int(in_h);
             if (wx < 0) wx += int(in_w);
             if (wy < 0) wy += int(in_h);
-            output.write(idx, input.read(uint2(wx, wy)));
+            output.write(idx, input.read(uint2(wx - out_x + ox, wy - out_y + oy)));
         } else if (extend_mode == 3) { // Mirror
             // handling negative mod correctly for mirror
             int wx = sx;
@@ -65,11 +65,11 @@ public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox
             int wy = sy;
             if (wy < 0) wy = -wy - 1;
             wy = (wy / int(in_h)) % 2 == 0 ? (wy % int(in_h)) : (int(in_h) - 1 - (wy % int(in_h)));
-            output.write(idx, input.read(uint2(wx, wy)));
+            output.write(idx, input.read(uint2(wx - out_x + ox, wy - out_y + oy)));
         } else { // Copy
             int cx = clamp(sx, 0, int(in_w) - 1);
             int cy = clamp(sy, 0, int(in_h) - 1);
-            output.write(idx, input.read(uint2(cx, cy)));
+            output.write(idx, input.read(uint2(cx - out_x + ox, cy - out_y + oy)));
         }
     }
 }
@@ -132,13 +132,15 @@ public void shrink_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint 
     output.write(idx, sum / float(count));
 }
 
-public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint in_w, uint tile_height, uint across) {
-    uint col = idx.x / in_w;
-    uint row = idx.y / tile_height;
+public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int out_x, int out_y, uint in_w, uint tile_height, uint across) {
+    uint x = out_x + idx.x;
+    uint y = out_y + idx.y;
+    uint col = x / in_w;
+    uint row = y / tile_height;
     uint strip = row * across + col;
 
-    uint sx = idx.x % in_w;
-    uint sy = strip * tile_height + (idx.y % tile_height);
+    uint sx = x % in_w;
+    uint sy = strip * tile_height + (y % tile_height);
 
     output.write(idx, input.read(uint2(sx, sy)));
 }

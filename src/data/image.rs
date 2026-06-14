@@ -371,6 +371,30 @@ impl VipsImageSource {
     }
 }
 
+/// LOD-space dimensions of a full-res `w x h` image at `lod` (floor, matching
+/// `vips shrink`). `Lod(0)` returns the full size.
+fn lod_dims(w: i32, h: i32, lod: crate::work_unit::Lod) -> (i32, i32) {
+    let s = lod.scale_factor() as i32;
+    ((w / s).max(1), (h / s).max(1))
+}
+
+/// Clamps a requested region to `[0,0]..[w,h]` — edge tiles legitimately
+/// overshoot the image bounds, but `vips_extract_area` rejects out-of-bounds
+/// rects, and the GPU buffer can only ever hold the clamped extent.
+fn clamp_region(region: &Region, w: i32, h: i32) -> Region {
+    let x0 = region.x.clamp(0, w);
+    let y0 = region.y.clamp(0, h);
+    let x1 = (region.x + region.w).clamp(0, w);
+    let y1 = (region.y + region.h).clamp(0, h);
+    Region {
+        x: x0,
+        y: y0,
+        w: (x1 - x0).max(1),
+        h: (y1 - y0).max(1),
+        lod: region.lod,
+    }
+}
+
 impl Source<GpuBackend> for VipsImageSource {
     type Kind = ImageKind;
 
@@ -385,14 +409,38 @@ impl Source<GpuBackend> for VipsImageSource {
     ) -> Result<Buffer<GpuBackend>, crate::error::Error> {
         use wgpu::util::DeviceExt;
 
-        // 1. Materialize the VIPS graph up to this node
-        let vips_buffer = self.vips_img.materialize(wu.clone())?;
-
-        // 2. Pull the raw bytes from the materialized VipsImage
-        let mut size: usize = 0;
-        let ptr = unsafe {
-            crate::ffi::vips_image_write_to_memory(vips_buffer.payload.ptr, &mut size as *mut usize)
+        // LOD-aware fetch: when the demand is at `lod > 0`, downsample in VIPS
+        // (shrink-on-load / streaming on CPU) so the GPU never decodes, uploads,
+        // or processes full resolution for a coarse mip. The demand's region
+        // coordinates are already in LOD space. This is the source honoring the
+        // LOD demand dimension — no GPU `Shrink` op, no full-res slab.
+        let scale = wu.lod.scale_factor();
+        let (lod_w, lod_h) = lod_dims(self.spec().width, self.spec().height, wu.lod);
+        let src = if scale > 1 {
+            self.vips_img.shrink(scale as f64, scale as f64, None)
+        } else {
+            self.vips_img.clone()
         };
+
+        // 1. Materialize the (downsampled) VIPS pipeline. VIPS streams the
+        // full-res decode internally; only the reduced image is realized.
+        let vips_buffer =
+            src.materialize(Region::full((lod_w, lod_h), crate::work_unit::Lod(0)))?;
+
+        // 2. Crop to the demanded tile (LOD-space coords) before uploading.
+        let region = clamp_region(wu, lod_w, lod_h);
+        let mut crop = crate::backend::vips::gobject::VipsGObject::new(b"extract_area\0")?;
+        crop.set_image("input", vips_buffer.payload.ptr);
+        crop.set_int("left", region.x);
+        crop.set_int("top", region.y);
+        crop.set_int("width", region.w);
+        crop.set_int("height", region.h);
+        let cropped: crate::backend::vips::VipsHandle = crop.run()?;
+
+        // 3. Pull the raw bytes from the cropped tile
+        let mut size: usize = 0;
+        let ptr =
+            unsafe { crate::ffi::vips_image_write_to_memory(cropped.ptr, &mut size as *mut usize) };
         if ptr.is_null() {
             return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
         }
@@ -432,8 +480,14 @@ impl Source<GpuBackend> for VipsImageSource {
         };
         match self.fetch(cx.ctx().as_ref(), region) {
             Ok(buf) => {
-                // The fetched buffer is the full image, tightly packed.
-                let geom = RegionParams::tight(self.spec().width, self.spec().height);
+                // The fetched buffer is the demanded tile (clamped to the
+                // LOD-space image bounds), tightly packed.
+                let (lod_w, lod_h) = lod_dims(self.spec().width, self.spec().height, region.lod);
+                let clamped = clamp_region(region, lod_w, lod_h);
+                let pad_x = clamped.x - region.x;
+                let pad_y = clamped.y - region.y;
+                println!("VipsImageSource: clamped={:?}, region={:?}, pad_x={}, pad_y={}", clamped, region, pad_x, pad_y);
+                let geom = RegionParams::padded(clamped.w as u32, 0, 0, clamped.w as u32, clamped.h as u32, pad_x, pad_y);
                 cx.input(
                     self.spec().input(),
                     geom.into_block("region_in_{slot}"),

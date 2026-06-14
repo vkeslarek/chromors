@@ -209,10 +209,11 @@ pub struct RegionParams {
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    pub pad_x: i32,
+    pub pad_y: i32,
 }
 
 impl RegionParams {
-    /// A tight, origin-aligned region covering a `w×h` buffer.
     pub fn tight(w: i32, h: i32) -> Self {
         let (w, h) = (w.max(0) as u32, h.max(0) as u32);
         Self {
@@ -221,16 +222,24 @@ impl RegionParams {
             y: 0,
             w,
             h,
+            pad_x: 0,
+            pad_y: 0,
         }
+    }
+
+    pub fn padded(stride: u32, x: u32, y: u32, w: u32, h: u32, pad_x: i32, pad_y: i32) -> Self {
+        Self { stride, x, y, w, h, pad_x, pad_y }
     }
     /// Push this region as a named `BufferRegion` field (+ std430 bytes) onto a
     /// `ChainParams` block.
     pub fn push_into(&self, block: &mut ParamBlock, name: &str) {
         block.fields.push((name.to_string(), "BufferRegion"));
-        block.field_sizes.push(20);
+        block.field_sizes.push(28);
         for v in [self.stride, self.x, self.y, self.w, self.h] {
             block.bytes.extend_from_slice(&v.to_le_bytes());
         }
+        block.bytes.extend_from_slice(&self.pad_x.to_le_bytes());
+        block.bytes.extend_from_slice(&self.pad_y.to_le_bytes());
     }
 
     /// A fresh `ParamBlock` containing just this region under `name`. Used by

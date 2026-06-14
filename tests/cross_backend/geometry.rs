@@ -103,6 +103,20 @@ fn embed_matches_vips() {
     let vips_bytes = common::vips_materialize(&vips_res);
     let gpu_bytes = common::poc_materialize(&gpu_res);
 
+    let mut diff_count = 0;
+    for i in (0..vips_bytes.len()).step_by(3) {
+        if vips_bytes[i] != gpu_bytes[i] || vips_bytes[i+1] != gpu_bytes[i+1] || vips_bytes[i+2] != gpu_bytes[i+2] {
+            if diff_count < 10 {
+                let p = i / 3;
+                let x = p % 240;
+                let y = p / 240;
+                println!("Diff at ({}, {}): vips={:?} gpu={:?}", x, y, &vips_bytes[i..i+3], &gpu_bytes[i..i+3]);
+            }
+            diff_count += 1;
+        }
+    }
+    println!("Total diffs: {}", diff_count);
+
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
     println!("embed RMS = {}", rms);
     assert!(rms < 5.0, "embed diff too high: {}", rms);
@@ -472,4 +486,79 @@ fn grid_matches_vips() {
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
     println!("grid RMS = {}", rms);
     assert!(rms < 1.0, "grid diff too high: {}", rms);
+}
+
+#[test]
+fn with_lod_tile_offset_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let lod = poc::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
+
+    // Reference: full vips shrink, then crop the right portion (x=24..50).
+    let vips_shrunk = vips_img.shrink(4.0, 4.0, None);
+    let vips_ref = vips_shrunk.crop(24, 0, 26, 50);
+
+    let gpu_res = gpu_img.with_lod(lod);
+    use poc::io::Target;
+    let target = poc::data::image::RamImageTarget;
+    let gpu_bytes = gpu_res
+        .pull(
+            &target,
+            poc::work_unit::Region {
+                x: 24,
+                y: 0,
+                w: 26,
+                h: 50,
+                lod: poc::work_unit::Lod(0),
+            },
+        )
+        .unwrap();
+
+    let vips_bytes = common::vips_materialize(&vips_ref);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("with_lod tile-offset RMS = {}", rms);
+    assert!(rms < 5.0, "tile-offset diff too high: {}", rms);
+}
+
+/// 25x50 RGB8 = 3750 bytes, not a multiple of 4 — regression test for the
+/// wgpu "Effective buffer binding size ... expected to align to 4" panic
+/// that non-4-aligned output buffers used to trigger (e.g. odd-sized atlas
+/// tiles at higher mip levels).
+#[test]
+fn with_lod_unaligned_region_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let lod = poc::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
+
+    let vips_shrunk = vips_img.shrink(4.0, 4.0, None);
+    let vips_ref = vips_shrunk.crop(25, 0, 25, 50);
+
+    let gpu_res = gpu_img.with_lod(lod);
+    use poc::io::Target;
+    let target = poc::data::image::RamImageTarget;
+    let gpu_bytes = gpu_res
+        .pull(
+            &target,
+            poc::work_unit::Region {
+                x: 25,
+                y: 0,
+                w: 25,
+                h: 50,
+                lod: poc::work_unit::Lod(0),
+            },
+        )
+        .unwrap();
+
+    let vips_bytes = common::vips_materialize(&vips_ref);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("with_lod unaligned-region RMS = {}", rms);
+    assert!(rms < 5.0, "unaligned-region diff too high: {}", rms);
 }

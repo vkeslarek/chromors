@@ -241,28 +241,18 @@ impl Lower<VipsBackend> for Crop<VipsBackend> {
 
 impl Lower<GpuBackend> for Crop<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(
-            RemapKind::Translate,
-            RemapParams {
-                tx: self.left,
-                ty: self.top,
-                ..Default::default()
-            },
-        ));
+        // `demand()` already shifts the upstream region by (left, top), so
+        // the source delivers exactly the cropped window — no read-side
+        // remap needed here.
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 impl Lower<GpuBackend> for ExtractArea<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
-        cx.adapt(remap_adapter(
-            RemapKind::Translate,
-            RemapParams {
-                tx: self.left,
-                ty: self.top,
-                ..Default::default()
-            },
-        ));
+        // `demand()` already shifts the upstream region by (left, top), so
+        // the source delivers exactly the extracted window — no read-side
+        // remap needed here.
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
@@ -486,10 +476,17 @@ impl Lower<GpuBackend> for Embed<GpuBackend> {
         let in_spec = &*self.input.spec;
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
+        let wu = cx.wu();
+        let (out_x, out_y) = match wu {
+            crate::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::backend::gpu::view::ParamBlock::new()
                 .param("ox", self.x)
                 .param("oy", self.y)
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("in_w", in_spec.width as u32)
                 .param("in_h", in_spec.height as u32)
                 .param("extend_mode", extend_mode as u32)
@@ -946,10 +943,17 @@ impl Lower<GpuBackend> for Gravity<GpuBackend> {
         };
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
+        let wu = cx.wu();
+        let (out_x, out_y) = match wu {
+            crate::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::backend::gpu::view::ParamBlock::new()
                 .param("ox", ox)
                 .param("oy", oy)
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("in_w", in_spec.width as u32)
                 .param("in_h", in_spec.height as u32)
                 .param("extend_mode", extend_mode as u32)
@@ -1730,8 +1734,15 @@ where
 impl Lower<GpuBackend> for Grid<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
+        let wu = cx.wu();
+        let (out_x, out_y) = match wu {
+            crate::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             ParamBlock::new()
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("in_w", in_spec.width as u32)
                 .param("tile_height", self.tile_height as u32)
                 .param("across", self.across as u32),

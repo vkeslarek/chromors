@@ -23,6 +23,21 @@ public void sharpen_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, floa
     output.write(idx, clamp(result, float4(0.0), float4(1.0)));
 }
 
+void insertion_sort_121(inout float arr[121], int count)
+{
+    for (int i = 1; i < count; i++)
+    {
+        float key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key)
+        {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+    }
+}
+
 public void median_kernel<R1: IRegion>(
     uint2 idx, R1 input, RWRegion output,
     uint sz)
@@ -39,7 +54,7 @@ public void median_kernel<R1: IRegion>(
         for (uint mx = 0u; mx < sz; mx++)
         {
             int2 src_pos = int2(idx) + int2(int(mx) - half, int(my) - half);
-            float4 src = input.read(uint2(src_pos));
+            float4 src = input.read_clamped(src_pos);
             r[count] = src.r;
             g[count] = src.g;
             b[count] = src.b;

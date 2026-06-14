@@ -22,8 +22,7 @@ fn shader_fingerprint() -> u64 {
     use std::sync::OnceLock;
     static FP: OnceLock<u64> = OnceLock::new();
     *FP.get_or_init(|| {
-        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-        let dir = std::path::PathBuf::from(&manifest).join("shaders");
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shaders");
         let mut files = Vec::new();
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             if let Ok(rd) = std::fs::read_dir(dir) {
@@ -153,20 +152,29 @@ pub fn compile(
 
 /// Invoca o compilador C++ FFI para compilar o shader JIT gerado para SPIR-V
 fn compile_spirv(text: &str, hash: u64) -> Result<Vec<u8>, Error> {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let manifest = env!("CARGO_MANIFEST_DIR");
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap_or_else(|_| {
-        std::path::PathBuf::from(&manifest)
+        std::path::PathBuf::from(manifest)
             .join("target")
             .to_str()
             .unwrap()
             .to_string()
     }));
-    let shader_dir = std::path::PathBuf::from(&manifest).join("shaders");
+    let shader_dir = std::path::PathBuf::from(manifest).join("shaders");
 
     let compiler = super::slang::SlangCompiler::new(shader_dir, out_dir);
     compiler
         .compile_ir(text, hash)
         .map_err(|e| Error::Backend(format!("Slang error: {}", e)))
+}
+
+/// wgpu requires storage-buffer binding sizes to be a multiple of 4. Logical
+/// region byte sizes (e.g. RGB8 tiles where `w*h*3` is odd-aligned) often
+/// aren't, so allocations are padded up; `byte_len` (the logical size used
+/// for `as_entire_binding`/download) is rounded separately from the
+/// caller-visible `GpuBuffer::byte_len`.
+fn align4(size: u64) -> u64 {
+    (size + 3) & !3
 }
 
 pub fn dispatch(
@@ -181,7 +189,7 @@ pub fn dispatch(
     let byte_len = out_bytes.max(16);
     let out_buffer = Arc::new(ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("output_buffer"),
-        size: byte_len,
+        size: align4(byte_len),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     }));
@@ -205,7 +213,7 @@ pub fn dispatch(
                 Some(Arc::new(ctx.device.create_buffer(
                     &wgpu::BufferDescriptor {
                         label: Some(&format!("work_{k}")),
-                        size: work_len,
+                        size: align4(work_len),
                         usage: wgpu::BufferUsages::STORAGE,
                         mapped_at_creation: false,
                     },

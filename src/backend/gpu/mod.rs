@@ -539,12 +539,21 @@ impl GpuBuilder {
         self
     }
 
-    /// Merge a whole `ParamBlock` (e.g. a reduction's `bin_count`) into the
-    /// shared `ChainParams`.
+    /// Merge a whole `ParamBlock` (e.g. an op's scalars or a reduction's
+    /// `bin_count`) into the shared `ChainParams`. Field names are **step-
+    /// namespaced** (`s{idx}_{name}`, like [`GpuBuilder::param`]) so two fused
+    /// steps that push a same-named field (e.g. `Exposure` and `Brightness`,
+    /// both `gain`/`preserve`) don't collide into one deduped declaration while
+    /// their distinct bytes desync the whole struct layout. The block's fields
+    /// become this step's positional kernel arguments in order, so the rename
+    /// is invisible to the shader (CLAUDE.md §5.2.4).
     pub fn param_block(&mut self, block: ParamBlock) -> &mut Self {
-        self.pending_params
-            .extend(block.fields.iter().map(|(name, _)| name.clone()));
-        self.params.fields.extend(block.fields);
+        let idx = self.steps.len(); // index of the kernel step this block feeds
+        for (name, ty) in block.fields {
+            let field = format!("s{idx}_{name}");
+            self.pending_params.push(field.clone());
+            self.params.fields.push((field, ty));
+        }
         self.params.field_sizes.extend(block.field_sizes);
         self.params.bytes.extend_from_slice(&block.bytes);
         self
