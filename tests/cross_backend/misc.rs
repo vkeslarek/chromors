@@ -1,6 +1,64 @@
 use super::*;
 use poc::{OperationBoolean, OperationRelational};
 
+/// `GpuContext::from_device` (the windowed-viewer shared-device path) must
+/// produce a context the DAG can materialize through just like
+/// `GpuContext::new`, and `GpuBufferTarget` (the viewport tile-fetch exit)
+/// must hand back a still-resident `Arc<GpuBuffer>` whose bytes match
+/// `RamImageTarget`'s download of the same region.
+#[test]
+fn gpu_context_from_device_and_buffer_target() {
+    use poc::backend::gpu::context::GpuContext;
+    use poc::data::image::GpuBufferTarget;
+    use poc::io::Target;
+    use poc::work_unit::{Lod, Region};
+    use std::sync::Arc;
+
+    let _g = common::vips_serial();
+
+    // Build a standalone device/queue the way a windowed app would, then
+    // wrap it via `from_device` instead of `GpuContext::new`.
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))
+    .expect("GPU adapter required for GPU tests");
+    let limits = adapter.limits();
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("from_device test"),
+        required_limits: limits.clone(),
+        ..Default::default()
+    }))
+    .expect("GPU device required for GPU tests");
+
+    let ctx = GpuContext::from_device(Arc::new(device), Arc::new(queue), &limits);
+
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+    // A bare source root can't be pulled directly (pre-existing
+    // `emit.rs` "fused pass needs an output" limitation, unrelated to this
+    // test) — apply a no-op `Convert` so the DAG has an operation node.
+    let gpu_img = gpu_img.cast_storage(poc::pixel::Storage::U8, None);
+    let (w, h) = (gpu_img.width(), gpu_img.height());
+    let region = Region {
+        x: 0,
+        y: 0,
+        w: w as i32,
+        h: h as i32,
+        lod: Lod(0),
+    };
+
+    let gpu_buf = gpu_img.pull(&GpuBufferTarget, region.clone()).unwrap();
+    let extracted = gpu_buf.read_to_cpu(&ctx).unwrap();
+    let downloaded = gpu_img
+        .pull(&poc::data::image::RamImageTarget, region)
+        .unwrap();
+
+    assert_eq!(extracted, downloaded);
+}
+
 #[test]
 fn saturation_matches_vips() {
     let _g = common::vips_serial();
