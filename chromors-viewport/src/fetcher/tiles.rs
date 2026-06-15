@@ -258,9 +258,9 @@ impl TileFetcher {
                         if cv.load(Ordering::Relaxed) != global {
                             return;
                         }
-                        rects.into_par_iter().for_each_with(
-                            sender,
-                            |sender, (rect, tx, ty)| {
+                        rects
+                            .into_par_iter()
+                            .for_each_with(sender, |sender, (rect, tx, ty)| {
                                 if cv.load(Ordering::Relaxed) != global
                                     || rect.width <= 0
                                     || rect.height <= 0
@@ -291,8 +291,7 @@ impl TileFetcher {
                                         );
                                     }
                                 }
-                            },
-                        );
+                            });
                     });
                 }
 

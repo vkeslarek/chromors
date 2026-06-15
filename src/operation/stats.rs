@@ -1,10 +1,12 @@
 use std::hash::Hasher;
 
 use crate::backend::Backend;
+use crate::backend::gpu::view::ParamBlock;
+use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
-use crate::data::image::ImageKind;
+use crate::data::image::{Image2D, ImageKind};
 use crate::operation::{AnyInput, Input, Lower, Operation};
-use crate::work_unit::{Region, WorkUnit};
+use crate::work_unit::{Atomic, Lod, Range, Region, WorkUnit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CombineMode {
@@ -50,9 +52,10 @@ where
         let input = &*self.input.spec;
         let bands = match self.band {
             Some(_) => 1,
-            None => input.layout.channel_count() as i32,
+            None => (input.layout.channel_count() as i32).min(4),
         };
         let mut spec = input.clone();
+        spec.layout = spec.layout.to_f32();
         spec.width = 256;
         spec.height = 1;
         spec.set_band_count(bands);
@@ -62,6 +65,37 @@ where
         if let Some(v) = self.band {
             state.write_i32(v);
         }
+    }
+}
+impl Lower<GpuBackend> for HistogramFind<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let img = Image2D::<GpuBackend> {
+            root: self.input.src.clone(),
+            ctx: cx.ctx().clone(),
+            spec: self.input.spec.clone(),
+        };
+        let out_spec = self.output_spec();
+        let bands = out_spec.layout.channel_count() as u32;
+        let hist = match self.band {
+            Some(c) => img.histogram(256, c as u32),
+            None => img.histogram_multi(256, bands),
+        };
+        let hist_buf = match hist.materialize(Atomic) {
+            Ok(b) => b,
+            Err(e) => {
+                cx.fail(e);
+                return;
+            }
+        };
+        cx.extra_input(
+            hist.spec.input(),
+            hist.spec.source_params(&WorkUnit::Atomic),
+            hist_buf.payload,
+        );
+        cx.kernel("ops.histogram", "histogram_to_image_kernel")
+            .param("bins", 256u32)
+            .param("bands", bands);
+        cx.output(out_spec.output(cx.wu()));
     }
 }
 impl Lower<VipsBackend> for HistogramFind<VipsBackend> {
@@ -103,6 +137,47 @@ where
         }
     }
 }
+impl Lower<GpuBackend> for HistogramEqualize<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let img = Image2D::<GpuBackend> {
+            root: self.input.src.clone(),
+            ctx: cx.ctx().clone(),
+            spec: self.input.spec.clone(),
+        };
+        let bands = match self.band {
+            Some(_) => 1u32,
+            None => (self.input.spec.layout.channel_count() as u32).min(4),
+        };
+        let hist = match self.band {
+            Some(c) => img.histogram(256, c as u32),
+            None => img.histogram_multi(256, bands),
+        };
+        let lut = hist.stage().equalize_lut();
+        let range = Range {
+            start: 0,
+            end: lut.spec.entries as i32,
+        };
+        let lut_buf = match lut.materialize(range.clone()) {
+            Ok(b) => b,
+            Err(e) => {
+                cx.fail(e);
+                return;
+            }
+        };
+        cx.extra_input(
+            lut.spec.input(),
+            lut.spec.source_params(&WorkUnit::Range(range)),
+            lut_buf.payload,
+        );
+        cx.param_block(
+            ParamBlock::new()
+                .param("lut_width", lut.spec.entries)
+                .param("band", self.band.unwrap_or(-1)),
+        );
+        cx.kernel("ops.misc", "maplut_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
 impl Lower<VipsBackend> for HistogramEqualize<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
@@ -114,6 +189,33 @@ impl Lower<VipsBackend> for HistogramEqualize<VipsBackend> {
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
     }
+}
+
+/// Separately materialize a `bins x 1 x bands` histogram-image and register
+/// it as an extra source slot. The fused-producer edge (`self.input`'s own
+/// `Operation::inputs()`) lands in `cur_inputs[0]` as an unused placeholder —
+/// reading the *whole* histogram-image per thread races if fused with its
+/// producer in the same dispatch (see `hist_image_cumulative_kernel`).
+fn stage_histogram_image(cx: &mut GpuBuilder, input: &Input<ImageKind, GpuBackend>) -> bool {
+    let img = Image2D::<GpuBackend> {
+        root: input.src.clone(),
+        ctx: cx.ctx().clone(),
+        spec: input.spec.clone(),
+    };
+    let region = Region::full((input.spec.width, input.spec.height), Lod(0));
+    let buf = match img.materialize(region.clone()) {
+        Ok(b) => b,
+        Err(e) => {
+            cx.fail(e);
+            return false;
+        }
+    };
+    cx.extra_input(
+        input.spec.input(),
+        input.spec.source_params(&WorkUnit::Region(region)),
+        buf.payload,
+    );
+    true
 }
 
 // ── HistCum ───────────────────────────────────────────────────────────────────
@@ -136,6 +238,19 @@ where
         (*self.input.spec).clone()
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+impl Lower<GpuBackend> for HistogramCumulative<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        if !stage_histogram_image(cx, &self.input) {
+            return;
+        }
+        let bins = self.input.spec.width as u32;
+        let bands = self.input.spec.layout.channel_count() as u32;
+        cx.kernel("ops.histogram", "hist_image_cumulative_kernel")
+            .param("bins", bins)
+            .param("bands", bands);
+        cx.output(self.output_spec().output(cx.wu()));
+    }
 }
 impl Lower<VipsBackend> for HistogramCumulative<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
@@ -168,6 +283,19 @@ where
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
+impl Lower<GpuBackend> for HistogramNormalize<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        if !stage_histogram_image(cx, &self.input) {
+            return;
+        }
+        let bins = self.input.spec.width as u32;
+        let bands = self.input.spec.layout.channel_count() as u32;
+        cx.kernel("ops.histogram", "hist_image_normalize_kernel")
+            .param("bins", bins)
+            .param("bands", bands);
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
 impl Lower<VipsBackend> for HistogramNormalize<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
@@ -192,7 +320,15 @@ where
         vec![&self.input]
     }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone()))]
+        // The plot kernel reads the *whole* histogram-image (e.g. `256 x 1`),
+        // not the `width x width` output region.
+        vec![Some(WorkUnit::Region(Region {
+            x: 0,
+            y: 0,
+            w: self.input.spec.width,
+            h: self.input.spec.height,
+            lod: out.lod,
+        }))]
     }
     // vips_hist_plot renders a histogram image (e.g. `256 x 1`) into a square
     // chart, `width x width`, preserving the band count.
@@ -205,6 +341,19 @@ where
         }
     }
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+impl Lower<GpuBackend> for HistogramPlot<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        if !stage_histogram_image(cx, &self.input) {
+            return;
+        }
+        let width = self.input.spec.width as u32;
+        let bands = self.input.spec.layout.channel_count() as u32;
+        cx.kernel("ops.histogram", "hist_plot_kernel")
+            .param("width", width)
+            .param("bands", bands);
+        cx.output(self.output_spec().output(cx.wu()));
+    }
 }
 impl Lower<VipsBackend> for HistogramPlot<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {

@@ -9,10 +9,10 @@
 //! at all — it is an ordinary graph leaf.
 //!
 //! A [`Cached`] wraps an upstream pipeline tip (`Data<K, B>`). Reading it builds
-//! a fresh DAG whose **source** is a [`CacheSource`]. When a downstream DAG pulls
-//! a region:
+//! a fresh DAG whose **source** is a [`crate::stage::BoundarySource`] backed by
+//! this boundary's store. When a downstream DAG pulls a region:
 //!
-//! 1. the `CacheSource` checks its store for that region;
+//! 1. the `BoundarySource` checks its store for that region;
 //! 2. **hit** → the cached `Buffer<B>` is fed straight in (the upstream DAG never
 //!    runs);
 //! 3. **miss** → the upstream DAG is materialized for *exactly that region*
@@ -48,15 +48,22 @@
 //! v1 is single-tier (VRAM-resident `Buffer<B>`) with CLOCK eviction by byte
 //! budget. The store key/accounting is tier-ready: a future RAM/Disk spill (port
 //! of `pixors-engine`'s `TieredCache`) slots in behind [`RegionCache`] without
-//! touching `CacheSource`.
+//! touching `BoundarySource`.
+//!
+//! ## Relation to [`crate::stage`]
+//!
+//! [`crate::stage::BoundarySource`] is the underlying boundary mechanism: a lazy
+//! `Source` that materializes its upstream and re-injects the result as a
+//! decoded input. `Cached` is `BoundarySource` *with* a [`RegionCache`] store
+//! (memoized); [`Data::stage`](crate::node::Data::stage) is the same mechanism
+//! *without* a store (a pure pass-boundary, e.g. for data-dependent ops like
+//! histogram equalize).
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 
 use crate::backend::Backend;
-use crate::backend::gpu::view::RegionParams;
-use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::buffer::Buffer;
 use crate::error::Error;
 use crate::io::Source;
@@ -81,7 +88,7 @@ pub struct CacheKey {
 }
 
 impl CacheKey {
-    fn new(content: u64, wu: &WorkUnit) -> Self {
+    pub(crate) fn new(content: u64, wu: &WorkUnit) -> Self {
         Self {
             content,
             wu: format!("{wu:?}"),
@@ -264,86 +271,14 @@ impl<B: Backend> RegionCache<B> {
     }
 }
 
-// ── CacheSource ───────────────────────────────────────────────────────────────
-
-/// The graph leaf a [`Cached`] reads through. On `fetch`/`lower` it serves the
-/// requested region from the store, or materializes the upstream DAG for exactly
-/// that region on a miss and caches it. Generic over the upstream Kind; the
-/// per-backend lowering is implemented for each backend below.
-pub struct CacheSource<K: Kind, B: Backend> {
-    upstream: Data<K, B>,
-    store: Arc<RegionCache<B>>,
-    content: u64,
-}
-
-impl<K: Kind, B: Backend> CacheSource<K, B> {
-    /// Hit the store, else materialize the upstream for `wu` (priority) and cache.
-    fn serve(&self, wu: &K::WorkUnit) -> Result<Buffer<B>, Error> {
-        let erased = wu.erase();
-        let key = CacheKey::new(self.content, &erased);
-        if let Some(buf) = self.store.get(&key) {
-            return Ok(buf);
-        }
-        let buf = self.upstream.materialize(wu.clone())?;
-        let len = buf.spec.byte_size(&erased);
-        self.store.insert(key, &buf, len);
-        Ok(buf)
-    }
-}
-
-/// GPU lowering. Constrained to `WorkUnit = Region` (image-shaped data) so the
-/// fetched buffer can be re-fed through the Kind's decode `View` with tight
-/// region geometry — exactly how `VipsImageSource`/`GpuConstantSource` feed a
-/// fetched buffer back into a fused pass.
-impl<K> Source<GpuBackend> for CacheSource<K, GpuBackend>
-where
-    K: Kind<WorkUnit = Region> + GpuView,
-{
-    type Kind = K;
-
-    fn spec(&self) -> Arc<K> {
-        self.upstream.spec.clone()
-    }
-
-    fn fetch(&self, _ctx: &crate::backend::gpu::GpuContext, wu: &Region) -> Result<Buffer<GpuBackend>, Error> {
-        self.serve(wu)
-    }
-
-    fn lower(&self, cx: &mut GpuBuilder) {
-        let wu = cx.wu().clone();
-        let WorkUnit::Region(region) = &wu else {
-            cx.fail(Error::InvalidWorkUnit(
-                "cache source expects a Region".into(),
-            ));
-            return;
-        };
-        match self.serve(region) {
-            Ok(buf) => {
-                // `serve` returns the upstream root buffer for `region`, which is
-                // tightly packed at the region's dimensions.
-                let geom = RegionParams::tight(region.w, region.h);
-                cx.input(
-                    self.spec().input(),
-                    geom.into_block("region_in_{slot}"),
-                    buf.payload,
-                );
-            }
-            Err(e) => cx.fail(e),
-        }
-    }
-
-    fn dyn_hash(&self, state: &mut dyn Hasher) {
-        state.write_u64(self.content);
-    }
-}
-
 // ── Cached handle ─────────────────────────────────────────────────────────────
 
 /// A materialization boundary over an upstream pipeline tip.
 ///
-/// [`Cached::handle`] hands out a `Data` whose source is this boundary's
-/// [`CacheSource`]; pulling it serves from the store or materializes the upstream
-/// on a miss. [`Cached::prime`] eagerly warms additional regions.
+/// [`Cached::handle`] hands out a `Data` whose source is a
+/// [`crate::stage::BoundarySource`] backed by this boundary's store; pulling it
+/// serves from the store or materializes the upstream on a miss.
+/// [`Cached::prime`] eagerly warms additional regions.
 pub struct Cached<K: Kind, B: Backend> {
     upstream: Data<K, B>,
     store: Arc<RegionCache<B>>,
@@ -367,14 +302,14 @@ impl<K, B> Cached<K, B>
 where
     K: Kind,
     B: Backend,
-    CacheSource<K, B>: Source<B, Kind = K>,
+    crate::stage::BoundarySource<K, B>: Source<B, Kind = K>,
 {
     /// A fresh `Data` reading through this cache boundary. Cheap; call it once
     /// per downstream branch.
     pub fn handle(&self) -> Data<K, B> {
-        let src = CacheSource {
+        let src = crate::stage::BoundarySource {
             upstream: self.upstream.clone(),
-            store: self.store.clone(),
+            store: Some(self.store.clone()),
             content: self.content,
         };
         Data::from_source(Arc::new(src), self.upstream.ctx.clone())
@@ -429,7 +364,7 @@ impl<K: Kind, B: Backend> Data<K, B> {
 //
 // The store's accounting + CLOCK eviction are backend-generic, so they are
 // proven here against a trivial fake backend (no GPU needed). The end-to-end
-// hit/miss behaviour of `CacheSource` on real GPU pipelines is exercised by the
+// hit/miss behaviour of `BoundarySource` on real GPU pipelines is exercised by the
 // `tests/gpu` suite.
 
 #[cfg(test)]
@@ -454,7 +389,9 @@ mod tests {
             _spec: Arc<dyn AnyKind>,
             _root_wu: &WorkUnit,
         ) -> Result<Buffer<TestBackend>, Error> {
-            Err(Error::InvalidWorkUnit("test backend never materializes".into()))
+            Err(Error::InvalidWorkUnit(
+                "test backend never materializes".into(),
+            ))
         }
     }
 

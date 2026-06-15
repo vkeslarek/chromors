@@ -12,7 +12,9 @@ use std::sync::Arc;
 use crate::backend::Backend;
 use crate::backend::gpu::view::{OutBuffer, OutputWrap, RegionParams, View};
 use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuStorageCodec, GpuView};
-use crate::backend::vips::{FromVipsBandFormat, IntoVipsBandFormat, VipsBackend, VipsBand, VipsBuilder};
+use crate::backend::vips::{
+    FromVipsBandFormat, IntoVipsBandFormat, VipsBackend, VipsBand, VipsBuilder,
+};
 use crate::color::model::ColorModel;
 use crate::color::space::ColorSpace;
 use crate::kind::{AnyKind, Kind};
@@ -207,7 +209,8 @@ impl FileImageSource {
             };
             if has_icc && !data.is_null() && len > 0 {
                 let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
-                let classification = crate::color::detect::IccClassification::classify_icc_profile(bytes);
+                let classification =
+                    crate::color::detect::IccClassification::classify_icc_profile(bytes);
                 classification.color_space.unwrap_or(default_cs)
             } else {
                 default_cs
@@ -487,8 +490,19 @@ impl Source<GpuBackend> for VipsImageSource {
                 let clamped = clamp_region(region, lod_w, lod_h);
                 let pad_x = clamped.x - region.x;
                 let pad_y = clamped.y - region.y;
-                println!("VipsImageSource: clamped={:?}, region={:?}, pad_x={}, pad_y={}", clamped, region, pad_x, pad_y);
-                let geom = RegionParams::padded(clamped.w as u32, 0, 0, clamped.w as u32, clamped.h as u32, pad_x, pad_y);
+                println!(
+                    "VipsImageSource: clamped={:?}, region={:?}, pad_x={}, pad_y={}",
+                    clamped, region, pad_x, pad_y
+                );
+                let geom = RegionParams::padded(
+                    clamped.w as u32,
+                    0,
+                    0,
+                    clamped.w as u32,
+                    clamped.h as u32,
+                    pad_x,
+                    pad_y,
+                );
                 cx.input(
                     self.spec().input(),
                     geom.into_block("region_in_{slot}"),

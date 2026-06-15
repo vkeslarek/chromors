@@ -105,12 +105,21 @@ fn embed_matches_vips() {
 
     let mut diff_count = 0;
     for i in (0..vips_bytes.len()).step_by(3) {
-        if vips_bytes[i] != gpu_bytes[i] || vips_bytes[i+1] != gpu_bytes[i+1] || vips_bytes[i+2] != gpu_bytes[i+2] {
+        if vips_bytes[i] != gpu_bytes[i]
+            || vips_bytes[i + 1] != gpu_bytes[i + 1]
+            || vips_bytes[i + 2] != gpu_bytes[i + 2]
+        {
             if diff_count < 10 {
                 let p = i / 3;
                 let x = p % 240;
                 let y = p / 240;
-                println!("Diff at ({}, {}): vips={:?} gpu={:?}", x, y, &vips_bytes[i..i+3], &gpu_bytes[i..i+3]);
+                println!(
+                    "Diff at ({}, {}): vips={:?} gpu={:?}",
+                    x,
+                    y,
+                    &vips_bytes[i..i + 3],
+                    &gpu_bytes[i..i + 3]
+                );
             }
             diff_count += 1;
         }
@@ -561,4 +570,52 @@ fn with_lod_unaligned_region_matches_vips() {
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
     println!("with_lod unaligned-region RMS = {}", rms);
     assert!(rms < 5.0, "unaligned-region diff too high: {}", rms);
+}
+
+// ── Smartcrop ───────────────────────────────────────────────────────────────
+
+#[test]
+fn smartcrop_centre_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let new_w = vips_img.width() - 40;
+    let new_h = vips_img.height() - 40;
+
+    let vips_res = vips_img.smartcrop(new_w, new_h, Some(Interesting::Centre));
+    let gpu_res = gpu_img.smartcrop(new_w, new_h, Some(Interesting::Centre));
+
+    assert_eq!(gpu_res.width(), vips_res.width());
+    assert_eq!(gpu_res.height(), vips_res.height());
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("smartcrop_centre RMS = {}", rms);
+    assert!(rms < 5.0, "smartcrop_centre diff too high: {}", rms);
+}
+
+#[test]
+fn smartcrop_attention_runs_and_is_sane() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let new_w = vips_img.width() - 40;
+    let new_h = vips_img.height() - 40;
+
+    // GPU smartcrop score is an approximation of vips' ENTROPY/ATTENTION
+    // heuristic — not bit-exact. Just check dims + that it ran cleanly.
+    let gpu_res = gpu_img.smartcrop(new_w, new_h, Some(Interesting::Attention));
+
+    assert_eq!(gpu_res.width(), new_w);
+    assert_eq!(gpu_res.height(), new_h);
+
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+    assert!(!gpu_bytes.is_empty());
+    assert_eq!(gpu_bytes.len() % (new_w * new_h) as usize, 0);
 }

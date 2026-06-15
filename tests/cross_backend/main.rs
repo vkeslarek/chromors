@@ -5,7 +5,7 @@ use poc::backend::vips::VipsBackend;
 use poc::data::image::Image2D as GenImage;
 use poc::data::mask2d::Mask2D;
 use poc::operation::composite::{BlendMode, Composite2};
-use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend};
+use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend, Interesting};
 use poc::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
 use poc::pixel::Storage;
 
@@ -44,16 +44,17 @@ fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
 
 mod arithmetic;
 mod bands;
+mod chain_bug;
 mod color;
 mod composite;
 mod edge;
 mod filters;
 mod geometry;
 mod icc;
+mod lod_demand;
 mod misc;
+mod mosaicing;
 mod opacity;
 mod pixel;
 mod stats;
 mod viewer_repro;
-mod lod_demand;
-mod chain_bug;

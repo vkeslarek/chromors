@@ -1,8 +1,8 @@
-use slotmap::{new_key_type, SlotMap};
-use vello::kurbo::{Point, Rect, Size};
 use crate::editor::params::ParamValue;
-use crate::editor::registry::{registry, NodeKindId};
+use crate::editor::registry::{NodeKindId, registry};
 use crate::editor::types::DataType;
+use slotmap::{SlotMap, new_key_type};
+use vello::kurbo::{Point, Rect, Size};
 
 new_key_type! {
     pub struct NodeKey;
@@ -10,7 +10,10 @@ new_key_type! {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Side { In, Out }
+pub enum Side {
+    In,
+    Out,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PortAddr {
@@ -134,9 +137,15 @@ impl NodeGraph {
     }
 
     pub fn connect(&mut self, from: PortAddr, to: PortAddr) -> Result<EdgeKey, ConnectError> {
-        if from.side != Side::Out { return Err(ConnectError::NotAnOutput); }
-        if to.side != Side::In { return Err(ConnectError::NotAnInput); }
-        if from.node == to.node { return Err(ConnectError::SameNode); }
+        if from.side != Side::Out {
+            return Err(ConnectError::NotAnOutput);
+        }
+        if to.side != Side::In {
+            return Err(ConnectError::NotAnInput);
+        }
+        if from.node == to.node {
+            return Err(ConnectError::SameNode);
+        }
 
         let desc_from = registry().get(self.nodes[from.node].kind);
         let desc_to = registry().get(self.nodes[to.node].kind);
@@ -145,7 +154,10 @@ impl NodeGraph {
         let in_ty = desc_to.inputs[to.index as usize].ty;
 
         if !in_ty.accepts(out_ty) {
-            return Err(ConnectError::TypeMismatch { out: out_ty, in_: in_ty });
+            return Err(ConnectError::TypeMismatch {
+                out: out_ty,
+                in_: in_ty,
+            });
         }
 
         // Cycle check (DFS)
@@ -158,7 +170,11 @@ impl NodeGraph {
             if visited.insert(curr) {
                 let desc_curr = registry().get(self.nodes[curr].kind);
                 for i in 0..desc_curr.outputs.len() {
-                    let curr_out = PortAddr { node: curr, side: Side::Out, index: i as u16 };
+                    let curr_out = PortAddr {
+                        node: curr,
+                        side: Side::Out,
+                        index: i as u16,
+                    };
                     for (_, child) in self.outgoing(curr_out) {
                         stack.push(child.node);
                     }

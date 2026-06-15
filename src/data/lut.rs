@@ -40,7 +40,9 @@ impl AnyKind for LutKind {
             WorkUnit::Range(r) => (r.end - r.start).max(0) as u64,
             _ => self.entries as u64,
         };
-        (entries * self.bands.max(1) as u64 * 4).max(16)
+        // Storage is always packed `float4` per entry (`bands <= 4`, zero-padded),
+        // regardless of `bands`.
+        (entries * 16).max(16)
     }
     fn dyn_hash(&self, state: &mut dyn Hasher) {
         state.write_u32(self.entries);

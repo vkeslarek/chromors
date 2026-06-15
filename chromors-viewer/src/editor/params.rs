@@ -48,26 +48,62 @@ impl ParamValue {
 }
 
 pub enum ParamSpec {
-    Float { name: &'static str, min: f64, max: f64, default: f64 },
-    Int { name: &'static str, min: i64, max: i64, default: i64 },
-    Bool { name: &'static str, default: bool },
-    Choice { name: &'static str, options: &'static [&'static str], default: usize },
-    Color { name: &'static str, default: [f32; 4] },
-    Path { name: &'static str },
+    Float {
+        name: &'static str,
+        min: f64,
+        max: f64,
+        default: f64,
+    },
+    Int {
+        name: &'static str,
+        min: i64,
+        max: i64,
+        default: i64,
+    },
+    Bool {
+        name: &'static str,
+        default: bool,
+    },
+    Choice {
+        name: &'static str,
+        options: &'static [&'static str],
+        default: usize,
+    },
+    Color {
+        name: &'static str,
+        default: [f32; 4],
+    },
+    Path {
+        name: &'static str,
+    },
 }
 
 impl ParamSpec {
     pub fn float(name: &'static str, min: f64, max: f64, default: f64) -> Self {
-        Self::Float { name, min, max, default }
+        Self::Float {
+            name,
+            min,
+            max,
+            default,
+        }
     }
     pub fn int(name: &'static str, min: i64, max: i64, default: i64) -> Self {
-        Self::Int { name, min, max, default }
+        Self::Int {
+            name,
+            min,
+            max,
+            default,
+        }
     }
     pub fn bool(name: &'static str, default: bool) -> Self {
         Self::Bool { name, default }
     }
     pub fn choice(name: &'static str, options: &'static [&'static str], default: usize) -> Self {
-        Self::Choice { name, options, default }
+        Self::Choice {
+            name,
+            options,
+            default,
+        }
     }
     pub fn color(name: &'static str, default: [f32; 4]) -> Self {
         Self::Color { name, default }

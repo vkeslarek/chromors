@@ -286,3 +286,49 @@ fn brightness_matches_vips() {
     println!("brightness RMS = {}", rms);
     assert!(rms < 20.0, "brightness diff too high: {}", rms);
 }
+
+#[test]
+fn copy_matches_vips() {
+    // `copy` is a pixel-identity passthrough (metadata-only). The GPU lowers it
+    // to a zero-cost `forward()` alias, so the output must be byte-identical to
+    // the input (and to the vips `copy`), modulo storage round-trip.
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::gray();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // A metadata-only copy: tweak resolution + offset, leave pixels untouched.
+    let vips_res = vips_img.copy(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(72.0),
+        Some(72.0),
+        Some(0),
+        Some(0),
+    );
+    let gpu_res = gpu_img.copy(
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(72.0),
+        Some(72.0),
+        Some(0),
+        Some(0),
+    );
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("copy RMS = {}", rms);
+    assert!(
+        rms < 1.0,
+        "copy must be a pixel-identity passthrough: {}",
+        rms
+    );
+}

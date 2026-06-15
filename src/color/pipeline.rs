@@ -15,7 +15,10 @@ use crate::pixel::PixelLayout;
 /// RGB: `A` maps src primaries+white point to XYZ(D50), `B` maps XYZ(D50) to
 /// dst primaries+white point. Errors if either endpoint is `Multiband` (no
 /// colorimetric meaning to convert) or has degenerate (singular) primaries.
-pub fn convert_matrices(src: PixelLayout, dst: PixelLayout) -> Result<(Matrix3x3, Matrix3x3), Error> {
+pub fn convert_matrices(
+    src: PixelLayout,
+    dst: PixelLayout,
+) -> Result<(Matrix3x3, Matrix3x3), Error> {
     if !src.model.is_colorimetric() || !dst.model.is_colorimetric() {
         return Err(Error::TypeMismatch(
             "cannot color-convert a Multiband image".into(),
@@ -33,7 +36,10 @@ pub fn convert_matrices(src: PixelLayout, dst: PixelLayout) -> Result<(Matrix3x3
     let xyz_to_dst = to_xyz(dst.color_space)?
         .inverse()
         .map_err(|e| Error::Backend(format!("{e:?}")))?;
-    let b = xyz_to_dst.mul(&bradford_cat(WhitePoint::D50, dst.color_space.white_point()));
+    let b = xyz_to_dst.mul(&bradford_cat(
+        WhitePoint::D50,
+        dst.color_space.white_point(),
+    ));
 
     Ok((a50, b))
 }

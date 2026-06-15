@@ -138,7 +138,7 @@ impl ViewportController {
                 } else {
                     vp.camera.zoom = new_z;
                 }
-                
+
                 vp.clamp_camera();
 
                 vp.stale = true;

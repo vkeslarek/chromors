@@ -1,9 +1,9 @@
+use crate::editor::graph::{NodeGraph, NodeKey, PortAddr, Side};
+use crate::editor::registry::{BuildError, registry};
+use crate::editor::types::PortValue;
+use poc::backend::gpu::GpuContext;
 use std::collections::HashMap;
 use std::sync::Arc;
-use poc::backend::gpu::GpuContext;
-use crate::editor::graph::{NodeGraph, NodeKey, Side, PortAddr};
-use crate::editor::registry::{registry, BuildError};
-use crate::editor::types::PortValue;
 
 pub struct EvalCache {
     pub values: HashMap<(NodeKey, u16), PortValue>,
@@ -82,22 +82,29 @@ pub fn evaluate(g: &NodeGraph, ctx: &Arc<GpuContext>) -> EvalCache {
 
         let mut inputs: Vec<Option<PortValue>> = Vec::with_capacity(desc.inputs.len());
         let mut upstream_failed = false;
-        
+
         for in_idx in 0..desc.inputs.len() as u16 {
-            let addr = PortAddr { node: key, side: Side::In, index: in_idx };
+            let addr = PortAddr {
+                node: key,
+                side: Side::In,
+                index: in_idx,
+            };
             match g.incoming(addr) {
-                Some((_edge, from)) => {
-                    match cache.values.get(&(from.node, from.index)) {
-                        Some(v) => inputs.push(Some(v.clone())),
-                        None => { upstream_failed = true; inputs.push(None); }
+                Some((_edge, from)) => match cache.values.get(&(from.node, from.index)) {
+                    Some(v) => inputs.push(Some(v.clone())),
+                    None => {
+                        upstream_failed = true;
+                        inputs.push(None);
                     }
-                }
+                },
                 None => inputs.push(None),
             }
         }
-        
+
         if upstream_failed {
-            cache.errors.insert(key, BuildError("upstream error".into()));
+            cache
+                .errors
+                .insert(key, BuildError("upstream error".into()));
             continue;
         }
 
@@ -107,9 +114,11 @@ pub fn evaluate(g: &NodeGraph, ctx: &Arc<GpuContext>) -> EvalCache {
                     cache.values.insert((key, i as u16), v);
                 }
             }
-            Err(e) => { cache.errors.insert(key, e); }
+            Err(e) => {
+                cache.errors.insert(key, e);
+            }
         }
     }
-    
+
     cache
 }

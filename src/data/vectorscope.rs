@@ -52,6 +52,10 @@ impl GpuView for VectorscopeKind {
             params: ParamBlock::scalar("bin_count", self.grid * self.grid),
         }
     }
+    /// Atomic-shaped: no region geometry, just the grid's total cell count.
+    fn source_params(&self, _wu: &WorkUnit) -> ParamBlock {
+        ParamBlock::scalar("bin_count", self.grid * self.grid)
+    }
 }
 
 /// What the user holds. GPU-only.

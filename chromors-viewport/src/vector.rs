@@ -19,7 +19,9 @@ use crate::camera::CameraState;
 /// paths/shapes into the scene in image-space coordinates.
 pub trait VectorGraphics: Send {
     fn draw(&self, scene: &mut Scene, camera: &CameraState, vp_w: u32, vp_h: u32);
-    fn is_screen_space(&self) -> bool { false }
+    fn is_screen_space(&self) -> bool {
+        false
+    }
 }
 
 /// A cubic Bézier curve (`p0 → p3`, control points `p1`,`p2`), stroked.
@@ -66,4 +68,3 @@ impl VectorGraphics for BezierGraphic {
         );
     }
 }
-

@@ -281,3 +281,5 @@ pub mod reinterpret;
 pub use reinterpret::*;
 pub mod color;
 pub use color::*;
+pub mod equalize;
+pub use equalize::*;

@@ -483,6 +483,84 @@ fn vectorscope_kernel_runs_and_writes_grid() {
 }
 
 #[test]
+fn equalize_lut_kernel_produces_monotonic_cdf() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let bins = 256u32;
+    let hist = gpu_img.histogram(bins, 0).stage();
+    let lut = hist.equalize_lut();
+    let bytes = lut
+        .pull(
+            &poc::data::lut::RawLutTarget,
+            poc::work_unit::Range {
+                start: 0,
+                end: bins as i32,
+            },
+        )
+        .unwrap();
+    let entries: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
+    assert_eq!(entries.len(), bins as usize);
+
+    // CDF: monotonically non-decreasing, starts >= 0, ends at 1.0.
+    let mut prev = 0.0f32;
+    for e in entries {
+        assert!(e[0] >= prev - 1e-6, "LUT not monotonic: {e:?} after {prev}");
+        assert!((0.0..=1.0001).contains(&e[0]));
+        prev = e[0];
+    }
+    assert!((entries.last().unwrap()[0] - 1.0).abs() < 1e-5);
+}
+
+#[test]
+fn histogram_cumulative_and_normalize_kernels_run() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let bins = 256u32;
+    let hist = gpu_img.histogram(bins, 0).stage();
+
+    let cumulative = hist.cumulative();
+    let bytes = cumulative.pull(&RawTarget, Atomic).unwrap();
+    let cum_bins: &[u32] = bytemuck::cast_slice(&bytes);
+    assert_eq!(cum_bins.len(), bins as usize);
+    let total = (gpu_img.width() as u64) * (gpu_img.height() as u64);
+    assert_eq!(*cum_bins.last().unwrap() as u64, total);
+    for i in 1..cum_bins.len() {
+        assert!(cum_bins[i] >= cum_bins[i - 1]);
+    }
+
+    let normalized = hist.normalize();
+    let bytes = normalized.pull(&RawTarget, Atomic).unwrap();
+    let norm_bins: &[u32] = bytemuck::cast_slice(&bytes);
+    assert_eq!(norm_bins.len(), bins as usize);
+    assert_eq!(*norm_bins.iter().max().unwrap(), bins - 1);
+}
+
+#[test]
+fn equalize_ergonomic_runs() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let equalized = gpu_img.equalize(256, 4);
+    let rect = Region {
+        x: 0,
+        y: 0,
+        w: gpu_img.width(),
+        h: gpu_img.height(),
+        lod: Lod(0),
+    };
+    let bytes: Vec<u8> = equalized.pull(&RamImageTarget, rect).unwrap();
+    assert!(!bytes.is_empty());
+}
+
+#[test]
 fn edge_detection_kernels_compile_and_run() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

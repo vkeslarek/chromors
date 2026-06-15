@@ -101,10 +101,7 @@ impl ViewportRenderer {
     /// Attach a vector graphic to the interactive overlay (drawn over the image
     /// in image-space, tracking camera pan/zoom). Returns its id for
     /// `replace_graphic`/`detach_graphic`.
-    pub fn attach_graphic(
-        &mut self,
-        graphic: Box<dyn crate::vector::VectorGraphics>,
-    ) -> u64 {
+    pub fn attach_graphic(&mut self, graphic: Box<dyn crate::vector::VectorGraphics>) -> u64 {
         self.stale = true;
         self.overlay.attach(graphic)
     }
@@ -340,7 +337,6 @@ impl ViewportRenderer {
         let max_pan_y = bh - vp_h_img / 2.0;
         self.camera.pan_y = self.camera.pan_y.clamp(min_pan_y, max_pan_y);
     }
-
 
     pub fn resize(&mut self, w: f32, h: f32) {
         self.camera.resize(w, h);
@@ -893,7 +889,8 @@ impl ViewportRenderer {
             let w = (self.bounds.width * self.camera.dpr) as u32;
             let h = (self.bounds.height * self.camera.dpr) as u32;
             let snap = self.camera.snapshot();
-            self.overlay.render_scene(&self.device, &self.queue, w, h, &snap);
+            self.overlay
+                .render_scene(&self.device, &self.queue, w, h, &snap);
             self.overlay.blit_to(encoder, target);
         }
     }

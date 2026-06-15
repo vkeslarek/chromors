@@ -1,8 +1,9 @@
 //! Windowed image viewer on top of `chromors-viewport`.
 
 mod app;
-mod gpu;
 mod editor;
+mod gpu;
+mod ui;
 
 fn main() {
     tracing_subscriber::fmt()

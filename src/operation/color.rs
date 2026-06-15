@@ -29,7 +29,7 @@ use crate::data::image::{Image2D, ImageKind};
 use crate::error::Error;
 use crate::ffi;
 use crate::operation::{AnyInput, Input, Lower, Operation};
-use crate::pixel::{AlphaPolicy, AlphaState, PixelLayout, Pixel, Storage};
+use crate::pixel::{AlphaPolicy, AlphaState, Pixel, PixelLayout, Storage};
 use crate::work_unit::{Region, WorkUnit};
 
 /// Converts an image to `target` — storage, color model, alpha state and/or
@@ -152,7 +152,11 @@ fn vips_can_convert(src: PixelLayout, dst: PixelLayout) -> bool {
 /// flatten -> addalpha -> cast`, driven by [`PixelLayout`] via
 /// [`to_vips_interpretation`] (port of `src/color/convert.rs::ColorConversion`,
 /// `docs/native-color-management.md` §6.1.4).
-fn vips_native_convert(h: &VipsHandle, src: PixelLayout, dst: PixelLayout) -> Result<VipsHandle, Error> {
+fn vips_native_convert(
+    h: &VipsHandle,
+    src: PixelLayout,
+    dst: PixelLayout,
+) -> Result<VipsHandle, Error> {
     let mut img = h.clone();
 
     let from_premultiplied = matches!(src.alpha, AlphaState::Premultiplied);
@@ -221,7 +225,11 @@ fn vips_native_convert(h: &VipsHandle, src: PixelLayout, dst: PixelLayout) -> Re
 /// (`to_vips_interpretation`) and take the native path instead; other model
 /// changes without a vips interpretation (e.g. `Hsv`/`Oklab`/`Yxy`/`YCbCr`)
 /// are not yet supported here.
-fn cpu_convert_region(h: &VipsHandle, src: PixelLayout, dst: PixelLayout) -> Result<VipsHandle, Error> {
+fn cpu_convert_region(
+    h: &VipsHandle,
+    src: PixelLayout,
+    dst: PixelLayout,
+) -> Result<VipsHandle, Error> {
     use crate::color::model::ColorModel;
     let same_shape = src.model == ColorModel::Rgb
         && dst.model == ColorModel::Rgb

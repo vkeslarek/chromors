@@ -51,10 +51,10 @@ impl VipsBand for HistogramKind {
 }
 
 impl GpuView for HistogramKind {
-    /// A histogram is never a graph input in practice, but the wrapper that
-    /// would read it back.
+    /// Read-only view of a materialized histogram, e.g. re-injected by
+    /// [`crate::stage::BoundarySource`] for a staged `HistogramKind`.
     fn input(&self) -> View {
-        View::new("uint", "HistogramOut", "{ {buf}, {params}[0].bin_count }")
+        View::new("uint", "HistogramIn", "{ {buf}, {params}[0].bin_count }")
     }
     /// Reduction output: the kernel writes the atomic-accumulate wrapper
     /// directly into the target — no working scratch, no encode step.
@@ -65,6 +65,12 @@ impl GpuView for HistogramKind {
             encode: None,
             params: ParamBlock::scalar("bin_count", self.bins),
         }
+    }
+    /// Atomic-shaped: no region geometry. `bin_count` is the total counter
+    /// count (`bins * bands`), matching the buffer a staged histogram is
+    /// re-injected as.
+    fn source_params(&self, _wu: &WorkUnit) -> ParamBlock {
+        ParamBlock::scalar("bin_count", self.bins * self.bands.max(1))
     }
 }
 
@@ -121,6 +127,52 @@ impl Lower<GpuBackend> for HistogramOp {
     }
 }
 
+// ── Operation: Image → multi-band Histogram (cross-Kind) ──────────────────────
+
+/// Per-pixel histogram accumulation for the first `bands` channels at once —
+/// one `bins`-wide histogram per band, packed into a single `bins * bands`
+/// buffer (`out[b*bins+i]`). `bands` must be <= 4 (RGBA).
+pub struct HistogramMultiOp {
+    input: Input<ImageKind, GpuBackend>,
+    bins: u32,
+    bands: u32,
+}
+
+impl Operation<GpuBackend> for HistogramMultiOp {
+    type Output = HistogramKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
+        vec![&self.input]
+    }
+    fn demand(&self, _out: &Atomic) -> Vec<Option<WorkUnit>> {
+        let (w, h) = self.input.spec.dims();
+        vec![Some(WorkUnit::Region(Region::full(
+            (w, h),
+            crate::work_unit::Lod(0),
+        )))]
+    }
+    fn output_spec(&self) -> HistogramKind {
+        HistogramKind {
+            bins: self.bins,
+            bands: self.bands,
+        }
+    }
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_u32(self.bins);
+        state.write_u32(self.bands);
+    }
+}
+
+impl Lower<GpuBackend> for HistogramMultiOp {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let (w, h) = self.input.spec.dims();
+        cx.dispatch((w.max(0) as u32, h.max(0) as u32));
+        cx.kernel("ops.histogram", "histogram_multi_kernel")
+            .param("bins", self.bins)
+            .param("bands", self.bands);
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
 // ── Ergonomic method on the image ─────────────────────────────────────────────
 
 impl crate::data::image::Image2D<GpuBackend> {
@@ -129,6 +181,16 @@ impl crate::data::image::Image2D<GpuBackend> {
             input: self.as_input(),
             bins,
             channel,
+        })
+    }
+
+    /// One `bins`-wide histogram per band (up to 4), packed into a single
+    /// `bins * bands` buffer (`out[b*bins+i]`).
+    pub fn histogram_multi(&self, bins: u32, bands: u32) -> Histogram<GpuBackend> {
+        self.push(HistogramMultiOp {
+            input: self.as_input(),
+            bins,
+            bands: bands.min(4),
         })
     }
 }

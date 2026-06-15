@@ -7,7 +7,7 @@ use crate::backend::vips::{IntoVipsBandFormat, IntoVipsEnum, VipsBackend, VipsBu
 use crate::data::image::ImageKind;
 use crate::operation::{AnyInput, Input, Lower, Operation, OperationBoolean, OperationRelational};
 use crate::pixel::PixelLayout;
-use crate::work_unit::{Region, WorkUnit};
+use crate::work_unit::{Range, Region, WorkUnit};
 
 /// Pixel access pattern hint for cache operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -168,6 +168,18 @@ impl Lower<VipsBackend> for Copy<VipsBackend> {
         }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Copy<GpuBackend> {
+    /// `copy` is a pixel-identity passthrough: it only rewrites metadata
+    /// (resolution, offset, declared extent). On the GPU it is therefore a
+    /// zero-cost alias of its input — `forward()` adds no kernel step; the
+    /// value flows straight through to the consumer (or the encoder, if this is
+    /// the root), re-encoded under the output spec. It fuses away entirely.
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.forward();
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
@@ -354,12 +366,9 @@ where
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
         vec![
             Some(WorkUnit::Region(out.clone())),
-            Some(WorkUnit::Region(Region {
-                x: 0,
-                y: 0,
-                w: self.lut.spec.entries as i32,
-                h: self.lut.spec.bands as i32,
-                lod: out.lod,
+            Some(WorkUnit::Range(Range {
+                start: 0,
+                end: self.lut.spec.entries as i32,
             })),
         ]
     }
@@ -437,7 +446,10 @@ impl Lower<VipsBackend> for Recomb<VipsBackend> {
         // the same band format/byte layout.
         let mut cast_op = crate::backend::vips::gobject::VipsGObject::new(b"cast\0").unwrap();
         cast_op.set_image("in", out_handle.ptr);
-        cast_op.set_int("format", self.input.spec.layout.storage.into_vips_band_format());
+        cast_op.set_int(
+            "format",
+            self.input.spec.layout.storage.into_vips_band_format(),
+        );
         cast_op.set_bool("shift", false);
         let cast_handle = cast_op.run().unwrap();
         cx.emit(cast_handle);
@@ -748,6 +760,13 @@ pub struct NoiseReduction<B: Backend> {
     pub strength: f32,
 }
 
+impl<B: Backend> NoiseReduction<B> {
+    /// Median window side length: grows with `strength`, always odd, >= 1.
+    fn size(&self) -> i32 {
+        (1 + (self.strength * 4.0) as i32 * 2).max(1)
+    }
+}
+
 impl<B: Backend> Operation<B> for NoiseReduction<B>
 where
     NoiseReduction<B>: Lower<B>,
@@ -757,7 +776,8 @@ where
         vec![&self.input]
     }
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        vec![Some(WorkUnit::Region(out.clone()))]
+        let halo = self.size() / 2;
+        vec![Some(WorkUnit::Region(out.expanded(halo)))]
     }
     fn output_spec(&self) -> ImageKind {
         (*self.input.spec).clone()
@@ -770,12 +790,22 @@ where
 impl Lower<VipsBackend> for NoiseReduction<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let size = (1 + (self.strength * 4.0) as i32 * 2).max(1);
-        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"median\0").unwrap();
+        let mut op = crate::backend::vips::gobject::VipsGObject::new(b"rank\0").unwrap();
         op.set_image("in", input_handle.ptr);
-        op.set_int("size", size);
+        let size = self.size();
+        op.set_int("width", size);
+        op.set_int("height", size);
+        op.set_int("index", size * size / 2);
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for NoiseReduction<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        cx.param_block(ParamBlock::new().param("sz", self.size() as u32));
+        cx.kernel("ops.filters", "median_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

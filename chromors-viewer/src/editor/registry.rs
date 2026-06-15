@@ -1,14 +1,21 @@
+use crate::editor::params::{ParamSpec, ParamValue};
+use crate::editor::types::{DataType, PortValue};
+use poc::backend::gpu::GpuContext;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use poc::backend::gpu::GpuContext;
-use crate::editor::types::{DataType, PortValue};
-use crate::editor::params::{ParamSpec, ParamValue};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeKindId(pub &'static str);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Category { Source, Color, Filter, Geometry, Composite, Sink }
+pub enum Category {
+    Source,
+    Color,
+    Filter,
+    Geometry,
+    Composite,
+    Sink,
+}
 
 pub struct SocketSpec {
     pub name: &'static str,
@@ -45,13 +52,18 @@ impl Registry {
         self.by_id.insert(desc.id, desc);
     }
     pub fn get(&self, id: NodeKindId) -> &NodeDescriptor {
-        self.by_id.get(&id).expect("NodeKindId not found in registry")
+        self.by_id
+            .get(&id)
+            .expect("NodeKindId not found in registry")
     }
     pub fn iter(&self) -> impl Iterator<Item = &NodeDescriptor> {
         self.ordered.iter().map(move |id| self.get(*id))
     }
     pub fn iter_category(&self, c: Category) -> impl Iterator<Item = &NodeDescriptor> {
-        self.ordered.iter().map(move |id| self.get(*id)).filter(move |d| d.category == c)
+        self.ordered
+            .iter()
+            .map(move |id| self.get(*id))
+            .filter(move |d| d.category == c)
     }
 }
 

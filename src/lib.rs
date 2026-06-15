@@ -58,6 +58,7 @@ pub mod export;
 pub mod node;
 pub mod operation;
 pub mod pixel;
+pub mod stage;
 pub mod work_unit;
 
 #[allow(non_upper_case_globals)]

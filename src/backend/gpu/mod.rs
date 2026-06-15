@@ -129,6 +129,11 @@ pub struct GpuBuilder {
     /// of the full working pixel. Cleared at the start of every `enter`.
     cur_output_adapter: Option<StepInput>,
 
+    /// Extra source slots registered via [`GpuBuilder::extra_input`] for the
+    /// *current* node, appended after its resolved graph-input(s) when its
+    /// first kernel step is pushed. Cleared at the start of every `enter`.
+    pending_extra_inputs: Vec<StepInput>,
+
     /// Count of distinct adapters resolved so far this pass — used to assign
     /// each adapter a unique `ChainParams` field prefix (`a{n}_...`).
     adapter_count: usize,
@@ -177,6 +182,7 @@ impl GpuBuilder {
             cur_node: None,
             cur_inputs: Vec::new(),
             cur_started: false,
+            pending_extra_inputs: Vec::new(),
             pending_params: Vec::new(),
             cur_output_adapter: None,
             adapter_count: 0,
@@ -232,6 +238,7 @@ impl GpuBuilder {
         self.cur_first_step = None;
         self.write_wraps.clear();
         self.cur_output_adapter = None;
+        self.pending_extra_inputs.clear();
         self.cur_inputs = input_keys
             .iter()
             .map(|k| {
@@ -316,6 +323,36 @@ impl GpuBuilder {
         self
     }
 
+    /// Register an extra source slot for the **current node**, not part of
+    /// its `Operation::inputs()` edges (e.g. a side buffer materialized
+    /// inside `lower`, like a staged histogram). Appended *after* the node's
+    /// resolved graph inputs as an argument to its first kernel step.
+    pub fn extra_input(
+        &mut self,
+        view: View,
+        slot_params: ParamBlock,
+        buf: Arc<crate::backend::gpu::buffer::GpuBuffer>,
+    ) -> &mut Self {
+        let slot = self.input_views.len();
+        for (name, ty) in &slot_params.fields {
+            self.params
+                .fields
+                .push((name.replace("{slot}", &slot.to_string()), ty));
+        }
+        self.params
+            .field_sizes
+            .extend(slot_params.field_sizes.iter().copied());
+        self.params.bytes.extend_from_slice(&slot_params.bytes);
+        self.input_views.push(view);
+        self.source_buffers.push(buf);
+        self.pending_extra_inputs.push(StepInput {
+            base: BaseInput::Source(slot),
+            adapter: None,
+            read_wraps: Vec::new(),
+        });
+        self
+    }
+
     /// Add a kernel step to the current node. Its first kernel reads the node's
     /// graph inputs; any later kernel (intra-node multistep) reads the step
     /// before it. The step's output temp is its own index.
@@ -334,7 +371,9 @@ impl GpuBuilder {
         let inputs = if !self.cur_started {
             self.cur_started = true;
             self.cur_first_step = Some(self.steps.len());
-            self.cur_inputs.clone()
+            let mut inputs = self.cur_inputs.clone();
+            inputs.extend(self.pending_extra_inputs.drain(..));
+            inputs
         } else {
             vec![StepInput {
                 base: BaseInput::Step(self.steps.len() - 1),
@@ -585,6 +624,28 @@ pub trait GpuView: Kind {
     /// resolved output WorkUnit — Region-shaped Kinds (images) use it to size
     /// their `region_out` geometry.
     fn output(&self, wu: &WorkUnit) -> OutputWrap;
+
+    /// Slot params for re-injecting a *materialized* value of this Kind as a
+    /// decoded source input — what [`crate::stage::BoundarySource`] (staging and
+    /// caching) pushes alongside [`GpuView::input`]. `wu` is the work unit the
+    /// materialized buffer covers.
+    ///
+    /// The default lifts the tight-region geometry every Region/Range source
+    /// already builds (same shape switch as `WorkUnit::union` — per-shape, not
+    /// per-datatype). `Atomic`-shaped Kinds (histogram, vectorscope) have no
+    /// region geometry and must override with their own params (e.g.
+    /// `bin_count`).
+    fn source_params(&self, wu: &WorkUnit) -> ParamBlock {
+        match wu {
+            WorkUnit::Region(r) => RegionParams::tight(r.w, r.h).into_block("region_in_{slot}"),
+            WorkUnit::Range(r) => {
+                RegionParams::tight(r.end - r.start, 1).into_block("region_in_{slot}")
+            }
+            WorkUnit::Atomic => {
+                panic!("GpuView::source_params: an Atomic-shaped Kind must override source_params")
+            }
+        }
+    }
 }
 
 /// Maps a [`crate::pixel::Storage`] to the Slang `IStorageCodec` type the
@@ -719,6 +780,9 @@ impl Builder<GpuBackend> for GpuBuilder {
         RegionParams::tight(dims.0 as i32, dims.1 as i32).push_into(&mut self.params, "domain");
 
         let slang = emit::emit_slang(&self, self.ctx.wg_dim);
+        if std::env::var("CHROMORS_DUMP_SLANG").is_ok() {
+            eprintln!("{slang}");
+        }
         let hash = emit::hash_slang(&slang);
         let compiled = compile::compile(self.ctx.as_ref(), &self, slang, hash)?;
 

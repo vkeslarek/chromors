@@ -1,4 +1,5 @@
 import lib.region;
+import lib.io;
 
 public void resize_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float inv_hscale, float inv_vscale) {
     // Standard pixel-center convention
@@ -145,3 +146,35 @@ public void grid_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int out
     output.write(idx, input.read(uint2(sx, sy)));
 }
 
+
+// Local-gradient "interestingness" score for a pixel: sum of the forward
+// luma differences to its right and below neighbors, scaled to an integer.
+// Used by `smartcrop_col_score_kernel` / `smartcrop_row_score_kernel` as a
+// cheap proxy for "detail" — not vips' own ENTROPY/ATTENTION heuristic, but
+// a reasonable approximation for picking a high-detail crop window.
+uint smartcrop_score<G: IRegion>(uint2 idx, G input) {
+    float4 c = input.read(idx);
+    float4 cx1 = input.read_clamped(int2(int(idx.x) + 1, int(idx.y)));
+    float4 cy1 = input.read_clamped(int2(int(idx.x), int(idx.y) + 1));
+    float luma = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+    float lx = cx1.r * 0.2126 + cx1.g * 0.7152 + cx1.b * 0.0722;
+    float ly = cy1.r * 0.2126 + cy1.g * 0.7152 + cy1.b * 0.0722;
+    return uint((abs(lx - luma) + abs(ly - luma)) * 1024.0);
+}
+
+// Sum of `smartcrop_score` over column `idx.x`, into a `width`-bin histogram.
+// dispatch domain = (width, height).
+public void smartcrop_col_score_kernel<G: IRegion>(uint2 idx, G input, HistogramOut output) {
+    output.accumulate_at(idx.x, smartcrop_score(idx, input));
+}
+
+// Sum of `smartcrop_score` over row `idx.y`, into a `height`-bin histogram.
+// dispatch domain = (width, height).
+public void smartcrop_row_score_kernel<G: IRegion>(uint2 idx, G input, HistogramOut output) {
+    output.accumulate_at(idx.y, smartcrop_score(idx, input));
+}
+
+// Crop a `width x height` window starting at `(off_x, off_y)` out of `input`.
+public void smartcrop_kernel<G: IRegion>(uint2 idx, G input, RWRegion output, uint off_x, uint off_y) {
+    output.write(idx, input.read(uint2(idx.x + off_x, idx.y + off_y)));
+}

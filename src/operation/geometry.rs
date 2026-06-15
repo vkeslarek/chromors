@@ -4,9 +4,10 @@ use crate::backend::Backend;
 use crate::backend::gpu::view::{ParamBlock, ViewAdapter};
 use crate::backend::gpu::{GpuBackend, GpuBuilder, GpuView};
 use crate::backend::vips::{IntoVipsEnum, VipsBackend, VipsBuilder};
-use crate::data::image::ImageKind;
+use crate::data::histogram::HistogramKind;
+use crate::data::image::{Image2D, ImageKind};
 use crate::operation::{AnyInput, Input, Lower, Operation};
-use crate::work_unit::{Region, WorkUnit};
+use crate::work_unit::{Atomic, Lod, Region, WorkUnit};
 
 // ── Remap (zero-cost index-remapping view adapter) ──────────────────────────
 
@@ -847,6 +848,152 @@ impl Lower<VipsBackend> for Smartcrop<VipsBackend> {
         }
         let out_handle = op.run().unwrap();
         cx.emit(out_handle);
+    }
+}
+
+// ── SmartcropColScore / SmartcropRowScore: per-column/row "interestingness" ───
+
+/// Sum of `smartcrop_score` (a cheap local-gradient detail proxy) over each
+/// column, as a `width`-bin [`HistogramKind`]. Feeds [`Smartcrop::lower`]'s
+/// crop-window search — not vips' own ENTROPY/ATTENTION heuristic, but a
+/// reasonable approximation for picking a high-detail crop window.
+struct SmartcropColScore {
+    input: Input<ImageKind, GpuBackend>,
+}
+impl Operation<GpuBackend> for SmartcropColScore {
+    type Output = HistogramKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
+        vec![&self.input]
+    }
+    fn demand(&self, _out: &Atomic) -> Vec<Option<WorkUnit>> {
+        let (w, h) = self.input.spec.dims();
+        vec![Some(WorkUnit::Region(Region::full((w, h), Lod(0))))]
+    }
+    fn output_spec(&self) -> HistogramKind {
+        HistogramKind {
+            bins: self.input.spec.width as u32,
+            bands: 1,
+        }
+    }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+impl Lower<GpuBackend> for SmartcropColScore {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let (w, h) = self.input.spec.dims();
+        cx.dispatch((w.max(0) as u32, h.max(0) as u32));
+        cx.kernel("ops.geometry", "smartcrop_col_score_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+/// Same as [`SmartcropColScore`], summed per row into a `height`-bin
+/// [`HistogramKind`].
+struct SmartcropRowScore {
+    input: Input<ImageKind, GpuBackend>,
+}
+impl Operation<GpuBackend> for SmartcropRowScore {
+    type Output = HistogramKind;
+    fn inputs(&self) -> Vec<&dyn AnyInput<GpuBackend>> {
+        vec![&self.input]
+    }
+    fn demand(&self, _out: &Atomic) -> Vec<Option<WorkUnit>> {
+        let (w, h) = self.input.spec.dims();
+        vec![Some(WorkUnit::Region(Region::full((w, h), Lod(0))))]
+    }
+    fn output_spec(&self) -> HistogramKind {
+        HistogramKind {
+            bins: self.input.spec.height as u32,
+            bands: 1,
+        }
+    }
+    fn dyn_hash(&self, _state: &mut dyn Hasher) {}
+}
+impl Lower<GpuBackend> for SmartcropRowScore {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let (w, h) = self.input.spec.dims();
+        cx.dispatch((w.max(0) as u32, h.max(0) as u32));
+        cx.kernel("ops.geometry", "smartcrop_row_score_kernel");
+        cx.output(self.output_spec().output(cx.wu()));
+    }
+}
+
+/// Slides a `window`-wide window over `scores` and returns the start offset
+/// that maximizes (or, if `minimize`, minimizes) the windowed sum.
+fn smartcrop_best_offset(scores: &[u32], window: usize, minimize: bool) -> usize {
+    if window == 0 || window >= scores.len() {
+        return 0;
+    }
+    let mut sum: u64 = scores[..window].iter().map(|&v| v as u64).sum();
+    let mut best = sum;
+    let mut best_off = 0;
+    for i in 1..=(scores.len() - window) {
+        sum += scores[i + window - 1] as u64;
+        sum -= scores[i - 1] as u64;
+        let better = if minimize { sum < best } else { sum > best };
+        if better {
+            best = sum;
+            best_off = i;
+        }
+    }
+    best_off
+}
+
+impl Lower<GpuBackend> for Smartcrop<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let (in_w, in_h) = self.input.spec.dims();
+        let out_w = self.width.clamp(0, in_w);
+        let out_h = self.height.clamp(0, in_h);
+
+        let (off_x, off_y) = match self.interesting {
+            Some(Interesting::None) | Some(Interesting::Centre) => {
+                ((in_w - out_w) / 2, (in_h - out_h) / 2)
+            }
+            interesting => {
+                let img = Image2D::<GpuBackend> {
+                    root: self.input.src.clone(),
+                    ctx: cx.ctx().clone(),
+                    spec: self.input.spec.clone(),
+                };
+                let col = img.push(SmartcropColScore {
+                    input: img.as_input(),
+                });
+                let row = img.push(SmartcropRowScore {
+                    input: img.as_input(),
+                });
+                let (col_buf, row_buf) = match (col.materialize(Atomic), row.materialize(Atomic))
+                {
+                    (Ok(c), Ok(r)) => (c, r),
+                    (Err(e), _) | (_, Err(e)) => {
+                        cx.fail(e);
+                        return;
+                    }
+                };
+                let (col_bytes, row_bytes) = match (
+                    col_buf.payload.read_to_cpu(cx.ctx()),
+                    row_buf.payload.read_to_cpu(cx.ctx()),
+                ) {
+                    (Ok(c), Ok(r)) => (c, r),
+                    (Err(e), _) | (_, Err(e)) => {
+                        cx.fail(e);
+                        return;
+                    }
+                };
+                let col_scores: &[u32] = bytemuck::cast_slice(&col_bytes);
+                let row_scores: &[u32] = bytemuck::cast_slice(&row_bytes);
+
+                let minimize = matches!(interesting, Some(Interesting::Low));
+                let off_x =
+                    smartcrop_best_offset(&col_scores[..in_w as usize], out_w as usize, minimize);
+                let off_y =
+                    smartcrop_best_offset(&row_scores[..in_h as usize], out_h as usize, minimize);
+                (off_x as i32, off_y as i32)
+            }
+        };
+
+        cx.kernel("ops.geometry", "smartcrop_kernel")
+            .param("off_x", off_x.max(0) as u32)
+            .param("off_y", off_y.max(0) as u32);
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

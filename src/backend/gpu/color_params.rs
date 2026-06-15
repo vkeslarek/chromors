@@ -5,7 +5,9 @@
 //! the §3.6 `Gpu*Id` traits are in scope, from the AGNOSTIC
 //! [`crate::color::pipeline::convert_matrices`] math.
 
-use crate::backend::gpu::{GpuAlphaId, GpuModelId, GpuTransferId, ParamBlock, ReadWrap, SlangPod, WriteWrap};
+use crate::backend::gpu::{
+    GpuAlphaId, GpuModelId, GpuTransferId, ParamBlock, ReadWrap, SlangPod, WriteWrap,
+};
 use crate::color::matrix::Matrix3x3;
 use crate::color::model::ColorModel;
 use crate::color::pipeline::convert_matrices;

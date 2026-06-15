@@ -228,7 +228,15 @@ impl RegionParams {
     }
 
     pub fn padded(stride: u32, x: u32, y: u32, w: u32, h: u32, pad_x: i32, pad_y: i32) -> Self {
-        Self { stride, x, y, w, h, pad_x, pad_y }
+        Self {
+            stride,
+            x,
+            y,
+            w,
+            h,
+            pad_x,
+            pad_y,
+        }
     }
     /// Push this region as a named `BufferRegion` field (+ std430 bytes) onto a
     /// `ChainParams` block.

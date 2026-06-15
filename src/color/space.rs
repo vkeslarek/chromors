@@ -209,7 +209,11 @@ pub fn to_vips_interpretation(model: super::model::ColorModel, cs: ColorSpace) -
 pub fn from_vips_interpretation(
     interp: i32,
     bands: i32,
-) -> (super::model::ColorModel, crate::pixel::AlphaState, ColorSpace) {
+) -> (
+    super::model::ColorModel,
+    crate::pixel::AlphaState,
+    ColorSpace,
+) {
     use super::model::ColorModel;
     use crate::ffi::{
         VipsInterpretation_VIPS_INTERPRETATION_B_W as B_W,

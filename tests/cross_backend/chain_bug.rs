@@ -26,9 +26,10 @@ fn disp() -> PixelLayout {
 fn fused_same_named_param_blocks_dont_collide() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
-    let vips =
-        poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open("tests/fixtures/rgb.jpg")
-            .unwrap();
+    let vips = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open(
+        "tests/fixtures/rgb.jpg",
+    )
+    .unwrap();
     let g = common::vips_to_gpu(&vips, &ctx);
 
     // Both ops push `gain`/`preserve` through `exposure_kernel`; exposure +
@@ -39,7 +40,13 @@ fn fused_same_named_param_blocks_dont_collide() {
         .exposure(-0.5, 0.0)
         .convert(disp());
 
-    let reg = Region { x: 0, y: 0, w: 32, h: 32, lod: Lod(0) };
+    let reg = Region {
+        x: 0,
+        y: 0,
+        w: 32,
+        h: 32,
+        lod: Lod(0),
+    };
     let bytes = out.pull(&RamImageTarget, reg).unwrap();
 
     // Every pixel opaque, and not a black hole: the fused pass produced real
@@ -48,6 +55,11 @@ fn fused_same_named_param_blocks_dont_collide() {
         bytes.iter().skip(3).step_by(4).all(|&a| a == 255),
         "alpha not opaque"
     );
-    let rgb_nonzero = (0..bytes.len()).filter(|i| i % 4 != 3 && bytes[*i] != 0).count();
-    assert!(rgb_nonzero > 0, "fused param_block ops produced all-zero RGB");
+    let rgb_nonzero = (0..bytes.len())
+        .filter(|i| i % 4 != 3 && bytes[*i] != 0)
+        .count();
+    assert!(
+        rgb_nonzero > 0,
+        "fused param_block ops produced all-zero RGB"
+    );
 }

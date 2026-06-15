@@ -47,7 +47,7 @@ fn convert_identity_is_lossless() {
 fn morph_matches_vips() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
-    
+
     // vips morph is designed for boolean images (0/255) and implements it using
     // bitwise AND/OR on the raw u8 bytes. Because the GPU pipeline correctly
     // converts sRGB to linear float working space, intermediate values like 1 or 2
@@ -314,4 +314,52 @@ fn median_matches_vips() {
     let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
     println!("median RMS = {}", rms);
     assert!(rms < 5.0, "median diff too high: {}", rms);
+}
+
+#[test]
+fn noise_reduction_matches_vips() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgba();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    let vips_res = vips_img.noise_reduction(0.5);
+    let gpu_res = gpu_img.noise_reduction(0.5);
+
+    let vips_bytes = common::vips_materialize(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let rms = common::rms_u8(&vips_bytes, &gpu_bytes);
+    println!("noise_reduction RMS = {}", rms);
+    assert!(rms < 5.0, "noise_reduction diff too high: {}", rms);
+}
+
+#[test]
+fn canny_runs_and_is_sane() {
+    let _g = common::vips_serial();
+    let ctx = common::gpu_ctx();
+    let vips_img = common::rgb();
+    let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
+
+    // GPU canny is an approximation of vips': the non-max suppression snaps
+    // to the nearest of 8 octants instead of bilinearly interpolating between
+    // the two neighboring octants (see shaders/ops/filters.slang). Check
+    // dims + that it produced a plausible edge map (mostly-zero, since both
+    // implementations zero out non-maximal pixels) rather than an exact match.
+    let vips_res = vips_img.canny(Some(1.4), None);
+    let gpu_res = gpu_img.canny(Some(1.4), None);
+
+    assert_eq!(gpu_res.width(), vips_res.width());
+    assert_eq!(gpu_res.height(), vips_res.height());
+
+    // vips canny promotes to float output even for uchar input; the GPU
+    // lower keeps the input's u8 storage. Compare zero-fractions only.
+    let vips_floats = common::vips_materialize_f32(&vips_res);
+    let gpu_bytes = common::poc_materialize(&gpu_res);
+
+    let vips_zero_frac =
+        vips_floats.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / vips_floats.len() as f64;
+    let gpu_zero_frac = gpu_bytes.iter().filter(|&&v| v == 0).count() as f64 / gpu_bytes.len() as f64;
+    println!("canny zero-fraction: vips = {:.3}, gpu = {:.3}", vips_zero_frac, gpu_zero_frac);
+    assert!(gpu_zero_frac > 0.5, "gpu canny output not sparse");
 }

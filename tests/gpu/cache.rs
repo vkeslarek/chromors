@@ -9,7 +9,13 @@ use poc::work_unit::{Lod, Region};
 use crate::common;
 
 fn full(w: i32, h: i32) -> Region {
-    Region { x: 0, y: 0, w, h, lod: Lod(0) }
+    Region {
+        x: 0,
+        y: 0,
+        w,
+        h,
+        lod: Lod(0),
+    }
 }
 
 /// A cached chain consumed by a downstream op matches the same chain without a
@@ -31,7 +37,10 @@ fn cached_chain_matches_uncached_and_populates_store() {
     assert!(rms < 3.0, "cached path diverged from uncached: rms {rms}");
 
     let stats = cached.store().stats();
-    assert!(stats.entries >= 1, "boundary should hold a tile, got {stats:?}");
+    assert!(
+        stats.entries >= 1,
+        "boundary should hold a tile, got {stats:?}"
+    );
     assert!(stats.misses >= 1, "first pull is a miss, got {stats:?}");
 }
 
@@ -71,7 +80,10 @@ fn prime_warms_then_pull_hits() {
     cached.prime(&[full(w, h)]).unwrap();
 
     let primed = cached.store().stats();
-    assert_eq!(primed.entries, 1, "prime should cache the region, {primed:?}");
+    assert_eq!(
+        primed.entries, 1,
+        "prime should cache the region, {primed:?}"
+    );
 
     // A downstream pull demanding the same region serves from the warm store.
     let out = cached.handle().invert();

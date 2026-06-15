@@ -1,14 +1,22 @@
-use crate::editor::registry::{Registry, NodeDescriptor, NodeKindId, Category, SocketSpec, BuildError};
-use crate::editor::types::{DataType, PortValue};
 use crate::editor::params::ParamSpec;
+use crate::editor::registry::{
+    BuildError, Category, NodeDescriptor, NodeKindId, Registry, SocketSpec,
+};
+use crate::editor::types::{DataType, PortValue};
 
 pub fn register(r: &mut Registry) {
     r.add(NodeDescriptor {
         id: NodeKindId("color.exposure"),
         title: "Exposure",
         category: Category::Color,
-        inputs: vec![SocketSpec { name: "image", ty: DataType::Image }],
-        outputs: vec![SocketSpec { name: "out", ty: DataType::Image }],
+        inputs: vec![SocketSpec {
+            name: "image",
+            ty: DataType::Image,
+        }],
+        outputs: vec![SocketSpec {
+            name: "out",
+            ty: DataType::Image,
+        }],
         params: vec![
             ParamSpec::float("stops", -5.0, 5.0, 0.0),
             ParamSpec::float("preserve", 0.0, 1.0, 0.0),
@@ -29,8 +37,14 @@ pub fn register(r: &mut Registry) {
         id: NodeKindId("color.invert"),
         title: "Invert",
         category: Category::Color,
-        inputs: vec![SocketSpec { name: "image", ty: DataType::Image }],
-        outputs: vec![SocketSpec { name: "out", ty: DataType::Image }],
+        inputs: vec![SocketSpec {
+            name: "image",
+            ty: DataType::Image,
+        }],
+        outputs: vec![SocketSpec {
+            name: "out",
+            ty: DataType::Image,
+        }],
         params: vec![],
         build: |inputs, _p, _ctx| {
             let img = inputs[0]

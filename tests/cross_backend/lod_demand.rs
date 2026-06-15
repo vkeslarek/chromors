@@ -24,16 +24,23 @@ fn disp() -> PixelLayout {
 fn lod_demand_matches_vips_shrink() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
-    let vips =
-        poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open("tests/fixtures/rgb.jpg")
-            .unwrap();
+    let vips = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open(
+        "tests/fixtures/rgb.jpg",
+    )
+    .unwrap();
     let gpu = common::vips_to_gpu(&vips, &ctx);
     let disp_img = gpu.convert(disp());
 
     for lod in [0u32, 1, 2] {
         let scale = 1i32 << lod;
         let (lw, lh) = (200 / scale, 200 / scale); // rgb.jpg is 200x200
-        let reg = Region { x: 0, y: 0, w: lw, h: lh, lod: Lod(lod) };
+        let reg = Region {
+            x: 0,
+            y: 0,
+            w: lw,
+            h: lh,
+            lod: Lod(lod),
+        };
         let gpu_bytes = disp_img.pull(&RamImageTarget, reg).unwrap();
 
         // Every pixel opaque (straight-alpha RGBA8 of an alpha-less JPEG).

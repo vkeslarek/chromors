@@ -40,7 +40,12 @@ struct GrayOut {
 
 // ── Histogram accumulator ────────────────────────────────────────────────────
 
-/// Fixed-size atomic histogram accumulator.
+/// Fixed-size atomic histogram accumulator. Also doubles as the read/write
+/// view of a *materialized* histogram output (e.g. `HistogramCumulative`'s
+/// result, `bin_count = bins * bands`) — `read`/`write` index the flat
+/// `bins*bands` buffer directly, band-major (band `b`'s bin `i` is at
+/// `b * bins + i`). RW-bound; for a read-only input view of a materialized
+/// histogram, see [`HistogramIn`].
 struct HistogramOut {
     RWStructuredBuffer<uint> bins;
     uint bin_count;
@@ -48,6 +53,34 @@ struct HistogramOut {
     void accumulate(float value) {
         uint bin = uint(clamp(value, 0.0, 0.9999) * float(bin_count));
         InterlockedAdd(bins[bin], 1u);
+    }
+
+    /// Add `amount` directly to bin `bin` (no value-to-bin mapping) — used by
+    /// reductions that already know their target bin, e.g. a per-column or
+    /// per-row score sum.
+    void accumulate_at(uint bin, uint amount) {
+        InterlockedAdd(bins[bin], amount);
+    }
+
+    uint read(uint i) {
+        return bins[i];
+    }
+
+    void write(uint i, uint value) {
+        bins[i] = value;
+    }
+}
+
+/// Read-only view of a *materialized* histogram, re-injected as a decoded
+/// source input (e.g. a staged `HistogramKind`, `bin_count = bins * bands`).
+/// `read` indexes the flat `bins*bands` buffer directly, band-major (band
+/// `b`'s bin `i` is at `b * bins + i`).
+struct HistogramIn {
+    StructuredBuffer<uint> bins;
+    uint bin_count;
+
+    uint read(uint i) {
+        return bins[i];
     }
 }
 

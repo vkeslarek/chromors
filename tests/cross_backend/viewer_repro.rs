@@ -44,7 +44,13 @@ fn convert_then_lod_is_deterministic() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
     let mip_img = large_display_mip(&ctx);
-    let region = Region { x: 0, y: 0, w: 256, h: 256, lod: Lod(0) };
+    let region = Region {
+        x: 0,
+        y: 0,
+        w: 256,
+        h: 256,
+        lod: Lod(0),
+    };
 
     let a = mip_img.pull(&RamImageTarget, region.clone()).unwrap();
     let b = mip_img.pull(&RamImageTarget, region.clone()).unwrap();
@@ -72,7 +78,13 @@ fn convert_then_lod_tiles_match_vips_shrink() {
         for tx in 0..2 {
             let w = TILE.min(500 - tx * TILE);
             let h = TILE.min(500 - ty * TILE);
-            let region = Region { x: tx * TILE, y: ty * TILE, w, h, lod: Lod(0) };
+            let region = Region {
+                x: tx * TILE,
+                y: ty * TILE,
+                w,
+                h,
+                lod: Lod(0),
+            };
 
             let gpu_buf = mip_img.pull(&GpuBufferTarget, region.clone()).unwrap();
             let gpu_bytes = gpu_buf.read_to_cpu(&ctx).unwrap();
@@ -92,7 +104,10 @@ fn convert_then_lod_tiles_match_vips_shrink() {
                 gpu_rgb.extend_from_slice(&gpu_bytes[px * 4..px * 4 + 3]);
             }
             let rms = common::rms_u8(&vips_bytes, &gpu_rgb);
-            assert!(rms < 5.0, "tile ({tx},{ty}) RMS vs vips shrink too high: {rms}");
+            assert!(
+                rms < 5.0,
+                "tile ({tx},{ty}) RMS vs vips shrink too high: {rms}"
+            );
         }
     }
 }

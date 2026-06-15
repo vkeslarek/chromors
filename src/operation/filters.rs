@@ -113,8 +113,11 @@ where
     }
 
     fn demand(&self, out: &Region) -> Vec<Option<WorkUnit>> {
-        let halo = self.sigma.unwrap_or(1.0) * 3.0;
-        vec![Some(WorkUnit::Region(out.expanded(halo.ceil() as i32)))]
+        let sigma = self.sigma.unwrap_or(1.4) as f32 / out.lod.scale_factor() as f32;
+        // gauss_radius for the blur, +1 for the 2x2 gradient corner, +1 for
+        // the directional neighbor read in non-max suppression.
+        let halo = gauss_radius(sigma) + 2;
+        vec![Some(WorkUnit::Region(out.expanded(halo)))]
     }
 
     fn output_spec(&self) -> ImageKind {
@@ -141,6 +144,22 @@ impl Lower<VipsBackend> for Canny<VipsBackend> {
         }
         let out_handle = op.run().expect("vips canny failed");
         cx.emit(out_handle);
+    }
+}
+
+impl Lower<GpuBackend> for Canny<GpuBackend> {
+    fn lower(&self, cx: &mut GpuBuilder) {
+        let wu = cx.wu().clone();
+        let scale = if let WorkUnit::Region(r) = &wu {
+            r.lod.scale_factor() as f32
+        } else {
+            1.0
+        };
+        let sigma = self.sigma.unwrap_or(1.4) as f32 / scale;
+        cx.kernel("ops.filters", "canny_kernel");
+        cx.param("sigma", sigma);
+        cx.param("radius", gauss_radius(sigma));
+        cx.output(self.output_spec().output(cx.wu()));
     }
 }
 

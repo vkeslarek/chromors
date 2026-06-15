@@ -57,7 +57,11 @@ fn convert_srgb_to_p3_matches_reference() {
 
     let rms = common::rms_u8(&gpu_u8, &reference);
     println!("srgb->p3 convert RMS = {}", rms);
-    assert!(rms < 2.0, "GPU Convert diverged from CPU reference: {}", rms);
+    assert!(
+        rms < 2.0,
+        "GPU Convert diverged from CPU reference: {}",
+        rms
+    );
 }
 
 /// `Convert`'s vips `Lower` (§6.1.4) for a destination color space with no
@@ -126,7 +130,10 @@ fn ergonomic_convert_wrappers_mutate_one_axis() {
 
     let lin = gpu_img.linearize();
     assert!(lin.spec.layout.color_space.is_linear());
-    assert_eq!(lin.spec.layout.color_space.primaries(), base.color_space.primaries());
+    assert_eq!(
+        lin.spec.layout.color_space.primaries(),
+        base.color_space.primaries()
+    );
     assert_eq!(lin.spec.layout.storage, base.storage);
     assert_eq!(lin.spec.layout.model, base.model);
 

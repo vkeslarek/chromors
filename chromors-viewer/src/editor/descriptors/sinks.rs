@@ -1,4 +1,6 @@
-use crate::editor::registry::{Registry, NodeDescriptor, NodeKindId, Category, SocketSpec, BuildError};
+use crate::editor::registry::{
+    BuildError, Category, NodeDescriptor, NodeKindId, Registry, SocketSpec,
+};
 use crate::editor::types::{DataType, PortValue};
 
 pub fn register(r: &mut Registry) {
@@ -6,7 +8,10 @@ pub fn register(r: &mut Registry) {
         id: NodeKindId("sink.viewer"),
         title: "Viewer",
         category: Category::Sink,
-        inputs: vec![SocketSpec { name: "image", ty: DataType::Image }],
+        inputs: vec![SocketSpec {
+            name: "image",
+            ty: DataType::Image,
+        }],
         outputs: vec![], // A sink produces nothing for the graph
         params: vec![],
         build: |inputs, _p, _ctx| {

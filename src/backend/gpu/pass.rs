@@ -70,7 +70,9 @@ const WORK_BYTES_CAP: u64 = 1 << 30; // 1 GiB
 /// Worst-case VRAM for an `n_steps` fused pass over `region_px` pixels
 /// (one `float4` temp per step).
 fn pass_work_bytes(n_steps: usize, region_px: u64) -> u64 {
-    (n_steps as u64).saturating_mul(region_px).saturating_mul(16)
+    (n_steps as u64)
+        .saturating_mul(region_px)
+        .saturating_mul(16)
 }
 
 /// Pixel count of a work unit's region (0 for non-region shapes).
@@ -309,7 +311,12 @@ fn is_resampling_op(node: &Arc<Node<GpuBackend>>) -> bool {
     }
     // Only image ops carry `Region` work units; probing demand_erased with a
     // Region on a non-image op would mismatch its work-unit shape.
-    if node.output_kind().as_any().downcast_ref::<ImageKind>().is_none() {
+    if node
+        .output_kind()
+        .as_any()
+        .downcast_ref::<ImageKind>()
+        .is_none()
+    {
         return false;
     }
     const P: i32 = 64;
@@ -547,50 +554,51 @@ fn gpu_materialize_region(
     // depend on each other) → maximum parallelism.
     use rayon::prelude::*;
 
-    let cut_results: Vec<Result<(NodeId, Arc<Node<GpuBackend>>), Error>> = cuts
-        .par_iter()
-        .map(|cut_node| {
-            let cut_id = NodeId::of(cut_node);
+    let cut_results: Vec<Result<(NodeId, Arc<Node<GpuBackend>>), Error>> =
+        cuts.par_iter()
+            .map(|cut_node| {
+                let cut_id = NodeId::of(cut_node);
 
-            let cut_wu = walk.demands.get(&cut_id).cloned().ok_or_else(|| {
-                Error::Backend("staging cut node has no demand entry".into())
-            })?;
+                let cut_wu =
+                    walk.demands.get(&cut_id).cloned().ok_or_else(|| {
+                        Error::Backend("staging cut node has no demand entry".into())
+                    })?;
 
-            // Recursive: if the subgraph still exceeds limits, it'll cut again.
-            let buf = gpu_materialize(ctx, cut_node, &cut_wu)?;
+                // Recursive: if the subgraph still exceeds limits, it'll cut again.
+                let buf = gpu_materialize(ctx, cut_node, &cut_wu)?;
 
-            // Wrap the result as a StagingSource leaf. The materialized buffer
-            // holds exactly the demanded slab, so the source's spec carries the
-            // *region* dimensions (tight extent), not the full image size.
-            let img_kind = buf
-                .spec
-                .as_any()
-                .downcast_ref::<crate::data::image::ImageKind>()
-                .ok_or_else(|| {
-                    Error::Backend(format!(
-                        "staging cut produces {:?}, only ImageKind supported",
-                        buf.spec
-                    ))
-                })?;
+                // Wrap the result as a StagingSource leaf. The materialized buffer
+                // holds exactly the demanded slab, so the source's spec carries the
+                // *region* dimensions (tight extent), not the full image size.
+                let img_kind = buf
+                    .spec
+                    .as_any()
+                    .downcast_ref::<crate::data::image::ImageKind>()
+                    .ok_or_else(|| {
+                        Error::Backend(format!(
+                            "staging cut produces {:?}, only ImageKind supported",
+                            buf.spec
+                        ))
+                    })?;
 
-            let mut region_kind = img_kind.clone();
-            if let WorkUnit::Region(r) = &cut_wu {
-                region_kind.width = r.w;
-                region_kind.height = r.h;
-            }
+                let mut region_kind = img_kind.clone();
+                if let WorkUnit::Region(r) = &cut_wu {
+                    region_kind.width = r.w;
+                    region_kind.height = r.h;
+                }
 
-            let source = Arc::new(StagingSource {
-                spec: Arc::new(region_kind),
-                buffer: buf.payload,
-            });
+                let source = Arc::new(StagingSource {
+                    spec: Arc::new(region_kind),
+                    buffer: buf.payload,
+                });
 
-            let source_node: Arc<Node<GpuBackend>> = Arc::new(Node::from_source(
-                source as Arc<dyn crate::io::AnySource<GpuBackend>>,
-            ));
+                let source_node: Arc<Node<GpuBackend>> = Arc::new(Node::from_source(
+                    source as Arc<dyn crate::io::AnySource<GpuBackend>>,
+                ));
 
-            Ok((cut_id, source_node))
-        })
-        .collect();
+                Ok((cut_id, source_node))
+            })
+            .collect();
 
     // Collect and build the replacement map.
     let mut replacements: HashMap<NodeId, Arc<Node<GpuBackend>>> = HashMap::new();

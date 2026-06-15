@@ -23,8 +23,8 @@ pub use layer::{ImageLayer, LayerTransform};
 pub use overlay::OverlayVertex;
 pub use rect::Rect;
 pub use renderer::{ViewportBounds, ViewportRenderer};
-pub use vector::{BezierGraphic, VectorGraphics};
-pub use vello_overlay::VelloOverlay;
 pub use source::{
     ImageViewportSource, MippedViewportSource, VectorGraphicsViewportSource, ViewportLayerSource,
 };
+pub use vector::{BezierGraphic, VectorGraphics};
+pub use vello_overlay::VelloOverlay;
