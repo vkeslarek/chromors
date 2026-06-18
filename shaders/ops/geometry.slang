@@ -118,10 +118,11 @@ public void rotate_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float
     output.write(idx, res);
 }
 
-public void shrink_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint h_factor, uint v_factor)
+// out_x, out_y: global output-tile origin so tile-local idx maps to correct source.
+public void shrink_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int out_x, int out_y, uint h_factor, uint v_factor)
 {
-    uint sx0 = idx.x * h_factor;
-    uint sy0 = idx.y * v_factor;
+    uint sx0 = (out_x + int(idx.x)) * h_factor;
+    uint sy0 = (out_y + int(idx.y)) * v_factor;
 
     float4 sum = float4(0.0, 0.0, 0.0, 0.0);
     uint count = 0u;

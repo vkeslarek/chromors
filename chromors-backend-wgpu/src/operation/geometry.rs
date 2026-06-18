@@ -431,8 +431,14 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
 
 impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Shrink<crate::GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
+        let (out_x, out_y) = match cx.wu() {
+            chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::view::ParamBlock::new()
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("h_factor", self.horizontal.ceil() as u32)
                 .param("v_factor", self.vertical.ceil() as u32),
         );
@@ -443,8 +449,14 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
 
 impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ShrinkHorizontal<crate::GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
+        let (out_x, out_y) = match cx.wu() {
+            chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::view::ParamBlock::new()
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("h_factor", self.shrink as u32)
                 .param("v_factor", 1u32),
         );
@@ -455,8 +467,14 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
 
 impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ShrinkVertical<crate::GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {
+        let (out_x, out_y) = match cx.wu() {
+            chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::view::ParamBlock::new()
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("h_factor", 1u32)
                 .param("v_factor", self.shrink as u32),
         );
