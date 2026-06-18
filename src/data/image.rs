@@ -615,6 +615,79 @@ impl Image2D<GpuBackend> {
     }
 }
 
+// ── RAM-backed Source (safe image-from-bytes) ────────────────────────────────
+
+/// A Vips source backed by owned bytes in RAM. The data is copied into a
+/// Vips-owned blob on `fetch`, so callers never touch FFI.
+pub struct RamImageSource {
+    pub spec: Arc<ImageKind>,
+    /// Raw pixel bytes, tightly packed HWC (height × width × channels).
+    pub data: Vec<u8>,
+}
+
+impl Source<VipsBackend> for RamImageSource {
+    type Kind = ImageKind;
+
+    fn spec(&self) -> Arc<ImageKind> {
+        self.spec.clone()
+    }
+
+    fn fetch(
+        &self,
+        _ctx: &<VipsBackend as Backend>::Ctx,
+        _wu: &Region,
+    ) -> Result<Buffer<VipsBackend>, crate::error::Error> {
+        let vips_format = self.spec.layout.storage.into_vips_band_format();
+        let bands = self.spec.layout.channel_count() as i32;
+        let ptr = unsafe {
+            crate::ffi::vips_image_new_from_memory_copy(
+                self.data.as_ptr() as *const std::ffi::c_void,
+                self.data.len(),
+                self.spec.width,
+                self.spec.height,
+                bands,
+                vips_format,
+            )
+        };
+        if ptr.is_null() {
+            return Err(crate::error::Error::Vips(crate::backend::vips::vips_error()));
+        }
+        Ok(Buffer {
+            payload: Arc::new(crate::backend::vips::VipsHandle { ptr }),
+            spec: self.spec.clone(),
+        })
+    }
+
+    fn lower(&self, cx: &mut VipsBuilder) {
+        let region = Region::full((self.spec.width, self.spec.height), crate::work_unit::Lod(0));
+        let buf = self.fetch(&(), &region).unwrap();
+        cx.emit((*buf.payload).clone());
+    }
+
+    fn dyn_hash(&self, state: &mut dyn Hasher) {
+        state.write_usize(self.data.len());
+        // Hash a sample of the data for identity (full hash would be expensive)
+        if self.data.len() >= 16 {
+            state.write(&self.data[..16]);
+        }
+    }
+}
+
+impl Image2D<VipsBackend> {
+    /// Creates an image from owned pixel bytes in RAM.
+    ///
+    /// `data` must be tightly packed HWC (height × width × channels) matching
+    /// the given `layout`, `width`, and `height`.
+    pub fn from_bytes(data: Vec<u8>, width: i32, height: i32, layout: PixelLayout) -> Self {
+        let spec = Arc::new(ImageKind::new(layout, width, height));
+        let src = RamImageSource {
+            spec: spec.clone(),
+            data,
+        };
+        crate::node::Data::from_source(Arc::new(src), Arc::new(()))
+    }
+}
+
 // ── Targets ───────────────────────────────────────────────────────────────────
 use crate::io::Target;
 

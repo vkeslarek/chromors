@@ -94,6 +94,12 @@ pub struct VipsHandle {
     pub(crate) ptr: *mut ffi::VipsImage,
 }
 
+impl VipsHandle {
+    pub fn ptr(&self) -> *mut ffi::VipsImage {
+        self.ptr
+    }
+}
+
 unsafe impl Send for VipsHandle {}
 unsafe impl Sync for VipsHandle {}
 

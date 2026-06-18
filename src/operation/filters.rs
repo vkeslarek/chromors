@@ -493,3 +493,50 @@ where
         })
     }
 }
+
+impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
+where
+    Blur<B>: crate::operation::Lower<B>,
+    crate::operation::arithmetic::Multiply<B>: crate::operation::Lower<B>,
+    crate::operation::arithmetic::Subtract<B>: crate::operation::Lower<B>,
+    crate::operation::arithmetic::Add<B>: crate::operation::Lower<B>,
+    crate::operation::arithmetic::Divide<B>: crate::operation::Lower<B>,
+    crate::operation::arithmetic::Linear<B>: crate::operation::Lower<B>,
+{
+    pub fn guided_filter(&self, p: &crate::data::image::Image2D<B>, radius: f32, eps: f64) -> Self {
+        // Guidance image: self (I)
+        // Filtering input image: p
+        
+        let mean_i = self.blur(radius);
+        let mean_p = p.blur(radius);
+
+        let ii = self.multiply(self);
+        let mean_ii = ii.blur(radius);
+
+        let ip = self.multiply(p);
+        let mean_ip = ip.blur(radius);
+
+        let mean_i_mean_i = mean_i.multiply(&mean_i);
+        let var_i = mean_ii.subtract(&mean_i_mean_i);
+
+        let mean_i_mean_p = mean_i.multiply(&mean_p);
+        let cov_ip = mean_ip.subtract(&mean_i_mean_p);
+
+        // var_i + eps
+        let var_i_eps = var_i.linear(vec![1.0], vec![eps]);
+
+        // a = cov_ip / (var_i + eps)
+        let a = cov_ip.divide(&var_i_eps);
+        
+        // b = mean_p - a * mean_i
+        let a_mean_i = a.multiply(&mean_i);
+        let b = mean_p.subtract(&a_mean_i);
+
+        let mean_a = a.blur(radius);
+        let mean_b = b.blur(radius);
+
+        // q = mean_a * I + mean_b
+        let mean_a_i = mean_a.multiply(self);
+        mean_a_i.add(&mean_b)
+    }
+}

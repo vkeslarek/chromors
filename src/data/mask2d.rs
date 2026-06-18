@@ -292,3 +292,59 @@ impl<B: crate::backend::Backend> Mask2D<B> {
         self.spec.height
     }
 }
+
+// ── Targets ──────────────────────────────────────────────────────────────────
+
+use crate::io::Target;
+use crate::backend::Backend;
+
+/// Extracts the mask's raw `f32` weight grid into host RAM.
+///
+/// This is the sanctioned exit for mask data — analogous to `RamImageTarget`
+/// for images.
+pub struct RamMaskTarget;
+
+impl Target<Mask2DKind, VipsBackend> for RamMaskTarget {
+    type Out = Vec<f32>;
+
+    fn extract(
+        &self,
+        buf: &Buffer<VipsBackend>,
+        _wu: &Region,
+        _ctx: &<VipsBackend as Backend>::Ctx,
+    ) -> Result<Self::Out, Error> {
+        let mut size: usize = 0;
+        let ptr = unsafe {
+            crate::ffi::vips_image_write_to_memory(buf.payload.ptr(), &mut size as *mut usize)
+        };
+        if ptr.is_null() {
+            return Err(Error::Vips(crate::backend::vips::vips_error()));
+        }
+        // Vips mask images are VIPS_FORMAT_DOUBLE (f64)
+        let count = size / 8;
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const f64, count) };
+        let values: Vec<f32> = slice.iter().map(|&v| v as f32).collect();
+        unsafe { crate::ffi::g_free(ptr as *mut std::ffi::c_void) };
+        Ok(values)
+    }
+}
+
+impl Target<Mask2DKind, GpuBackend> for RamMaskTarget {
+    type Out = Vec<f32>;
+
+    fn extract(
+        &self,
+        buf: &Buffer<GpuBackend>,
+        _wu: &Region,
+        ctx: &<GpuBackend as Backend>::Ctx,
+    ) -> Result<Self::Out, Error> {
+        let bytes = buf.payload.read_to_cpu(ctx)?;
+        // GPU masks are f32
+        let count = bytes.len() / 4;
+        let values: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect();
+        Ok(values)
+    }
+}

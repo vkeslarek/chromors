@@ -1,0 +1,26 @@
+[package]
+name = "chromors-ai"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# Segmentation / Matting
+sam2 = []
+sam3 = []
+cascadepsp = []
+modnet = []
+vitmatte = []
+# Super Resolution / Restoration
+realesrgan = []
+swinir = []
+# Depth Estimation
+depth_anything = []
+# Inpainting
+lama = []
+
+[dependencies]
+ort = { version = "2.0.0-rc.12", features = ["cuda", "coreml"] }
+ndarray = "0.17.2"
+tracing = "0.1.44"
+poc = { path = "../" }

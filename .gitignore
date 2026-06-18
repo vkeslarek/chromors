@@ -8,3 +8,5 @@
 *.ARW
 *.RW2
 *.tif
+models/
+chromors-ai/models/

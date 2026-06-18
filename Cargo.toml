@@ -3,6 +3,9 @@ name = "poc"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+
 [dependencies]
 bytemuck = "1.25.0"
 lru = "0.18.0"
@@ -17,6 +20,7 @@ serde = { version = "1.0", features = ["derive"] }
 wide = "0.7.28"
 rayon = "1.12.0"
 ctor = "0.2"
+ndarray = "0.17.2"
 
 [build-dependencies]
 bindgen = "0.71"
@@ -25,4 +29,4 @@ pkg-config = "0.3"
 
 [workspace]
 resolver = "2"
-members = ["chromors-viewport", "chromors-viewer"]
+members = ["chromors-viewport", "chromors-viewer", "chromors-ai"]

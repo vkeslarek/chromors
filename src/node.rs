@@ -103,7 +103,7 @@ impl<K: Kind, B: Backend> Data<K, B> {
     /// "data stays on the backend" invariant. The only public exits run a
     /// `Target` — including the resident viewport exit, which is itself a
     /// `Target<Out = Buffer<B>>` that never downloads.
-    pub(crate) fn materialize(&self, wu: K::WorkUnit) -> Result<Buffer<B>, Error> {
+    pub fn materialize(&self, wu: K::WorkUnit) -> Result<Buffer<B>, Error> {
         use crate::work_unit::WorkUnitFor;
         B::materialize(&self.ctx, &self.root, &wu.erase())
     }
