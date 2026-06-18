@@ -1,4 +1,5 @@
 use super::*;
+use chromors::data::histogram::GpuImageExt;
 
 #[test]
 fn histogram_extracts_channel() {
@@ -9,11 +10,11 @@ fn histogram_extracts_channel() {
     let (w, h) = (gpu_img.width(), gpu_img.height());
     let hist = gpu_img.histogram(256, 0);
 
-    use poc::data::histogram::RawTarget;
-    use poc::io::Target;
-    use poc::work_unit::Atomic;
+    use chromors::data::histogram::RawTarget;
+    use chromors::io::Target;
+    use chromors::work_unit::Atomic;
 
-    let bytes = hist.pull(&RawTarget, Atomic).unwrap();
+    let bytes: Vec<u8> = hist.pull(&RawTarget, Atomic).unwrap();
     let counts: &[u32] = bytemuck::cast_slice(&bytes);
     let total: u64 = counts.iter().take(256).map(|&c| c as u64).sum();
 
@@ -34,10 +35,11 @@ fn histogram_capability_matches_gpu() {
     let (w, h) = (vips_img.width(), vips_img.height());
 
     // Vips: hist_find on a single band -> 256x1 uint image, sum of all bins.
-    use poc::io::Target;
-    use poc::work_unit::{Lod, Region};
+    use chromors::data::histogram::GpuImageExt;
+    use chromors::io::Target;
+    use chromors::work_unit::{Lod, Region};
     let vips_hist = vips_img.histogram_find(Some(0));
-    let target = poc::data::image::RamImageTarget;
+    let target = chromors::data::image::RamImageTarget;
     let raw = vips_hist
         .pull(
             &target,
@@ -60,9 +62,9 @@ fn histogram_capability_matches_gpu() {
 
     // GPU: histogram over channel 0, 256 bins.
     let gpu_hist = gpu_img.histogram(256, 0);
-    use poc::data::histogram::RawTarget;
-    use poc::work_unit::Atomic;
-    let gpu_bytes = gpu_hist.pull(&RawTarget, Atomic).unwrap();
+    use chromors::data::histogram::RawTarget;
+    use chromors::work_unit::Atomic;
+    let gpu_bytes: Vec<u8> = gpu_hist.pull(&RawTarget, Atomic).unwrap();
     let gpu_counts: &[u32] = bytemuck::cast_slice(&gpu_bytes);
     let gpu_total: u64 = gpu_counts.iter().take(256).map(|&c| c as u64).sum();
 
@@ -90,13 +92,13 @@ fn histogram_gpu_capability_counts_pixels() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
     let (w, h) = (gpu_img.width(), gpu_img.height());
 
-    use poc::data::histogram::RawTarget;
-    use poc::io::Target;
-    use poc::work_unit::Atomic;
+    use chromors::data::histogram::RawTarget;
+    use chromors::io::Target;
+    use chromors::work_unit::Atomic;
 
     for channel in [0u32, 1, 2] {
         let hist = gpu_img.histogram(256, channel);
-        let bytes = hist.pull(&RawTarget, Atomic).unwrap();
+        let bytes: Vec<u8> = hist.pull(&RawTarget, Atomic).unwrap();
         let counts: &[u32] = bytemuck::cast_slice(&bytes);
         let total: u64 = counts.iter().take(256).map(|&c| c as u64).sum();
         println!(
@@ -127,9 +129,9 @@ fn histogram_find_matches_vips_gray() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
     let (w, h) = (vips_img.width(), vips_img.height());
 
-    use poc::data::image::RamImageTarget;
-    use poc::io::Target;
-    use poc::work_unit::{Lod, Region};
+    use chromors::data::image::RamImageTarget;
+    use chromors::io::Target;
+    use chromors::work_unit::{Lod, Region};
 
     let vips_hist = vips_img.histogram_find(Some(0));
     let vips_bytes = vips_hist
@@ -222,16 +224,16 @@ fn histogram_cumulative_normalize_plot_gpu_smoke() {
     let vips_img = common::gray();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    use poc::data::image::RamImageTarget;
-    use poc::io::Target;
-    use poc::work_unit::{Lod, Region};
+    use chromors::data::image::RamImageTarget;
+    use chromors::io::Target;
+    use chromors::work_unit::{Lod, Region};
 
     let hist = gpu_img.histogram_find(Some(0));
 
     let cum = hist.histogram_cumulative();
     assert_eq!(cum.width(), 256);
     assert_eq!(cum.height(), 1);
-    let cum_bytes = cum
+    let cum_bytes: Vec<u8> = cum
         .pull(
             &RamImageTarget,
             Region {
@@ -256,7 +258,7 @@ fn histogram_cumulative_normalize_plot_gpu_smoke() {
     let norm = hist.histogram_normalize();
     assert_eq!(norm.width(), 256);
     assert_eq!(norm.height(), 1);
-    let norm_bytes = norm
+    let norm_bytes: Vec<u8> = norm
         .pull(
             &RamImageTarget,
             Region {
@@ -278,7 +280,7 @@ fn histogram_cumulative_normalize_plot_gpu_smoke() {
     let plot = hist.histogram_plot();
     assert_eq!(plot.width(), 256);
     assert_eq!(plot.height(), 256);
-    let plot_bytes = plot
+    let plot_bytes: Vec<u8> = plot
         .pull(
             &RamImageTarget,
             Region {

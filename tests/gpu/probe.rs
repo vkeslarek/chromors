@@ -1,10 +1,11 @@
 use crate::common;
 
-use poc::backend::gpu::GpuBackend;
-use poc::data::histogram::RawTarget;
-use poc::data::image::{Image2D as GenImage, ImageKind as GenImageKind, RamImageTarget};
-use poc::io::Target;
-use poc::work_unit::{Atomic, Lod, Region};
+use chromors::backend::gpu::GpuBackend;
+use chromors::data::histogram::RawTarget;
+use chromors::data::image::{Image2D as GenImage, ImageKind as GenImageKind, RamImageTarget};
+use chromors::io::Target;
+use chromors::work_unit::{Atomic, Lod, Region};
+use chromors::{CacheExt, GpuImageExt, GpuLutExt, GpuMask2DExt, StageExt};
 
 #[test]
 fn extract_band_single_alias_runs() {
@@ -92,7 +93,7 @@ fn bandjoin_of_extracts_runs() {
     let b = gpu_img.extract_band(2, None);
     let a = gpu_img.extract_band(3, None);
 
-    let joined: GenImage<GpuBackend> = r.push(poc::operation::bands::Bandjoin {
+    let joined: GenImage<GpuBackend> = r.push(chromors::operation::bands::Bandjoin {
         images: vec![r.as_input(), g.as_input(), b.as_input(), a.as_input()],
     });
     println!("bandjoin4(extracts) output_spec = {:?}", joined.spec);
@@ -128,7 +129,7 @@ fn bandbool_and_bandmean_run() {
     println!("bandmean(4) -> {} bytes, spec = {:?}", bytes.len(), bm.spec);
     assert!(!bytes.is_empty());
 
-    let bb = gpu_img.bandbool(poc::operation::OperationBoolean::And, 4);
+    let bb = gpu_img.bandbool(chromors::operation::OperationBoolean::And, 4);
     let rect = Region {
         x: 0,
         y: 0,
@@ -157,7 +158,7 @@ fn bandjoin_reconstruction_close_to_original() {
     let b = gpu_img.extract_band(2, None);
     let a = gpu_img.extract_band(3, None);
 
-    let joined: GenImage<GpuBackend> = r.push(poc::operation::bands::Bandjoin {
+    let joined: GenImage<GpuBackend> = r.push(chromors::operation::bands::Bandjoin {
         images: vec![r.as_input(), g.as_input(), b.as_input(), a.as_input()],
     });
 
@@ -269,7 +270,7 @@ fn newly_imported_kernel_modules_compile_and_run() {
     assert!(!bytes.is_empty());
 
     // geometry ops (RemapView testing)
-    let flip_img = gpu_img.flip(poc::operation::geometry::Direction::Horizontal);
+    let flip_img = gpu_img.flip(chromors::operation::geometry::Direction::Horizontal);
     let rect = Region {
         x: 0,
         y: 0,
@@ -281,7 +282,7 @@ fn newly_imported_kernel_modules_compile_and_run() {
     println!("flip -> {} bytes", bytes.len());
     assert!(!bytes.is_empty());
 
-    let rot_img = gpu_img.rot90(poc::operation::geometry::Angle::D90);
+    let rot_img = gpu_img.rot90(chromors::operation::geometry::Angle::D90);
     let rect = Region {
         x: 0,
         y: 0,
@@ -343,8 +344,8 @@ fn data_driven_kernels_compile_and_run() {
             [v, v, v, 1.0]
         })
         .collect();
-    let lut = <poc::data::lut::Lut<GpuBackend>>::from_values(ctx.clone(), 256, 4, &lut_data);
-    let matrix = <poc::data::mask2d::Mask2D<GpuBackend>>::identity(ctx.clone(), 3);
+    let lut = <chromors::data::lut::Lut<GpuBackend>>::from_values(ctx.clone(), 256, 4, &lut_data);
+    let matrix = <chromors::data::mask2d::Mask2D<GpuBackend>>::identity(ctx.clone(), 3);
     let cond = gpu_img.crop(0, 0, 10, 10);
     let bg = gpu_img.crop(0, 0, 10, 10);
     let t = gpu_img.crop(0, 0, 10, 10);
@@ -412,13 +413,13 @@ fn geometry_extended_kernels_compile_and_run() {
 
     let embed = gpu_img.embed(10, 10, 200, 200, None, None);
     let gravity = gpu_img.gravity(
-        poc::operation::CompassDirection::Centre,
+        chromors::operation::CompassDirection::Centre,
         200,
         200,
         None,
         None,
     );
-    let rot45 = gpu_img.rot45(poc::operation::Angle45::D45);
+    let rot45 = gpu_img.rot45(chromors::operation::Angle45::D45);
     let rotate = gpu_img.rotate(45.0, None, None, None, None, None);
     let thumbnail = gpu_img.thumbnail(
         100, None, None, None, None, None, None, None, None, None, None,
@@ -494,8 +495,8 @@ fn equalize_lut_kernel_produces_monotonic_cdf() {
     let lut = hist.equalize_lut();
     let bytes = lut
         .pull(
-            &poc::data::lut::RawLutTarget,
-            poc::work_unit::Range {
+            &chromors::data::lut::RawLutTarget,
+            chromors::work_unit::Range {
                 start: 0,
                 end: bins as i32,
             },
@@ -572,14 +573,14 @@ fn edge_detection_kernels_compile_and_run() {
     let scharr = gpu_img.scharr();
 
     for img in [sobel.clone(), prewitt.clone(), scharr.clone()] {
-        let rect = poc::work_unit::Region {
+        let rect = chromors::work_unit::Region {
             x: 0,
             y: 0,
             w: 10,
             h: 10,
-            lod: poc::work_unit::Lod(0),
+            lod: chromors::work_unit::Lod(0),
         };
-        let bytes: Vec<u8> = img.pull(&poc::data::image::RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img.pull(&chromors::data::image::RamImageTarget, rect).unwrap();
         assert!(!bytes.is_empty());
     }
 }
@@ -591,15 +592,15 @@ fn edge_detection_kernels_compile_and_run() {
 /// without needing a video module.
 #[derive(Clone, Debug, PartialEq)]
 struct TaggedImageKind {
-    image: poc::data::image::ImageKind,
+    image: chromors::data::image::ImageKind,
     tag: u32,
 }
 
-impl poc::kind::AnyKind for TaggedImageKind {
+impl chromors::kind::AnyKind for TaggedImageKind {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    fn byte_size(&self, wu: &poc::work_unit::WorkUnit) -> u64 {
+    fn byte_size(&self, wu: &chromors::work_unit::WorkUnit) -> u64 {
         self.image.byte_size(wu)
     }
     fn dyn_hash(&self, state: &mut dyn std::hash::Hasher) {
@@ -608,21 +609,21 @@ impl poc::kind::AnyKind for TaggedImageKind {
     }
 }
 
-impl poc::kind::Kind for TaggedImageKind {
+impl chromors::kind::Kind for TaggedImageKind {
     type WorkUnit = Region;
 }
 
-impl poc::backend::gpu::GpuView for TaggedImageKind {
-    fn input(&self) -> poc::backend::gpu::View {
+impl chromors::backend::gpu::GpuView for TaggedImageKind {
+    fn input(&self) -> chromors::backend::gpu::View {
         self.image.input()
     }
-    fn output(&self, wu: &poc::work_unit::WorkUnit) -> poc::backend::gpu::OutputWrap {
+    fn output(&self, wu: &chromors::work_unit::WorkUnit) -> chromors::backend::gpu::OutputWrap {
         self.image.output(wu)
     }
 }
 
-impl poc::kind::ReinterpretAs<poc::data::image::ImageKind> for TaggedImageKind {
-    fn reinterpret_spec(&self) -> poc::data::image::ImageKind {
+impl chromors::kind::ReinterpretAs<chromors::data::image::ImageKind> for TaggedImageKind {
+    fn reinterpret_spec(&self) -> chromors::data::image::ImageKind {
         self.image.clone()
     }
 }
@@ -649,7 +650,7 @@ fn reinterpret_cast_is_transparent_to_compute() {
         .unwrap();
 
     // Cast → invert → cast back → cast to image again, same byte rect.
-    let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
+    let tagged: chromors::node::Data<TaggedImageKind, GpuBackend> =
         gpu_img.reinterpret_with(TaggedImageKind {
             image: (*gpu_img.spec).clone(),
             tag: 42,
@@ -697,7 +698,7 @@ fn reinterpret_root_cast_pulls() {
     let vips_img = common::rgba();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let tagged: poc::node::Data<TaggedImageKind, GpuBackend> =
+    let tagged: chromors::node::Data<TaggedImageKind, GpuBackend> =
         gpu_img.reinterpret_with(TaggedImageKind {
             image: (*gpu_img.spec).clone(),
             tag: 1,

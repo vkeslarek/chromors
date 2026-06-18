@@ -1,5 +1,5 @@
 [package]
-name = "poc"
+name = "chromors"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,6 +7,9 @@ edition = "2024"
 default = []
 
 [dependencies]
+chromors-core = { path = "chromors-core" }
+chromors-backend-wgpu = { path = "chromors-backend-wgpu" }
+chromors-backend-vips = { path = "chromors-backend-vips" }
 bytemuck = "1.25.0"
 lru = "0.18.0"
 pollster = "0.4.0"
@@ -22,6 +25,9 @@ rayon = "1.12.0"
 ctor = "0.2"
 ndarray = "0.17.2"
 
+[dev-dependencies]
+chromors = { path = "." }
+
 [build-dependencies]
 bindgen = "0.71"
 cc = "1"
@@ -29,4 +35,13 @@ pkg-config = "0.3"
 
 [workspace]
 resolver = "2"
-members = ["chromors-viewport", "chromors-viewer", "chromors-ai"]
+members = [
+    "chromors-core",
+    "chromors-backend-wgpu",
+    "chromors-backend-vips",
+    "chromors-backend-raw",
+    "chromors-backend-vello",
+    "chromors-viewport",
+    "chromors-viewer",
+    "chromors-ai"
+]

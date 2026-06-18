@@ -1,10 +1,10 @@
 use crate::atlas::TILE;
 use crate::rect::Rect;
-use poc::backend::gpu::{GpuBackend, GpuBuffer};
-use poc::color::model::ColorModel;
-use poc::data::image::{GpuBufferTarget, Image2D as GenImage};
-use poc::pixel::{AlphaState, PixelLayout, Storage};
-use poc::work_unit::{Lod, Region};
+use chromors::backend::gpu::{GpuBackend, GpuBuffer};
+use chromors::color::model::ColorModel;
+use chromors::data::image::{GpuBufferTarget, Image2D as GenImage};
+use chromors::pixel::{AlphaState, PixelLayout, Storage};
+use chromors::work_unit::{Lod, Region};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

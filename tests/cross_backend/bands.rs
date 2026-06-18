@@ -51,7 +51,7 @@ fn bandjoin4_matches_vips() {
     let vg = vips_img.extract_band(1, None);
     let vb = vips_img.extract_band(2, None);
     let va = vips_img.extract_band(3, None);
-    let vips_res: GenImage<VipsBackend> = vr.push(poc::operation::bands::Bandjoin {
+    let vips_res: GenImage<VipsBackend> = vr.push(chromors::operation::bands::Bandjoin {
         images: vec![vr.as_input(), vg.as_input(), vb.as_input(), va.as_input()],
     });
 
@@ -60,7 +60,7 @@ fn bandjoin4_matches_vips() {
     let gg = gpu_img.extract_band(1, None);
     let gb = gpu_img.extract_band(2, None);
     let ga = gpu_img.extract_band(3, None);
-    let gpu_res: GenImage<GpuBackend> = gr.push(poc::operation::bands::Bandjoin {
+    let gpu_res: GenImage<GpuBackend> = gr.push(chromors::operation::bands::Bandjoin {
         images: vec![gr.as_input(), gg.as_input(), gb.as_input(), ga.as_input()],
     });
 
@@ -82,13 +82,13 @@ fn bandjoin2_matches_vips() {
 
     let vr = vips_img.extract_band(0, None);
     let vg = vips_img.extract_band(1, None);
-    let vips_res: GenImage<VipsBackend> = vr.push(poc::operation::bands::Bandjoin {
+    let vips_res: GenImage<VipsBackend> = vr.push(chromors::operation::bands::Bandjoin {
         images: vec![vr.as_input(), vg.as_input()],
     });
 
     let gr = gpu_img.extract_band(0, None);
     let gg = gpu_img.extract_band(1, None);
-    let gpu_res: GenImage<GpuBackend> = gr.push(poc::operation::bands::Bandjoin {
+    let gpu_res: GenImage<GpuBackend> = gr.push(chromors::operation::bands::Bandjoin {
         images: vec![gr.as_input(), gg.as_input()],
     });
 

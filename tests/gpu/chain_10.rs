@@ -7,9 +7,9 @@
 
 use crate::common;
 
-use poc::data::image::RamImageTarget;
-use poc::io::Target;
-use poc::work_unit::{Lod, Region};
+use chromors::data::image::RamImageTarget;
+use chromors::io::Target;
+use chromors::work_unit::{Lod, Region};
 
 /// Chain 10 GPU ops: invert → exposure → gamma → abs → sign → invert →
 /// exposure → gamma → abs → invert. Exercises the full DAG → BFS → cuts →
@@ -55,7 +55,7 @@ fn chain_10_ops_materializes() {
 /// sources in the chain to verify the DAG structure is correct.
 #[test]
 fn chain_10_ops_dag_has_correct_shape() {
-    use poc::backend::gpu::pass::{binding_count, exceeds_binding_limit};
+    use chromors::backend::gpu::pass::{binding_count, exceeds_binding_limit};
 
     // A chain of 10 ops from 1 source needs:
     // 2 (target+params) + 10 (work temps) + 1 (source) = 13 bindings.
@@ -75,7 +75,7 @@ fn chain_10_ops_dag_has_correct_shape() {
 /// that stresses the binding budget (10 sources + 10 ops + 2 = 22 bindings).
 #[test]
 fn chain_10_sources_binding_budget() {
-    use poc::backend::gpu::pass::binding_count;
+    use chromors::backend::gpu::pass::binding_count;
 
     // 10 sources + 10 ops = 22 bindings. Would need CutFinder on GPUs
     // with max_storage_buffers < 22.

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use poc::backend::gpu::GpuBackend;
-use poc::data::image::Image2D as GenImage;
+use chromors::backend::gpu::GpuBackend;
+use chromors::data::image::Image2D as GenImage;
 
 use crate::atlas::{PADDING_TILES, TILE, TileAtlas};
 use crate::camera::Camera;

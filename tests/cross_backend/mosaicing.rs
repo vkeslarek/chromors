@@ -1,5 +1,5 @@
 use super::*;
-use poc::operation::mosaicing::Merge;
+use chromors::operation::mosaicing::Merge;
 
 // GPU `merge` assumes both inputs are fully opaque rectangles: placement of
 // `ref`/`sec` on the output canvas and the non-overlap regions match vips

@@ -11,8 +11,8 @@
 //!   slot from outside (full external control, no in-viewport shrinking).
 //! - [`VectorGraphicsViewportSource`] — a Vello-drawn vector layer (stub).
 
-use poc::backend::gpu::GpuBackend;
-use poc::data::image::Image2D as GenImage;
+use chromors::backend::gpu::GpuBackend;
+use chromors::data::image::Image2D as GenImage;
 
 /// A source of GPU images for a viewport layer's mip slots.
 ///

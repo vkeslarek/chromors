@@ -12,7 +12,7 @@ use vello::kurbo::Point;
 use vello::{RenderParams, RendererOptions, Scene};
 
 use crate::gpu::GpuState;
-use poc::backend::gpu::GpuContext;
+use chromors::backend::gpu::GpuContext;
 
 use crate::editor::compile::{EvalCache, evaluate};
 use crate::editor::graph::{NodeGraph, PortAddr, Side};

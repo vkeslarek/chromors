@@ -51,12 +51,12 @@ impl ExportConfig {
     }
 }
 
-impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
-    /// Saves this image to a file with the given export configuration.
-    ///
-    /// Materializes the full image through the Vips pipeline, then writes
-    /// it using `vips_image_write_to_file` with the format-specific options.
-    pub fn save_with_config(
+pub trait ExportExt {
+    fn save_with_config(&self, filename: &str, config: &ExportConfig) -> Result<(), crate::error::Error>;
+}
+
+impl ExportExt for chromors_core::Image2D<chromors_backend_vips::VipsBackend> {
+    fn save_with_config(
         &self,
         filename: &str,
         config: &ExportConfig,
@@ -75,14 +75,14 @@ impl crate::data::image::Image2D<crate::backend::vips::VipsBackend> {
         let c = std::ffi::CString::new(full.as_str())
             .map_err(|_| Error::Vips("invalid filename".into()))?;
         if unsafe {
-            crate::ffi::vips_image_write_to_file(
+            chromors_backend_vips::ffi::vips_image_write_to_file(
                 mat.payload.ptr,
                 c.as_ptr(),
                 std::ptr::null::<std::ffi::c_void>(),
             )
         } != 0
         {
-            return Err(Error::Vips(crate::backend::vips::vips_error()));
+            return Err(Error::Vips(chromors_backend_vips::vips_error()));
         }
         Ok(())
     }

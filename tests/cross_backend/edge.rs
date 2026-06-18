@@ -93,8 +93,8 @@ fn sign_matches_vips() {
 
 #[test]
 fn invertlut_matches_vips() {
-    use poc::data::lut::{Lut, RawLutTarget};
-    use poc::work_unit::Range;
+    use chromors::data::lut::{Lut, RawLutTarget};
+    use chromors::work_unit::Range;
 
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();

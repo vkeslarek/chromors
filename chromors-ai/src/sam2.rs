@@ -1,20 +1,22 @@
 //! SAM2 — Segment Anything Model 2.
 //!
-//! Input: `Image2D` (any size, any layout) + point/box prompts
-//! Output: `Mask2D` (binary or soft segmentation mask)
+//! Input: `Image2D<B>` (any size, any layout) + point/box prompts
+//! Output: `Mask2D<B>` (binary or soft segmentation mask)
 
 use ndarray::{Array1, Array2, Array3, Array4, ArrayView2, ArrayView4};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::Tensor;
 
-use poc::backend::vips::VipsBackend;
-use poc::color::model::ColorModel;
-use poc::color::space::ColorSpace;
-use poc::data::image::{Image2D, RamImageTarget};
-use poc::data::mask2d::Mask2D;
-use poc::pixel::{AlphaState, PixelLayout, Storage};
-use poc::work_unit::{Lod, Region};
+use chromors::color::model::ColorModel;
+use chromors::color::space::ColorSpace;
+use chromors::data::image::{Image2D, RamImageTarget};
+use chromors::data::mask2d::Mask2D;
+use chromors::pixel::{AlphaState, PixelLayout, Storage};
+use chromors::work_unit::{Lod, Region};
+use chromors::io::Target;
+
+use crate::prelude::AiBackend;
 
 const RGB_U8_LAYOUT: PixelLayout = PixelLayout {
     storage: Storage::U8,
@@ -28,46 +30,28 @@ const IMAGENET_STD: [f32; 3] = [0.229, 0.224, 0.225];
 
 /// SAM2 point label constants.
 pub mod label {
-    /// Positive click — include this point in the mask.
     pub const FOREGROUND: i32 = 1;
-    /// Negative click — exclude this point from the mask.
     pub const BACKGROUND: i32 = 0;
-    /// Top-left corner of a bounding box prompt.
     pub const BOX_TOP_LEFT: i32 = 2;
-    /// Bottom-right corner of a bounding box prompt.
     pub const BOX_BOTTOM_RIGHT: i32 = 3;
 }
 
-/// Configuration for SAM2 inference.
 #[derive(Debug, Clone)]
 pub struct Sam2Config {
     /// Encoder input resolution (default: 1024).
     pub encoder_size: usize,
-
     /// Sigmoid threshold for mask binarization (default: 0.5).
-    /// Lower → more permissive masks, higher → tighter masks.
     pub mask_threshold: f32,
-
-    /// Which mask to select from multi-mask output (default: `MaskSelection::BestIoU`).
     pub mask_selection: MaskSelection,
-
-    /// Whether to return a soft (sigmoid) mask instead of binary (default: false).
-    /// When true, mask values are continuous [0, 1] instead of {0, 1}.
+    /// Return a soft (sigmoid) mask instead of binary (default: false).
     pub soft_mask: bool,
-
-    /// ImageNet normalization mean.
     pub normalize_mean: [f32; 3],
-
-    /// ImageNet normalization std.
     pub normalize_std: [f32; 3],
 }
 
-/// How to select among the multi-mask decoder outputs.
 #[derive(Debug, Clone)]
 pub enum MaskSelection {
-    /// Pick the mask with the highest IoU prediction (default).
     BestIoU,
-    /// Pick a specific mask by index (0, 1, or 2).
     Index(usize),
 }
 
@@ -90,29 +74,21 @@ pub struct Sam2Model {
     config: Sam2Config,
 }
 
-/// Cached image embeddings from the encoder — reuse across multiple `segment` calls.
 pub struct Sam2Embeddings {
     high_res_feats_0: Array4<f32>,
     high_res_feats_1: Array4<f32>,
     image_embed: Array4<f32>,
 }
 
-/// A single prompt for SAM2 segmentation.
 #[derive(Debug, Clone)]
 pub enum Sam2Prompt {
-    /// Click at a point with the given label.
     Point { x: f32, y: f32, label: i32 },
-    /// Bounding box defined by top-left and bottom-right corners.
     BoundingBox { x1: f32, y1: f32, x2: f32, y2: f32 },
 }
 
-/// Result of a SAM2 segmentation.
-pub struct Sam2Result {
-    /// The selected segmentation mask.
-    pub mask: Mask2D<VipsBackend>,
-    /// IoU prediction scores for all candidate masks.
+pub struct Sam2Result<B: AiBackend> {
+    pub mask: Mask2D<B>,
     pub iou_scores: Vec<f32>,
-    /// Index of the selected mask.
     pub selected_mask_index: usize,
 }
 
@@ -121,34 +97,32 @@ impl Sam2Model {
         Self::with_config(encoder_path, decoder_path, Sam2Config::default())
     }
 
-    pub fn with_config(
-        encoder_path: &str,
-        decoder_path: &str,
-        config: Sam2Config,
-    ) -> ort::Result<Self> {
+    pub fn with_config(encoder_path: &str, decoder_path: &str, config: Sam2Config) -> ort::Result<Self> {
         let encoder = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .with_execution_providers([
+                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])?
             .commit_from_file(encoder_path)?;
 
         let decoder = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .with_execution_providers([
+                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+            ])?
             .commit_from_file(decoder_path)?;
 
         Ok(Self { encoder, decoder, config })
     }
 
-    /// Returns the current configuration.
-    pub fn config(&self) -> &Sam2Config {
-        &self.config
-    }
+    pub fn config(&self) -> &Sam2Config { &self.config }
 
-    /// Encodes an image into reusable embeddings.
-    ///
-    /// Call this once, then use `segment` multiple times with different prompts.
-    pub fn encode(
+    pub fn encode<B: AiBackend>(
         &mut self,
-        image: &Image2D<VipsBackend>,
-    ) -> Result<Sam2Embeddings, poc::error::Error> {
+        image: &Image2D<B>,
+    ) -> Result<Sam2Embeddings, chromors::error::Error> {
         let (w, h) = image.spec.dims();
         let sz = self.config.encoder_size;
 
@@ -156,35 +130,25 @@ impl Sam2Model {
             .resize(sz as f64 / w as f64, None, Some(sz as f64 / h as f64), None)
             .convert(RGB_U8_LAYOUT);
 
-        let bytes = preprocessed.pull(
-            &RamImageTarget,
-            Region::full((sz as i32, sz as i32), Lod(0)),
-        )?;
+        let bytes = preprocessed.pull(&RamImageTarget, Region::full((sz as i32, sz as i32), Lod(0)))?;
 
-        let image_arr = hwc_u8_to_nchw_normalized(
-            &bytes, sz, sz,
-            &self.config.normalize_mean,
-            &self.config.normalize_std,
-        );
-
+        let image_arr = hwc_u8_to_nchw_normalized(&bytes, sz, sz, &self.config.normalize_mean, &self.config.normalize_std);
         self.encode_internal(image_arr)
-            .map_err(|e| poc::error::Error::Backend(format!("SAM2 encode: {e:?}")))
+            .map_err(|e| chromors::error::Error::Backend(format!("SAM2 encode: {e:?}")))
     }
 
-    /// Segments using high-level prompt types.
-    ///
-    /// Returns a `Sam2Result` with the mask, IoU scores, and selected mask index.
-    pub fn segment(
+    pub fn segment<B: AiBackend>(
         &mut self,
         embeddings: &Sam2Embeddings,
         prompts: &[Sam2Prompt],
         original_size: (i32, i32),
-    ) -> Result<Sam2Result, poc::error::Error> {
-        assert!(!prompts.is_empty(), "at least one prompt is required");
+    ) -> Result<Sam2Result<B>, chromors::error::Error> {
+        if prompts.is_empty() {
+            return Err(chromors::error::Error::Backend("SAM2: at least one prompt required".into()));
+        }
 
         let mut points = Vec::new();
         let mut labels = Vec::new();
-
         for prompt in prompts {
             match prompt {
                 Sam2Prompt::Point { x, y, label } => {
@@ -192,10 +156,8 @@ impl Sam2Model {
                     labels.push(*label);
                 }
                 Sam2Prompt::BoundingBox { x1, y1, x2, y2 } => {
-                    points.push((*x1, *y1));
-                    labels.push(label::BOX_TOP_LEFT);
-                    points.push((*x2, *y2));
-                    labels.push(label::BOX_BOTTOM_RIGHT);
+                    points.extend([(*x1, *y1), (*x2, *y2)]);
+                    labels.extend([label::BOX_TOP_LEFT, label::BOX_BOTTOM_RIGHT]);
                 }
             }
         }
@@ -203,40 +165,36 @@ impl Sam2Model {
         self.segment_points(embeddings, &points, &labels, original_size)
     }
 
-    /// Low-level segmentation with raw points and labels.
-    pub fn segment_points(
+    pub fn segment_points<B: AiBackend>(
         &mut self,
         embeddings: &Sam2Embeddings,
         points: &[(f32, f32)],
         labels: &[i32],
         original_size: (i32, i32),
-    ) -> Result<Sam2Result, poc::error::Error> {
-        assert_eq!(points.len(), labels.len(),
-            "points ({}) and labels ({}) must have the same length",
-            points.len(), labels.len());
+    ) -> Result<Sam2Result<B>, chromors::error::Error> {
+        if points.len() != labels.len() {
+            return Err(chromors::error::Error::Backend(format!(
+                "SAM2: points ({}) and labels ({}) length mismatch", points.len(), labels.len()
+            )));
+        }
 
         let (masks, ious) = self
             .decode_internal(embeddings, points, labels)
-            .map_err(|e| poc::error::Error::Backend(format!("SAM2 decode: {e:?}")))?;
+            .map_err(|e| chromors::error::Error::Backend(format!("SAM2 decode: {e:?}")))?;
 
         let num_masks = ious.dim().1;
-        let mut iou_scores = Vec::with_capacity(num_masks);
-        for i in 0..num_masks {
-            iou_scores.push(ious[[0, i]]);
-        }
+        let iou_scores: Vec<f32> = (0..num_masks).map(|i| ious[[0, i]]).collect();
 
         let selected = match &self.config.mask_selection {
-            MaskSelection::BestIoU => {
-                iou_scores.iter()
-                    .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                    .map(|(i, _)| i)
-                    .unwrap_or(0)
-            }
+            MaskSelection::BestIoU => iou_scores.iter().enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i).unwrap_or(0),
             MaskSelection::Index(idx) => {
-                assert!(*idx < num_masks,
-                    "mask index {} out of range (model produced {} masks)",
-                    idx, num_masks);
+                if *idx >= num_masks {
+                    return Err(chromors::error::Error::Backend(format!(
+                        "SAM2: mask index {idx} out of range ({num_masks} masks)"
+                    )));
+                }
                 *idx
             }
         };
@@ -246,34 +204,21 @@ impl Sam2Model {
         let thresh = self.config.mask_threshold;
         let soft = self.config.soft_mask;
 
-        let mut mask_values = vec![0.0f32; mask_h * mask_w];
-        for y in 0..mask_h {
-            for x in 0..mask_w {
-                let val = masks[[0, selected, y, x]];
-                let sig = 1.0 / (1.0 + (-val).exp());
-                mask_values[y * mask_w + x] = if soft {
-                    sig
-                } else {
-                    if sig > thresh { 1.0 } else { 0.0 }
-                };
-            }
-        }
+        let mask_values: Vec<f32> = (0..mask_h).flat_map(|y| {
+            (0..mask_w).map(move |x| {
+                let sig = 1.0 / (1.0 + (-masks[[0, selected, y, x]]).exp());
+                if soft { sig } else if sig > thresh { 1.0 } else { 0.0 }
+            })
+        }).collect();
 
-        let mask_small = Mask2D::<VipsBackend>::from_values(
-            mask_w as i32, mask_h as i32, &mask_values,
-        );
-
-        // TODO: upscale mask to original_size when Mask2D supports resize
-        let _ = original_size;
+        let _ = original_size; // TODO: upscale mask when Mask2D supports resize
 
         Ok(Sam2Result {
-            mask: mask_small,
+            mask: B::mask_from_values(&mask_values, mask_w as i32, mask_h as i32),
             iou_scores,
             selected_mask_index: selected,
         })
     }
-
-    // ── Private ─────────────────────────────────────────────────────────────
 
     fn encode_internal(&mut self, image: Array4<f32>) -> ort::Result<Sam2Embeddings> {
         let image_tensor = Tensor::from_array(image)?.into_dyn();
@@ -284,9 +229,7 @@ impl Sam2Model {
             Ok(ArrayView4::from_shape(
                 (shape[0] as usize, shape[1] as usize, shape[2] as usize, shape[3] as usize),
                 slice,
-            )
-            .unwrap()
-            .to_owned())
+            ).unwrap().to_owned())
         };
 
         Ok(Sam2Embeddings {
@@ -317,13 +260,13 @@ impl Sam2Model {
         let has_mask_input = Array1::<f32>::zeros(1);
 
         let inputs = ort::inputs![
-            "image_embed" => Tensor::from_array(embeddings.image_embed.clone())?.into_dyn(),
+            "image_embed"      => Tensor::from_array(embeddings.image_embed.clone())?.into_dyn(),
             "high_res_feats_0" => Tensor::from_array(embeddings.high_res_feats_0.clone())?.into_dyn(),
             "high_res_feats_1" => Tensor::from_array(embeddings.high_res_feats_1.clone())?.into_dyn(),
-            "point_coords" => Tensor::from_array(point_coords)?.into_dyn(),
-            "point_labels" => Tensor::from_array(point_labels)?.into_dyn(),
-            "mask_input" => Tensor::from_array(mask_input)?.into_dyn(),
-            "has_mask_input" => Tensor::from_array(has_mask_input)?.into_dyn()
+            "point_coords"     => Tensor::from_array(point_coords)?.into_dyn(),
+            "point_labels"     => Tensor::from_array(point_labels)?.into_dyn(),
+            "mask_input"       => Tensor::from_array(mask_input)?.into_dyn(),
+            "has_mask_input"   => Tensor::from_array(has_mask_input)?.into_dyn()
         ];
 
         let outputs = self.decoder.run(inputs)?;
@@ -332,33 +275,26 @@ impl Sam2Model {
         let masks = ArrayView4::from_shape(
             (shape_m[0] as usize, shape_m[1] as usize, shape_m[2] as usize, shape_m[3] as usize),
             slice_m,
-        )
-        .unwrap()
-        .to_owned();
+        ).unwrap().to_owned();
 
         let (shape_i, slice_i) = outputs["iou_predictions"].try_extract_tensor::<f32>()?;
         let ious = ArrayView2::from_shape(
-            (shape_i[0] as usize, shape_i[1] as usize),
-            slice_i,
-        )
-        .unwrap()
-        .to_owned();
+            (shape_i[0] as usize, shape_i[1] as usize), slice_i,
+        ).unwrap().to_owned();
 
         Ok((masks, ious))
     }
 }
 
 fn hwc_u8_to_nchw_normalized(
-    bytes: &[u8], w: usize, h: usize,
-    mean: &[f32; 3], std: &[f32; 3],
+    bytes: &[u8], w: usize, h: usize, mean: &[f32; 3], std: &[f32; 3],
 ) -> Array4<f32> {
     let mut arr = Array4::<f32>::zeros((1, 3, h, w));
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) * 3;
             for c in 0..3 {
-                let val = bytes[idx + c] as f32 / 255.0;
-                arr[[0, c, y, x]] = (val - mean[c]) / std[c];
+                arr[[0, c, y, x]] = (bytes[idx + c] as f32 / 255.0 - mean[c]) / std[c];
             }
         }
     }

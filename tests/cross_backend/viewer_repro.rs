@@ -13,11 +13,13 @@
 //!  - target parity: `GpuBufferTarget` (viewport path) == `RamImageTarget`.
 use super::common;
 
-use poc::color::model::ColorModel;
-use poc::color::space::ColorSpace;
-use poc::data::image::{GpuBufferTarget, RamImageTarget};
-use poc::pixel::{AlphaState, PixelLayout, Storage};
-use poc::work_unit::{Lod, Region};
+use std::sync::Arc;
+use chromors::color::model::ColorModel;
+use chromors::color::space::ColorSpace;
+use chromors::data::image::{GpuBufferTarget, RamImageTarget};
+use chromors::pixel::{AlphaState, PixelLayout, Storage};
+use chromors::work_unit::{Lod, Region};
+use chromors::VipsImageExt;
 
 fn display_layout() -> PixelLayout {
     PixelLayout {
@@ -29,9 +31,9 @@ fn display_layout() -> PixelLayout {
 }
 
 fn large_display_mip(
-    ctx: &std::sync::Arc<poc::backend::gpu::GpuContext>,
-) -> poc::data::image::Image2D<poc::backend::gpu::GpuBackend> {
-    let vips_img = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open(
+    ctx: &Arc<chromors::backend::gpu::GpuContext>,
+) -> chromors::data::image::Image2D<chromors::backend::gpu::GpuBackend> {
+    let vips_img = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::open(
         "tests/fixtures/large.jpg",
     )
     .unwrap();
@@ -64,7 +66,7 @@ fn convert_then_lod_tiles_match_vips_shrink() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
 
-    let vips_img = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open(
+    let vips_img = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::open(
         "tests/fixtures/large.jpg",
     )
     .unwrap();

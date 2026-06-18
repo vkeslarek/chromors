@@ -169,8 +169,8 @@ fn math2_const_matches_vips() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     // Use a small exponent or a small constant to avoid extreme wrapping on u8
-    let vips_res = vips_img.math2_const(poc::operation::OperationMath2::Pow, vec![0.5]);
-    let gpu_res = gpu_img.math2_const(poc::operation::OperationMath2::Pow, vec![0.5]);
+    let vips_res = vips_img.math2_const(chromors::operation::OperationMath2::Pow, vec![0.5]);
+    let gpu_res = gpu_img.math2_const(chromors::operation::OperationMath2::Pow, vec![0.5]);
 
     // VIPS outputs u8 for Pow if input is u8, wait no, math2_const(Pow) always outputs f32 on some VIPS versions?
     // Let's use `poc_materialize_f32` equivalent, but wait!

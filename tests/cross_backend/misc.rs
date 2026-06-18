@@ -1,5 +1,5 @@
 use super::*;
-use poc::{OperationBoolean, OperationRelational};
+use chromors::{OperationBoolean, OperationRelational};
 
 /// `GpuContext::from_device` (the windowed-viewer shared-device path) must
 /// produce a context the DAG can materialize through just like
@@ -8,10 +8,10 @@ use poc::{OperationBoolean, OperationRelational};
 /// `RamImageTarget`'s download of the same region.
 #[test]
 fn gpu_context_from_device_and_buffer_target() {
-    use poc::backend::gpu::context::GpuContext;
-    use poc::data::image::GpuBufferTarget;
-    use poc::io::Target;
-    use poc::work_unit::{Lod, Region};
+    use chromors::backend::gpu::context::GpuContext;
+    use chromors::data::image::GpuBufferTarget;
+    use chromors::io::Target;
+    use chromors::work_unit::{Lod, Region};
     use std::sync::Arc;
 
     let _g = common::vips_serial();
@@ -40,7 +40,7 @@ fn gpu_context_from_device_and_buffer_target() {
     // A bare source root can't be pulled directly (pre-existing
     // `emit.rs` "fused pass needs an output" limitation, unrelated to this
     // test) — apply a no-op `Convert` so the DAG has an operation node.
-    let gpu_img = gpu_img.cast_storage(poc::pixel::Storage::U8, None);
+    let gpu_img = gpu_img.cast_storage(chromors::pixel::Storage::U8, None);
     let (w, h) = (gpu_img.width(), gpu_img.height());
     let region = Region {
         x: 0,
@@ -53,7 +53,7 @@ fn gpu_context_from_device_and_buffer_target() {
     let gpu_buf = gpu_img.pull(&GpuBufferTarget, region.clone()).unwrap();
     let extracted = gpu_buf.read_to_cpu(&ctx).unwrap();
     let downloaded = gpu_img
-        .pull(&poc::data::image::RamImageTarget, region)
+        .pull(&chromors::data::image::RamImageTarget, region)
         .unwrap();
 
     assert_eq!(extracted, downloaded);

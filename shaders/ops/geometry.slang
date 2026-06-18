@@ -37,12 +37,17 @@ public void resize_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, float
     output.write(idx, res);
 }
 
-public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox, int oy, int out_x, int out_y, uint in_w, uint in_h, uint extend_mode, float bg_r, float bg_g, float bg_b) {
-    int sx = out_x + int(idx.x) - ox;
-    int sy = out_y + int(idx.y) - oy;
+// Input IRegion wraps the full source image (tight layout, local coord = source coord).
+// out_x, out_y: global output-tile origin (idx is tile-local).
+// ox, oy: where the source is placed in the output canvas.
+public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int out_x, int out_y, int ox, int oy, uint in_w, uint in_h, uint extend_mode, float bg_r, float bg_g, float bg_b) {
+    int gx = out_x + int(idx.x);
+    int gy = out_y + int(idx.y);
+    int sx = gx - ox; // source x
+    int sy = gy - oy; // source y
 
     if (sx >= 0 && sx < int(in_w) && sy >= 0 && sy < int(in_h)) {
-        output.write(idx, input.read(idx));
+        output.write(idx, input.read(uint2(sx, sy)));
     } else {
         if (extend_mode == 0) { // Black
             output.write(idx, float4(0.0, 0.0, 0.0, 1.0));
@@ -51,14 +56,12 @@ public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox
         } else if (extend_mode == 5) { // Background
             output.write(idx, float4(bg_r, bg_g, bg_b, 1.0));
         } else if (extend_mode == 2) { // Repeat
-            // handling negative mod correctly
             int wx = sx % int(in_w);
             int wy = sy % int(in_h);
             if (wx < 0) wx += int(in_w);
             if (wy < 0) wy += int(in_h);
-            output.write(idx, input.read(uint2(wx - out_x + ox, wy - out_y + oy)));
+            output.write(idx, input.read(uint2(wx, wy)));
         } else if (extend_mode == 3) { // Mirror
-            // handling negative mod correctly for mirror
             int wx = sx;
             if (wx < 0) wx = -wx - 1;
             wx = (wx / int(in_w)) % 2 == 0 ? (wx % int(in_w)) : (int(in_w) - 1 - (wx % int(in_w)));
@@ -66,11 +69,11 @@ public void embed_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, int ox
             int wy = sy;
             if (wy < 0) wy = -wy - 1;
             wy = (wy / int(in_h)) % 2 == 0 ? (wy % int(in_h)) : (int(in_h) - 1 - (wy % int(in_h)));
-            output.write(idx, input.read(uint2(wx - out_x + ox, wy - out_y + oy)));
+            output.write(idx, input.read(uint2(wx, wy)));
         } else { // Copy
             int cx = clamp(sx, 0, int(in_w) - 1);
             int cy = clamp(sy, 0, int(in_h) - 1);
-            output.write(idx, input.read(uint2(cx - out_x + ox, cy - out_y + oy)));
+            output.write(idx, input.read(uint2(cx, cy)));
         }
     }
 }

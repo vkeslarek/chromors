@@ -1,13 +1,14 @@
 #[path = "../common/mod.rs"]
 pub mod common;
-use poc::backend::gpu::GpuBackend;
-use poc::backend::vips::VipsBackend;
-use poc::data::image::Image2D as GenImage;
-use poc::data::mask2d::Mask2D;
-use poc::operation::composite::{BlendMode, Composite2};
-use poc::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend, Interesting};
-use poc::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
-use poc::pixel::Storage;
+use chromors::backend::gpu::GpuBackend;
+use chromors::backend::vips::VipsBackend;
+use chromors::data::image::Image2D as GenImage;
+use chromors::data::mask2d::Mask2D;
+use chromors::operation::composite::{BlendMode, Composite2};
+use chromors::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend, Interesting};
+use chromors::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
+use chromors::pixel::Storage;
+use chromors::{VipsImageExt, GpuImageExt, GpuLutExt, GpuMask2DExt, VipsMask2DExt, VipsLutExt};
 
 /// Read a vips image whose runtime pixels are FLOAT (e.g. promoted by
 /// `linear`) but whose `format()` metadata still reports the pre-promotion
@@ -16,11 +17,11 @@ use poc::pixel::Storage;
 /// `format()`. Returns normalized+clamped [0,1] values (raw vips `linear`
 /// output is `in_u8 * gain`, i.e. in the 0..255*gain range).
 fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
-    use poc::io::Target;
-    use poc::work_unit::{Lod, Region};
+    use chromors::io::Target;
+    use chromors::work_unit::{Lod, Region};
     let (w, h) = (img.width(), img.height());
     let bands = img.layout().channel_count() as usize;
-    let target = poc::data::image::RamImageTarget;
+    let target = chromors::data::image::RamImageTarget;
     let bytes = img
         .pull(
             &target,

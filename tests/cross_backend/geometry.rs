@@ -28,7 +28,7 @@ fn with_lod_matches_vips_shrink() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let lod = poc::work_unit::Lod(2); // scale_factor = 4
+    let lod = chromors::work_unit::Lod(2); // scale_factor = 4
 
     let vips_res = vips_img.shrink(4.0, 4.0, None);
     let gpu_res = gpu_img.with_lod(lod);
@@ -53,7 +53,7 @@ fn with_lod_zero_is_identity() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let lod0 = gpu_img.with_lod(poc::work_unit::Lod(0));
+    let lod0 = gpu_img.with_lod(chromors::work_unit::Lod(0));
     assert_eq!(lod0.width(), gpu_img.width());
     assert_eq!(lod0.height(), gpu_img.height());
 }
@@ -504,24 +504,24 @@ fn with_lod_tile_offset_matches_vips() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let lod = poc::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
+    let lod = chromors::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
 
     // Reference: full vips shrink, then crop the right portion (x=24..50).
     let vips_shrunk = vips_img.shrink(4.0, 4.0, None);
     let vips_ref = vips_shrunk.crop(24, 0, 26, 50);
 
     let gpu_res = gpu_img.with_lod(lod);
-    use poc::io::Target;
-    let target = poc::data::image::RamImageTarget;
+    use chromors::io::Target;
+    let target = chromors::data::image::RamImageTarget;
     let gpu_bytes = gpu_res
         .pull(
             &target,
-            poc::work_unit::Region {
+            chromors::work_unit::Region {
                 x: 24,
                 y: 0,
                 w: 26,
                 h: 50,
-                lod: poc::work_unit::Lod(0),
+                lod: chromors::work_unit::Lod(0),
             },
         )
         .unwrap();
@@ -544,23 +544,23 @@ fn with_lod_unaligned_region_matches_vips() {
     let vips_img = common::rgb();
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
-    let lod = poc::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
+    let lod = chromors::work_unit::Lod(2); // scale_factor = 4, 200x200 -> 50x50
 
     let vips_shrunk = vips_img.shrink(4.0, 4.0, None);
     let vips_ref = vips_shrunk.crop(25, 0, 25, 50);
 
     let gpu_res = gpu_img.with_lod(lod);
-    use poc::io::Target;
-    let target = poc::data::image::RamImageTarget;
+    use chromors::io::Target;
+    let target = chromors::data::image::RamImageTarget;
     let gpu_bytes = gpu_res
         .pull(
             &target,
-            poc::work_unit::Region {
+            chromors::work_unit::Region {
                 x: 25,
                 y: 0,
                 w: 25,
                 h: 50,
-                lod: poc::work_unit::Lod(0),
+                lod: chromors::work_unit::Lod(0),
             },
         )
         .unwrap();

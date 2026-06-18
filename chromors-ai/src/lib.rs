@@ -1,3 +1,5 @@
+pub mod prelude;
+
 #[cfg(feature = "sam2")]
 pub mod sam2;
 

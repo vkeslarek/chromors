@@ -1,7 +1,7 @@
 use crate::editor::graph::{NodeGraph, NodeKey, PortAddr, Side};
 use crate::editor::registry::{BuildError, registry};
 use crate::editor::types::PortValue;
-use poc::backend::gpu::GpuContext;
+use chromors::backend::gpu::GpuContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 

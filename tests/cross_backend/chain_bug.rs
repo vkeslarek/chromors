@@ -7,11 +7,12 @@
 //! then read garbage and the dispatch wrote nothing (fully black/transparent
 //! output). This pins the fix (CLAUDE.md §5.2.4).
 use super::common;
-use poc::color::model::ColorModel;
-use poc::color::space::ColorSpace;
-use poc::data::image::RamImageTarget;
-use poc::pixel::{AlphaState, PixelLayout, Storage};
-use poc::work_unit::{Lod, Region};
+use chromors::color::model::ColorModel;
+use chromors::color::space::ColorSpace;
+use chromors::data::image::RamImageTarget;
+use chromors::pixel::{AlphaState, PixelLayout, Storage};
+use chromors::work_unit::{Lod, Region};
+use chromors::VipsImageExt;
 
 fn disp() -> PixelLayout {
     PixelLayout {
@@ -26,7 +27,7 @@ fn disp() -> PixelLayout {
 fn fused_same_named_param_blocks_dont_collide() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
-    let vips = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::open(
+    let vips = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::open(
         "tests/fixtures/rgb.jpg",
     )
     .unwrap();

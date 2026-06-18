@@ -1,5 +1,5 @@
-use poc::backend::gpu::GpuBackend;
-use poc::data::image::Image2D as GpuImage;
+use chromors::backend::gpu::GpuBackend;
+use chromors::data::image::Image2D as GpuImage;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DataType {

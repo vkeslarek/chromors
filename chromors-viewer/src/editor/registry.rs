@@ -1,6 +1,6 @@
 use crate::editor::params::{ParamSpec, ParamValue};
 use crate::editor::types::{DataType, PortValue};
-use poc::backend::gpu::GpuContext;
+use chromors::backend::gpu::GpuContext;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 

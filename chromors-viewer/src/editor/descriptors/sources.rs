@@ -16,9 +16,9 @@ pub fn register(r: &mut Registry) {
         }],
         params: vec![ParamSpec::path("file")],
         build: |_inputs, params, ctx| {
-            use poc::backend::vips::VipsBackend;
-            use poc::data::image::{Image2D, VipsImageSource};
-            use poc::node::Data;
+            use chromors::backend::vips::VipsBackend;
+            use chromors::data::image::{Image2D, VipsImageSource, VipsImageExt};
+            use chromors::node::Data;
             use std::sync::Arc;
 
             let path = params[0]

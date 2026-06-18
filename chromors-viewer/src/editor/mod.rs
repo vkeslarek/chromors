@@ -11,7 +11,7 @@ mod tests {
     use crate::editor::graph::{NodeGraph, PortAddr, Side};
     use crate::editor::params::ParamValue;
     use crate::editor::registry::NodeKindId;
-    use poc::backend::gpu::GpuContext;
+    use chromors::backend::gpu::GpuContext;
     use std::sync::Arc;
     use vello::kurbo::Point;
 

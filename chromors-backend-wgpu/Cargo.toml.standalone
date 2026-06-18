@@ -1,0 +1,20 @@
+[package]
+name = "chromors-backend-wgpu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chromors-core = { path = "../chromors-core" }
+wgpu = { version = "29.0.3", features = ["spirv"] }
+bytemuck = "1.25.0"
+spirv-tools = "0.13.3"
+pollster = "0.4.0"
+lru = "0.18.0"
+tracing = "0.1.44"
+rayon = "1.12.0"
+
+[build-dependencies]
+bindgen = "0.71"
+cc = "1"
+
+[workspace]

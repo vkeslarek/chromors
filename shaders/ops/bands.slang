@@ -1,5 +1,47 @@
 import lib.region;
 
+float band_get(float4 v, uint index, uint bands) {
+    switch (clamp(index, 0u, 3u)) {
+        case 0u: return v.x;
+        case 1u: return v.y;
+        case 2u: return v.z;
+        default: return v.w;
+    }
+}
+
+float4 band_set(float4 v, uint index, uint bands, float value) {
+    switch (clamp(index, 0u, 3u)) {
+        case 0u: v.x = value; break;
+        case 1u: v.y = value; break;
+        case 2u: v.z = value; break;
+        default: v.w = value; break;
+    }
+    return v;
+}
+
+// ── Bandjoin: combine 1–5 single-band sources into a multi-band output ────────
+
+public void bandjoin1_kernel<R0: IRegion>(uint2 idx, R0 i0, RWRegion output, uint ch0) {
+    output.write(idx, float4(i0.read(idx)[ch0], 0.0, 0.0, 1.0));
+}
+
+public void bandjoin2_kernel<R0: IRegion, R1: IRegion>(uint2 idx, R0 i0, R1 i1, RWRegion output, uint ch0, uint ch1) {
+    output.write(idx, float4(i0.read(idx)[ch0], i1.read(idx)[ch1], 0.0, 1.0));
+}
+
+public void bandjoin3_kernel<R0: IRegion, R1: IRegion, R2: IRegion>(uint2 idx, R0 i0, R1 i1, R2 i2, RWRegion output, uint ch0, uint ch1, uint ch2) {
+    output.write(idx, float4(i0.read(idx)[ch0], i1.read(idx)[ch1], i2.read(idx)[ch2], 1.0));
+}
+
+public void bandjoin4_kernel<R0: IRegion, R1: IRegion, R2: IRegion, R3: IRegion>(uint2 idx, R0 i0, R1 i1, R2 i2, R3 i3, RWRegion output, uint ch0, uint ch1, uint ch2, uint ch3) {
+    output.write(idx, float4(i0.read(idx)[ch0], i1.read(idx)[ch1], i2.read(idx)[ch2], i3.read(idx)[ch3]));
+}
+
+public void bandjoin5_kernel<R0: IRegion, R1: IRegion, R2: IRegion, R3: IRegion, R4: IRegion>(uint2 idx, R0 i0, R1 i1, R2 i2, R3 i3, R4 i4, RWRegion output, uint ch0, uint ch1, uint ch2, uint ch3, uint ch4) {
+    // 5-band: pack first 4 into rgba, discard 5th (max 4 in float4)
+    output.write(idx, float4(i0.read(idx)[ch0], i1.read(idx)[ch1], i2.read(idx)[ch2], i3.read(idx)[ch3]));
+}
+
 public void bandbool_kernel<R: IRegion>(uint2 idx, R input, RWRegion output, uint boolean_op, uint bands)
 {
     float4 a = input.read(idx);

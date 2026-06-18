@@ -32,31 +32,31 @@ fn asset(name: &str) -> String {
     assets_dir().join(name).to_str().unwrap().to_string()
 }
 
-const RGB_U8: poc::pixel::PixelLayout = poc::pixel::PixelLayout {
-    storage: poc::pixel::Storage::U8,
-    model: poc::color::model::ColorModel::Rgb,
-    alpha: poc::pixel::AlphaState::None,
-    color_space: poc::color::space::ColorSpace::SRGB,
+const RGB_U8: chromors::pixel::PixelLayout = chromors::pixel::PixelLayout {
+    storage: chromors::pixel::Storage::U8,
+    model: chromors::color::model::ColorModel::Rgb,
+    alpha: chromors::pixel::AlphaState::None,
+    color_space: chromors::color::space::ColorSpace::SRGB,
 };
 
-fn save_png(img: &poc::data::image::Image2D<poc::backend::vips::VipsBackend>, name: &str) {
+fn save_png(img: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>, name: &str) {
     let path = output_dir().join(format!("{name}.png"));
-    let config = poc::export::ExportConfig::Png(poc::export::png::PngExportConfig::default());
+    let config = chromors::export::ExportConfig::Png(chromors::export::png::PngExportConfig::default());
     img.save_with_config(path.to_str().unwrap(), &config).unwrap();
     println!("  ✓ Saved: {}", path.display());
 }
 
 /// Pull mask f32 values from a Mask2D.
-fn pull_mask(mask: &poc::data::mask2d::Mask2D<poc::backend::vips::VipsBackend>) -> Vec<f32> {
-    use poc::data::mask2d::RamMaskTarget;
-    use poc::work_unit::{Lod, Region};
+fn pull_mask(mask: &chromors::data::mask2d::Mask2D<chromors::backend::vips::VipsBackend>) -> Vec<f32> {
+    use chromors::data::mask2d::RamMaskTarget;
+    use chromors::work_unit::{Lod, Region};
     mask.pull(&RamMaskTarget, Region::full((mask.width(), mask.height()), Lod(0)))
         .unwrap()
 }
 
 /// Save a mask as a grayscale PNG.
 fn save_mask_as_png(
-    mask: &poc::data::mask2d::Mask2D<poc::backend::vips::VipsBackend>,
+    mask: &chromors::data::mask2d::Mask2D<chromors::backend::vips::VipsBackend>,
     name: &str,
 ) {
     let w = mask.width();
@@ -71,7 +71,7 @@ fn save_mask_as_png(
         bytes[i * 3 + 2] = v;
     }
 
-    let img = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::from_bytes(
+    let img = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
         bytes, w, h, RGB_U8,
     );
     save_png(&img, name);
@@ -80,12 +80,12 @@ fn save_mask_as_png(
 /// Multiply an image by a mask (alpha composite) and save.
 /// Shows the original image where mask > 0, black where mask = 0.
 fn save_mask_composite(
-    image: &poc::data::image::Image2D<poc::backend::vips::VipsBackend>,
-    mask: &poc::data::mask2d::Mask2D<poc::backend::vips::VipsBackend>,
+    image: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>,
+    mask: &chromors::data::mask2d::Mask2D<chromors::backend::vips::VipsBackend>,
     name: &str,
 ) {
-    use poc::data::image::RamImageTarget;
-    use poc::work_unit::{Lod, Region};
+    use chromors::data::image::RamImageTarget;
+    use chromors::work_unit::{Lod, Region};
 
     let iw = image.width();
     let ih = image.height();
@@ -120,7 +120,7 @@ fn save_mask_composite(
         }
     }
 
-    let composite = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::from_bytes(
+    let composite = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
         out, iw, ih, RGB_U8,
     );
     save_png(&composite, name);
@@ -128,12 +128,12 @@ fn save_mask_composite(
 
 /// Multiply an Image2D mask (binary white/black) with the original image.
 fn save_image_mask_composite(
-    image: &poc::data::image::Image2D<poc::backend::vips::VipsBackend>,
-    mask_img: &poc::data::image::Image2D<poc::backend::vips::VipsBackend>,
+    image: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>,
+    mask_img: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>,
     name: &str,
 ) {
-    use poc::data::image::RamImageTarget;
-    use poc::work_unit::{Lod, Region};
+    use chromors::data::image::RamImageTarget;
+    use chromors::work_unit::{Lod, Region};
 
     let iw = image.width();
     let ih = image.height();
@@ -171,7 +171,7 @@ fn save_image_mask_composite(
         }
     }
 
-    let composite = poc::data::image::Image2D::<poc::backend::vips::VipsBackend>::from_bytes(
+    let composite = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
         out, iw, ih, RGB_U8,
     );
     save_png(&composite, name);
@@ -187,8 +187,8 @@ fn init_ort() {
 mod modnet_tests {
     use super::*;
     use chromors_ai::modnet::ModNetModel;
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -222,8 +222,8 @@ mod modnet_tests {
 mod realesrgan_tests {
     use super::*;
     use chromors_ai::realesrgan::RealEsrganModel;
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -257,8 +257,8 @@ mod realesrgan_tests {
 mod depth_anything_tests {
     use super::*;
     use chromors_ai::depth_anything::DepthAnythingModel;
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -312,8 +312,8 @@ mod depth_anything_tests {
 mod swinir_tests {
     use super::*;
     use chromors_ai::swinir::SwinIrModel;
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -348,9 +348,9 @@ mod vitmatte_tests {
     use super::*;
     use chromors_ai::vitmatte::ViTMatteModel;
     use chromors_ai::modnet::ModNetModel;
-    use poc::data::image::Image2D;
-    use poc::data::mask2d::Mask2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::data::mask2d::Mask2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -414,9 +414,9 @@ mod vitmatte_tests {
 mod lama_tests {
     use super::*;
     use chromors_ai::lama::LamaModel;
-    use poc::data::image::Image2D;
-    use poc::data::mask2d::Mask2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::data::mask2d::Mask2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -468,8 +468,8 @@ mod lama_tests {
 mod sam2_tests {
     use super::*;
     use chromors_ai::sam2::{Sam2Model, Sam2Prompt, label};
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]
@@ -517,8 +517,8 @@ mod sam2_tests {
 mod cascadepsp_tests {
     use super::*;
     use chromors_ai::cascadepsp::CascadePspModel;
-    use poc::data::image::Image2D;
-    use poc::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors::backend::vips::VipsBackend;
 
     #[test]
     #[ignore]

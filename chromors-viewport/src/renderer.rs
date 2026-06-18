@@ -1,5 +1,5 @@
-use poc::backend::gpu::GpuBackend;
-use poc::data::image::Image2D as GenImage;
+use chromors::backend::gpu::GpuBackend;
+use chromors::data::image::Image2D as GenImage;
 
 use crate::atlas::TexturePool;
 use crate::camera::{Camera, CameraState, LayerUniform};
@@ -310,7 +310,7 @@ impl ViewportRenderer {
         }
     }
 
-    fn device_ctx(&self) -> Option<std::sync::Arc<poc::backend::gpu::GpuContext>> {
+    fn device_ctx(&self) -> Option<std::sync::Arc<chromors::backend::gpu::GpuContext>> {
         for layer in &self.layers {
             if let Some(img) = layer.source.built_slots().first() {
                 return Some(img.ctx.clone());
