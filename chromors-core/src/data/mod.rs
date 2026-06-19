@@ -13,7 +13,7 @@ pub mod vectorscope;
 
 pub use fft2d::{Fft2D, Fft2DKind};
 pub use histogram::{Histogram, HistogramKind};
-pub use image::{Image2D, ImageKind, RamImageTarget, GpuBufferTarget};
+pub use image::{GpuBufferTarget, Image2D, ImageKind, RamImageTarget};
 pub use lut::{Lut, LutKind};
 pub use mask2d::{Mask2D, Mask2DKind};
 pub use vector_graphics::{VectorGraphics, VectorGraphicsKind};

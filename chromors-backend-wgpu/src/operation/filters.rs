@@ -58,4 +58,3 @@ impl Lower<GpuBackend> for crate::Blur<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

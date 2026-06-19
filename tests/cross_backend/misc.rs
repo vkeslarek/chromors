@@ -10,7 +10,7 @@ use chromors::{OperationBoolean, OperationRelational};
 fn gpu_context_from_device_and_buffer_target() {
     use chromors::backend::gpu::context::GpuContext;
     use chromors::data::image::GpuBufferTarget;
-    use chromors::io::Target;
+
     use chromors::work_unit::{Lod, Region};
     use std::sync::Arc;
 

@@ -231,4 +231,3 @@ where
     }
     fn dyn_hash(&self, _state: &mut dyn std::hash::Hasher) {}
 }
-

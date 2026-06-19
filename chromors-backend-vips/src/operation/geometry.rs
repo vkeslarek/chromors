@@ -255,8 +255,6 @@ impl Lower<VipsBackend> for crate::ReduceVertical<VipsBackend> {
     }
 }
 
-
-
 impl Lower<VipsBackend> for crate::ExtractArea<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
@@ -309,8 +307,6 @@ impl Lower<VipsBackend> for crate::Replicate<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-
-
 
 impl Lower<VipsBackend> for crate::ShrinkHorizontal<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {

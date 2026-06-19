@@ -26,7 +26,9 @@ impl chromors_core::operation::Lower<VipsBackend> for crate::HistogramEqualize<V
     }
 }
 
-impl chromors_core::operation::Lower<VipsBackend> for chromors_core::operation::stats::HistogramCumulative<VipsBackend> {
+impl chromors_core::operation::Lower<VipsBackend>
+    for chromors_core::operation::stats::HistogramCumulative<VipsBackend>
+{
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
         let mut op = VipsGObject::new(b"hist_cum\0").unwrap();
@@ -36,7 +38,9 @@ impl chromors_core::operation::Lower<VipsBackend> for chromors_core::operation::
     }
 }
 
-impl chromors_core::operation::Lower<VipsBackend> for chromors_core::operation::stats::HistogramNormalize<VipsBackend> {
+impl chromors_core::operation::Lower<VipsBackend>
+    for chromors_core::operation::stats::HistogramNormalize<VipsBackend>
+{
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
         let mut op = VipsGObject::new(b"hist_norm\0").unwrap();
@@ -60,8 +64,7 @@ impl chromors_core::operation::Lower<VipsBackend> for crate::HistFindIndexed<Vip
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
         let index_handle = cx.input(self.index.src());
-        let mut op =
-            VipsGObject::new(b"hist_find_indexed\0").unwrap();
+        let mut op = VipsGObject::new(b"hist_find_indexed\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_image("index", index_handle.ptr);
         if let Some(v) = self.combine {
@@ -135,4 +138,3 @@ impl chromors_core::operation::Lower<VipsBackend> for crate::Stdif<VipsBackend> 
         cx.emit(out_handle);
     }
 }
-

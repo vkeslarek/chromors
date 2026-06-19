@@ -1,6 +1,6 @@
 use crate::prelude::*;
-use chromors_core::data::vectorscope::{VectorscopeKind, VectorscopeOp};
 use crate::view::{OutBuffer, OutputWrap, ParamBlock, View};
+use chromors_core::data::vectorscope::{VectorscopeKind, VectorscopeOp};
 
 impl GpuView for VectorscopeKind {
     fn input(&self) -> View {

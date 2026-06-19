@@ -112,8 +112,7 @@ impl Lower<VipsBackend> for crate::Complex2<VipsBackend> {
 impl Lower<VipsBackend> for crate::Math<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"math\0")
-            .expect("failed to create vips math op");
+        let mut op = VipsGObject::new(b"math\0").expect("failed to create vips math op");
         op.set_image("in", input_handle.ptr);
         op.set_int("math", self.math.into_vips());
         let out_handle = op.run().expect("vips math failed");
@@ -124,8 +123,7 @@ impl Lower<VipsBackend> for crate::Math<VipsBackend> {
 impl Lower<VipsBackend> for crate::Round<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"round\0")
-            .expect("failed to create vips round op");
+        let mut op = VipsGObject::new(b"round\0").expect("failed to create vips round op");
         op.set_image("in", input_handle.ptr);
         op.set_int("round", self.round.into_vips());
         let out_handle = op.run().expect("vips round failed");
@@ -183,4 +181,3 @@ impl Lower<VipsBackend> for crate::RemainderConst<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use super::IntoVipsName;
 use crate::Error;
-use crate::ffi as ffi;
+use crate::ffi;
 
 /// Vips interpolation methods for geometric transforms (resize, rotate, affine, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

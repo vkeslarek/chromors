@@ -4,16 +4,16 @@
 //! Output: `Image2D<B>` (`scale`× upscaled)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -40,7 +40,13 @@ pub struct RealEsrganConfig {
 
 impl Default for RealEsrganConfig {
     fn default() -> Self {
-        Self { tile_size: 64, scale: 4, tile_pad: 8, normalize_0_1: true, clamp_output: true }
+        Self {
+            tile_size: 64,
+            scale: 4,
+            tile_pad: 8,
+            normalize_0_1: true,
+            clamp_output: true,
+        }
     }
 }
 
@@ -65,7 +71,9 @@ impl RealEsrganModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &RealEsrganConfig { &self.config }
+    pub fn config(&self) -> &RealEsrganConfig {
+        &self.config
+    }
 
     /// Upscales an image by `config.scale`×.
     ///
@@ -82,14 +90,21 @@ impl RealEsrganModel {
         let tile_pad = self.config.tile_pad;
 
         let rgb = image.clone().convert(RGB_U8_LAYOUT);
-        let bytes = rgb.pull(&RamImageTarget, Region::full((iw as i32, ih as i32), Lod(0)))?;
+        let bytes = rgb.pull(
+            &RamImageTarget,
+            Region::full((iw as i32, ih as i32), Lod(0)),
+        )?;
 
         let out_w = iw * scale;
         let out_h = ih * scale;
         let mut accum = vec![0.0f32; out_h * out_w * 3];
         let mut weight = vec![0.0f32; out_h * out_w];
 
-        let step = if tile_pad > 0 { tile_size - 2 * tile_pad } else { tile_size };
+        let step = if tile_pad > 0 {
+            tile_size - 2 * tile_pad
+        } else {
+            tile_size
+        };
 
         let mut y = 0usize;
         while y < ih {
@@ -112,7 +127,11 @@ impl RealEsrganModel {
                         let src_idx = (sy * iw + sx) * 3;
                         for c in 0..3 {
                             let v = bytes[src_idx + c] as f32;
-                            tile[[0, c, py, px]] = if self.config.normalize_0_1 { v / 255.0 } else { v / 127.5 - 1.0 };
+                            tile[[0, c, py, px]] = if self.config.normalize_0_1 {
+                                v / 255.0
+                            } else {
+                                v / 127.5 - 1.0
+                            };
                         }
                     }
                 }
@@ -121,14 +140,17 @@ impl RealEsrganModel {
                     .map_err(|e| chromors::error::Error::Backend(format!("ESRGAN tensor: {e:?}")))?
                     .into_dyn();
 
-                let outputs = self.session
+                let outputs = self
+                    .session
                     .run(ort::inputs!["input.1" => tile_tensor])
-                    .map_err(|e| chromors::error::Error::Backend(format!("ESRGAN inference: {e:?}")))?;
+                    .map_err(|e| {
+                        chromors::error::Error::Backend(format!("ESRGAN inference: {e:?}"))
+                    })?;
 
                 let out_key = outputs.keys().next().unwrap();
-                let (shape, slice) = outputs[out_key]
-                    .try_extract_tensor::<f32>()
-                    .map_err(|e| chromors::error::Error::Backend(format!("ESRGAN output: {e:?}")))?;
+                let (shape, slice) = outputs[out_key].try_extract_tensor::<f32>().map_err(|e| {
+                    chromors::error::Error::Backend(format!("ESRGAN output: {e:?}"))
+                })?;
 
                 let oth = shape[2] as usize;
                 let otw = shape[3] as usize;
@@ -143,17 +165,23 @@ impl RealEsrganModel {
                 for py in 0..valid_y.min(out_h - oy0) {
                     for px in 0..valid_x.min(out_w - ox0) {
                         let wx = if pad_scaled > 0 {
-                            (px as f32 / pad_scaled as f32).min(1.0)
+                            (px as f32 / pad_scaled as f32)
+                                .min(1.0)
                                 .min((valid_x - 1 - px) as f32 / pad_scaled as f32)
-                        } else { 1.0 };
+                        } else {
+                            1.0
+                        };
                         let wy = if pad_scaled > 0 {
-                            (py as f32 / pad_scaled as f32).min(1.0)
+                            (py as f32 / pad_scaled as f32)
+                                .min(1.0)
                                 .min((valid_y - 1 - py) as f32 / pad_scaled as f32)
-                        } else { 1.0 };
+                        } else {
+                            1.0
+                        };
                         let w_blend = wx * wy;
 
                         let dst = ((oy0 + py) * out_w + (ox0 + px)) * 3;
-                        let wt  = (oy0 + py) * out_w + (ox0 + px);
+                        let wt = (oy0 + py) * out_w + (ox0 + px);
                         for c in 0..3 {
                             accum[dst + c] += slice[c * oth * otw + py * otw + px] * w_blend;
                         }
@@ -171,11 +199,18 @@ impl RealEsrganModel {
             let wt = if weight[i] > 0.0 { weight[i] } else { 1.0 };
             for c in 0..3 {
                 let mut val = accum[i * 3 + c] / wt;
-                if self.config.clamp_output { val = val.clamp(0.0, 1.0); }
+                if self.config.clamp_output {
+                    val = val.clamp(0.0, 1.0);
+                }
                 output_bytes[i * 3 + c] = (val * 255.0) as u8;
             }
         }
 
-        Ok(B::image_from_bytes(output_bytes, out_w as i32, out_h as i32, RGB_U8_LAYOUT))
+        Ok(B::image_from_bytes(
+            output_bytes,
+            out_w as i32,
+            out_h as i32,
+            RGB_U8_LAYOUT,
+        ))
     }
 }

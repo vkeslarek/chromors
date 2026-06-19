@@ -88,12 +88,11 @@ impl<B: crate::backend::Backend> Mask2D<B> {
 
 // ── Targets ──────────────────────────────────────────────────────────────────
 
-use crate::io::Target;
 use crate::backend::Backend;
+use crate::io::Target;
 
 /// Extracts the mask's raw `f32` weight grid into host RAM.
 ///
 /// This is the sanctioned exit for mask data — analogous to `RamImageTarget`
 /// for images.
 pub struct RamMaskTarget;
-

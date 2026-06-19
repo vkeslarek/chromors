@@ -7,6 +7,7 @@ edition = "2024"
 chromors-core = { path = "../chromors-core" }
 libc = "0.2"
 bytemuck = "1.25.0"
+rayon = "1.12.0"
 
 [build-dependencies]
 bindgen = "0.71"

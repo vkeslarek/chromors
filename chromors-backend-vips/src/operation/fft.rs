@@ -29,4 +29,3 @@ impl Lower<VipsBackend> for crate::Spectrum<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

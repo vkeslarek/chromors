@@ -124,4 +124,3 @@ impl Lower<VipsBackend> for crate::GlobalBalance<VipsBackend> {
         cx.emit(out);
     }
 }
-

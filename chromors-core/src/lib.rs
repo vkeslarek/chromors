@@ -18,12 +18,13 @@ macro_rules! assert_approx_eq {
 
 pub mod backend;
 pub mod buffer;
+pub mod color;
 pub mod data;
 pub mod error;
+pub mod generator;
 pub mod io;
 pub mod kind;
 pub mod node;
-pub mod color;
 pub mod operation;
 pub mod pixel;
 pub mod stage;
@@ -35,10 +36,13 @@ pub use buffer::*;
 pub use color::*;
 pub use data::*;
 pub use error::*;
+pub use generator::*;
 pub use io::*;
 pub use kind::*;
 pub use node::*;
 pub use operation::*;
 pub use stage::*;
-pub use stage_cache::{CacheExt, CacheKey, CacheStats, Cached, RegionCache, StageExt, DEFAULT_BUDGET};
+pub use stage_cache::{
+    CacheExt, CacheKey, CacheStats, Cached, DEFAULT_BUDGET, RegionCache, StageExt,
+};
 pub use work_unit::*;

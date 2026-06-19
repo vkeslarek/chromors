@@ -3,8 +3,8 @@ pub use chromors_core::*;
 pub mod handle;
 pub use handle::{VelloHandle, VelloScene};
 
-use std::sync::Arc;
 use self::handle::VelloHandle as VelloHandleAlias;
+use std::sync::Arc;
 
 /// Marker struct for the Vello vector graphics rasterization backend.
 ///

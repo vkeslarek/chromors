@@ -4,17 +4,17 @@
 //! Output: `Mask2D<B>` (alpha matte at model resolution)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
 use chromors::data::mask2d::Mask2D;
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -38,7 +38,11 @@ pub struct ModNetConfig {
 
 impl Default for ModNetConfig {
     fn default() -> Self {
-        Self { input_size: 512, ref_val: 127.5, alpha_threshold: 0.0 }
+        Self {
+            input_size: 512,
+            ref_val: 127.5,
+            alpha_threshold: 0.0,
+        }
     }
 }
 
@@ -63,7 +67,9 @@ impl ModNetModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &ModNetConfig { &self.config }
+    pub fn config(&self) -> &ModNetConfig {
+        &self.config
+    }
 
     /// Produces an alpha matte from a portrait image.
     ///
@@ -79,7 +85,10 @@ impl ModNetModel {
             .resize(sz as f64 / w as f64, None, Some(sz as f64 / h as f64), None)
             .convert(RGB_U8_LAYOUT);
 
-        let bytes = preprocessed.pull(&RamImageTarget, Region::full((sz as i32, sz as i32), Lod(0)))?;
+        let bytes = preprocessed.pull(
+            &RamImageTarget,
+            Region::full((sz as i32, sz as i32), Lod(0)),
+        )?;
 
         let ref_val = self.config.ref_val;
         let mut input = Array4::<f32>::zeros((1, 3, sz, sz));
@@ -96,7 +105,8 @@ impl ModNetModel {
             .map_err(|e| chromors::error::Error::Backend(format!("MODNet tensor: {e:?}")))?
             .into_dyn();
 
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(ort::inputs!["input" => input_tensor])
             .map_err(|e| chromors::error::Error::Backend(format!("MODNet inference: {e:?}")))?;
 
@@ -109,10 +119,12 @@ impl ModNetModel {
         let ow = shape[3] as usize;
         let thresh = self.config.alpha_threshold;
 
-        let mask_values: Vec<f32> = (0..oh * ow).map(|i| {
-            let v = slice[i].clamp(0.0, 1.0);
-            if v < thresh { 0.0 } else { v }
-        }).collect();
+        let mask_values: Vec<f32> = (0..oh * ow)
+            .map(|i| {
+                let v = slice[i].clamp(0.0, 1.0);
+                if v < thresh { 0.0 } else { v }
+            })
+            .collect();
 
         Ok(B::mask_from_values(&mask_values, ow as i32, oh as i32))
     }

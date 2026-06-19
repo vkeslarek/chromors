@@ -1,8 +1,8 @@
 use crate::prelude::*;
-use chromors_core::backend::Backend;
 use crate::{GpuBackend, GpuBuilder, GpuView};
+use chromors_core::backend::Backend;
 use chromors_core::operation::Lower;
-use chromors_core::operation::edge::{Invert, Sign, Abs, Hypot, Sobel, Prewitt, Scharr};
+use chromors_core::operation::edge::{Abs, Hypot, Invert, Prewitt, Scharr, Sign, Sobel};
 
 impl Lower<GpuBackend> for Invert<GpuBackend> {
     fn lower(&self, cx: &mut GpuBuilder) {

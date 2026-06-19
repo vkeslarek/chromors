@@ -189,4 +189,3 @@ impl Lower<GpuBackend> for crate::RelationalConst<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

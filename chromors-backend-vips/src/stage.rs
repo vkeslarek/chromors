@@ -1,14 +1,14 @@
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use crate::Kind;
-use crate::VipsBackend;
-use crate::VipsBuilder;
-use crate::VipsBand;
-use crate::VipsHandle;
 use crate::Buffer;
 use crate::Error;
+use crate::Kind;
 use crate::Source;
+use crate::VipsBackend;
+use crate::VipsBand;
+use crate::VipsBuilder;
+use crate::VipsHandle;
 use crate::WorkUnitFor;
 use chromors_core::stage::BoundarySource;
 

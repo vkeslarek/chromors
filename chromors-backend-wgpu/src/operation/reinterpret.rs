@@ -11,4 +11,3 @@ where
         cx.output(self.spec.output(cx.wu()));
     }
 }
-

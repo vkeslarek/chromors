@@ -42,6 +42,5 @@ members = [
     "chromors-backend-raw",
     "chromors-backend-vello",
     "chromors-viewport",
-    "chromors-viewer",
     "chromors-ai"
 ]

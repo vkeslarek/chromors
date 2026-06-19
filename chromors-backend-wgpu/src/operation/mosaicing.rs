@@ -53,4 +53,3 @@ impl Lower<GpuBackend> for crate::Merge<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

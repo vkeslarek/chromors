@@ -1,13 +1,13 @@
-use chromors_core::*;
-use chromors_core::pixel::{PixelLayout, AlphaState};
+use crate::custom::run_custom;
+use crate::custom::{CustomRegion, VipsCustomOperation};
+use crate::{IntoVipsBandFormat, VipsBackend, VipsBuilder, VipsHandle};
+use chromors_core::color::matrix::Matrix3x3;
 use chromors_core::color::model::ColorModel;
 use chromors_core::color::space::ColorSpace;
-use chromors_core::color::matrix::Matrix3x3;
-use crate::{VipsBackend, VipsBuilder, VipsHandle, IntoVipsBandFormat};
-use crate::custom::{VipsCustomOperation, CustomRegion};
-use crate::custom::run_custom;
-use std::sync::Arc;
 use chromors_core::color::transfer::TransferFn;
+use chromors_core::pixel::{AlphaState, PixelLayout};
+use chromors_core::*;
+use std::sync::Arc;
 
 /// `true` if both endpoints have a faithful vips `VipsInterpretation` — the
 /// native `colourspace`-based chain ([`vips_native_convert`]) round-trips
@@ -135,7 +135,8 @@ impl VipsCustomOperation for CpuConvertOp {
                     let src_row = input.pixels::<$p>(y);
                     let dst_row = out.pixels_mut::<$p>(y);
                     for x in 0..w as usize {
-                        let [r, g, bch, alpha] = <$p as chromors_core::pixel::Pixel>::unpack(src_row[x]);
+                        let [r, g, bch, alpha] =
+                            <$p as chromors_core::pixel::Pixel>::unpack(src_row[x]);
                         let lin = [
                             self.src_tf.decode(r),
                             self.src_tf.decode(g),
@@ -149,7 +150,10 @@ impl VipsCustomOperation for CpuConvertOp {
                             self.dst_tf.encode(dst_lin[2]),
                             alpha,
                         ];
-                        dst_row[x] = <$p as chromors_core::pixel::Pixel>::pack_one(out_rgba, chromors_core::pixel::AlphaPolicy::Straight);
+                        dst_row[x] = <$p as chromors_core::pixel::Pixel>::pack_one(
+                            out_rgba,
+                            chromors_core::pixel::AlphaPolicy::Straight,
+                        );
                     }
                 }
                 Ok(())

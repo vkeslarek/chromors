@@ -1,5 +1,5 @@
-use std::hash::Hasher;
 use crate::operation::IntoVipsEnum;
+use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::data::image::ImageKind;
@@ -151,4 +151,3 @@ where
 }
 
 // ── GPU Lowering ──────────────────────────────────────────────────────────────
-

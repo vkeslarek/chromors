@@ -1,8 +1,17 @@
-pub use chromors_core::*;
-pub use chromors_core::pixel::*;
 pub use chromors_core::color::*;
+pub use chromors_core::pixel::*;
+pub use chromors_core::*;
 
-#[allow(non_upper_case_globals, non_camel_case_types, non_snake_case, dead_code, warnings, clippy::all, unnecessary_transmutes, unsafe_op_in_unsafe_fn)]
+#[allow(
+    non_upper_case_globals,
+    non_camel_case_types,
+    non_snake_case,
+    dead_code,
+    warnings,
+    clippy::all,
+    unnecessary_transmutes,
+    unsafe_op_in_unsafe_fn
+)]
 pub mod libraw_ffi {
     include!(concat!(env!("OUT_DIR"), "/libraw_ffi.rs"));
 }

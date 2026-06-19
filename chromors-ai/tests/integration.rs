@@ -19,9 +19,10 @@ fn output_dir() -> PathBuf {
 }
 
 fn assets_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("assets")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("assets")
 }
-
 
 /// Room interior — geometric structures for ZITS.
 fn models_dir() -> PathBuf {
@@ -39,19 +40,29 @@ const RGB_U8: chromors::pixel::PixelLayout = chromors::pixel::PixelLayout {
     color_space: chromors::color::space::ColorSpace::SRGB,
 };
 
-fn save_png(img: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>, name: &str) {
+fn save_png(
+    img: &chromors::data::image::Image2D<chromors::backend::vips::VipsBackend>,
+    name: &str,
+) {
     let path = output_dir().join(format!("{name}.png"));
-    let config = chromors::export::ExportConfig::Png(chromors::export::png::PngExportConfig::default());
-    img.save_with_config(path.to_str().unwrap(), &config).unwrap();
+    let config =
+        chromors::export::ExportConfig::Png(chromors::export::png::PngExportConfig::default());
+    img.save_with_config(path.to_str().unwrap(), &config)
+        .unwrap();
     println!("  ✓ Saved: {}", path.display());
 }
 
 /// Pull mask f32 values from a Mask2D.
-fn pull_mask(mask: &chromors::data::mask2d::Mask2D<chromors::backend::vips::VipsBackend>) -> Vec<f32> {
+fn pull_mask(
+    mask: &chromors::data::mask2d::Mask2D<chromors::backend::vips::VipsBackend>,
+) -> Vec<f32> {
     use chromors::data::mask2d::RamMaskTarget;
     use chromors::work_unit::{Lod, Region};
-    mask.pull(&RamMaskTarget, Region::full((mask.width(), mask.height()), Lod(0)))
-        .unwrap()
+    mask.pull(
+        &RamMaskTarget,
+        Region::full((mask.width(), mask.height()), Lod(0)),
+    )
+    .unwrap()
 }
 
 /// Save a mask as a grayscale PNG.
@@ -93,10 +104,9 @@ fn save_mask_composite(
     let mh = mask.height();
 
     let rgb = image.clone().convert(RGB_U8);
-    let img_bytes = rgb.pull(
-        &RamImageTarget,
-        Region::full((iw, ih), Lod(0)),
-    ).unwrap();
+    let img_bytes = rgb
+        .pull(&RamImageTarget, Region::full((iw, ih), Lod(0)))
+        .unwrap();
     let mask_values = pull_mask(mask);
 
     let mut out = vec![0u8; (iw * ih * 3) as usize];
@@ -120,9 +130,10 @@ fn save_mask_composite(
         }
     }
 
-    let composite = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
-        out, iw, ih, RGB_U8,
-    );
+    let composite =
+        chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
+            out, iw, ih, RGB_U8,
+        );
     save_png(&composite, name);
 }
 
@@ -141,16 +152,14 @@ fn save_image_mask_composite(
     let mh = mask_img.height();
 
     let rgb = image.clone().convert(RGB_U8);
-    let img_bytes = rgb.pull(
-        &RamImageTarget,
-        Region::full((iw, ih), Lod(0)),
-    ).unwrap();
+    let img_bytes = rgb
+        .pull(&RamImageTarget, Region::full((iw, ih), Lod(0)))
+        .unwrap();
 
     let mask_rgb = mask_img.clone().convert(RGB_U8);
-    let mask_bytes = mask_rgb.pull(
-        &RamImageTarget,
-        Region::full((mw, mh), Lod(0)),
-    ).unwrap();
+    let mask_bytes = mask_rgb
+        .pull(&RamImageTarget, Region::full((mw, mh), Lod(0)))
+        .unwrap();
 
     let mut out = vec![0u8; (iw * ih * 3) as usize];
     for y in 0..ih as usize {
@@ -171,9 +180,10 @@ fn save_image_mask_composite(
         }
     }
 
-    let composite = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
-        out, iw, ih, RGB_U8,
-    );
+    let composite =
+        chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::from_bytes(
+            out, iw, ih, RGB_U8,
+        );
     save_png(&composite, name);
 }
 
@@ -186,9 +196,9 @@ fn init_ort() {
 #[cfg(feature = "modnet")]
 mod modnet_tests {
     use super::*;
-    use chromors_ai::modnet::ModNetModel;
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::modnet::ModNetModel;
 
     #[test]
     #[ignore]
@@ -198,7 +208,9 @@ mod modnet_tests {
 
         let model_path = models_dir().join("modnet/modnet_photographic.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py modnet");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py modnet"
+            );
             return;
         }
 
@@ -221,9 +233,9 @@ mod modnet_tests {
 #[cfg(feature = "realesrgan")]
 mod realesrgan_tests {
     use super::*;
-    use chromors_ai::realesrgan::RealEsrganModel;
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::realesrgan::RealEsrganModel;
 
     #[test]
     #[ignore]
@@ -233,7 +245,9 @@ mod realesrgan_tests {
 
         let model_path = models_dir().join("realesrgan/realesrgan_x4plus.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py realesrgan");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py realesrgan"
+            );
             return;
         }
 
@@ -244,7 +258,11 @@ mod realesrgan_tests {
         println!("  Input: {}x{}", small.width(), small.height());
 
         let upscaled = model.upscale(&small).unwrap();
-        println!("  Output: {}x{} (4× upscaled)", upscaled.width(), upscaled.height());
+        println!(
+            "  Output: {}x{} (4× upscaled)",
+            upscaled.width(),
+            upscaled.height()
+        );
 
         save_png(&small, "realesrgan_input_small");
         save_png(&upscaled, "realesrgan_output_4x");
@@ -256,9 +274,9 @@ mod realesrgan_tests {
 #[cfg(feature = "depth_anything")]
 mod depth_anything_tests {
     use super::*;
-    use chromors_ai::depth_anything::DepthAnythingModel;
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::depth_anything::DepthAnythingModel;
 
     #[test]
     #[ignore]
@@ -268,7 +286,9 @@ mod depth_anything_tests {
 
         let model_path = models_dir().join("depth_anything/depth_anything_v2_small.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py depth_anything");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py depth_anything"
+            );
             return;
         }
 
@@ -311,9 +331,9 @@ mod depth_anything_tests {
 #[cfg(feature = "swinir")]
 mod swinir_tests {
     use super::*;
-    use chromors_ai::swinir::SwinIrModel;
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::swinir::SwinIrModel;
 
     #[test]
     #[ignore]
@@ -323,14 +343,21 @@ mod swinir_tests {
 
         let model_path = models_dir().join("swinir/swinir_denoise_color_15.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py swinir");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py swinir"
+            );
             return;
         }
 
         let mut model = SwinIrModel::new(model_path.to_str().unwrap()).unwrap();
 
         let img = Image2D::<VipsBackend>::open(&asset("city_street.jpg")).unwrap();
-        let small = img.resize(256.0 / img.width() as f64, None, Some(256.0 / img.height() as f64), None);
+        let small = img.resize(
+            256.0 / img.width() as f64,
+            None,
+            Some(256.0 / img.height() as f64),
+            None,
+        );
         println!("  Input: {}x{}", small.width(), small.height());
 
         let restored = model.restore(&small).unwrap();
@@ -346,11 +373,11 @@ mod swinir_tests {
 #[cfg(feature = "vitmatte")]
 mod vitmatte_tests {
     use super::*;
-    use chromors_ai::vitmatte::ViTMatteModel;
-    use chromors_ai::modnet::ModNetModel;
+    use chromors::backend::vips::VipsBackend;
     use chromors::data::image::Image2D;
     use chromors::data::mask2d::Mask2D;
-    use chromors::backend::vips::VipsBackend;
+    use chromors_ai::modnet::ModNetModel;
+    use chromors_ai::vitmatte::ViTMatteModel;
 
     #[test]
     #[ignore]
@@ -361,7 +388,9 @@ mod vitmatte_tests {
         let modnet_path = models_dir().join("modnet/modnet_photographic.onnx");
         let vitmatte_path = models_dir().join("vitmatte/vitmatte_small.onnx");
         if !modnet_path.exists() || !vitmatte_path.exists() {
-            println!("  ⏭ Skipped (models not downloaded). Run: python chromors-ai/download_models.py modnet vitmatte");
+            println!(
+                "  ⏭ Skipped (models not downloaded). Run: python chromors-ai/download_models.py modnet vitmatte"
+            );
             return;
         }
 
@@ -373,7 +402,11 @@ mod vitmatte_tests {
         // Step 1: MODNet rough alpha
         let mut modnet = ModNetModel::new(modnet_path.to_str().unwrap()).unwrap();
         let rough_alpha = modnet.matte(&img).unwrap();
-        println!("  MODNet rough alpha: {}x{}", rough_alpha.width(), rough_alpha.height());
+        println!(
+            "  MODNet rough alpha: {}x{}",
+            rough_alpha.width(),
+            rough_alpha.height()
+        );
         save_mask_as_png(&rough_alpha, "vitmatte_1_rough_alpha");
 
         // Step 2: Convert rough alpha to trimap via erode/dilate simulation
@@ -413,10 +446,10 @@ mod vitmatte_tests {
 #[cfg(feature = "lama")]
 mod lama_tests {
     use super::*;
-    use chromors_ai::lama::LamaModel;
+    use chromors::backend::vips::VipsBackend;
     use chromors::data::image::Image2D;
     use chromors::data::mask2d::Mask2D;
-    use chromors::backend::vips::VipsBackend;
+    use chromors_ai::lama::LamaModel;
 
     #[test]
     #[ignore]
@@ -426,7 +459,9 @@ mod lama_tests {
 
         let model_path = models_dir().join("lama/lama_fp32.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py lama");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py lama"
+            );
             return;
         }
 
@@ -434,7 +469,12 @@ mod lama_tests {
 
         // City street → remove a building/object from the scene
         let img = Image2D::<VipsBackend>::open(&asset("city_street.jpg")).unwrap();
-        let img_small = img.resize(512.0 / img.width() as f64, None, Some(512.0 / img.height() as f64), None);
+        let img_small = img.resize(
+            512.0 / img.width() as f64,
+            None,
+            Some(512.0 / img.height() as f64),
+            None,
+        );
         let w = img_small.width();
         let h = img_small.height();
         println!("  Input: {}x{}", w, h);
@@ -461,15 +501,14 @@ mod lama_tests {
     }
 }
 
-
 // ── SAM2 ─────────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "sam2")]
 mod sam2_tests {
     use super::*;
-    use chromors_ai::sam2::{Sam2Model, Sam2Prompt, label};
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::sam2::{Sam2Model, Sam2Prompt, label};
 
     #[test]
     #[ignore]
@@ -480,15 +519,14 @@ mod sam2_tests {
         let enc_path = models_dir().join("sam2/sam2_hiera_tiny.encoder.onnx");
         let dec_path = models_dir().join("sam2/sam2_hiera_tiny.decoder.onnx");
         if !enc_path.exists() || !dec_path.exists() {
-            println!("  ⏭ Skipped (models not downloaded). Run: python chromors-ai/download_models.py sam2");
+            println!(
+                "  ⏭ Skipped (models not downloaded). Run: python chromors-ai/download_models.py sam2"
+            );
             return;
         }
 
-        let mut model = Sam2Model::new(
-            enc_path.to_str().unwrap(),
-            dec_path.to_str().unwrap(),
-        )
-        .unwrap();
+        let mut model =
+            Sam2Model::new(enc_path.to_str().unwrap(), dec_path.to_str().unwrap()).unwrap();
 
         let img = Image2D::<VipsBackend>::open(&asset("city_street.jpg")).unwrap();
         let (w, h) = img.spec.dims();
@@ -499,9 +537,15 @@ mod sam2_tests {
 
         // Point at image center (SAM2 coords are in 1024×1024 encoder space)
         let result = model
-            .segment(&embeddings, &[
-                Sam2Prompt::Point { x: 512.0, y: 512.0, label: label::FOREGROUND },
-            ], (w, h))
+            .segment(
+                &embeddings,
+                &[Sam2Prompt::Point {
+                    x: 512.0,
+                    y: 512.0,
+                    label: label::FOREGROUND,
+                }],
+                (w, h),
+            )
             .unwrap();
         println!("  IoU scores: {:?}", result.iou_scores);
         println!("  Selected mask: {}", result.selected_mask_index);
@@ -516,9 +560,9 @@ mod sam2_tests {
 #[cfg(feature = "cascadepsp")]
 mod cascadepsp_tests {
     use super::*;
-    use chromors_ai::cascadepsp::CascadePspModel;
-    use chromors::data::image::Image2D;
     use chromors::backend::vips::VipsBackend;
+    use chromors::data::image::Image2D;
+    use chromors_ai::cascadepsp::CascadePspModel;
 
     #[test]
     #[ignore]
@@ -528,7 +572,9 @@ mod cascadepsp_tests {
 
         let model_path = models_dir().join("cascadepsp/cascadepsp_base.onnx");
         if !model_path.exists() {
-            println!("  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py cascadepsp");
+            println!(
+                "  ⏭ Skipped (model not downloaded). Run: python chromors-ai/download_models.py cascadepsp"
+            );
             return;
         }
 

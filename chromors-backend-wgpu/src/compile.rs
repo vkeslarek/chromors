@@ -1,8 +1,8 @@
-use crate::buffer::GpuBuffer;
 use super::context::CachedPipelines;
 use super::emit::{self, Slot};
 use super::{GpuBuilder, GpuContext};
 use crate::Error;
+use crate::buffer::GpuBuffer;
 use std::sync::Arc;
 use wgpu;
 
@@ -164,11 +164,7 @@ fn compile_spirv(text: &str, hash: u64) -> Result<Vec<u8>, Error> {
             .unwrap()
             .to_string()
     }));
-    // Shaders live at the workspace root, one level above this crate.
-    let shader_dir = std::path::PathBuf::from(manifest)
-        .parent()
-        .map(|p| p.join("shaders"))
-        .unwrap_or_else(|| std::path::PathBuf::from(manifest).join("shaders"));
+    let shader_dir = std::path::PathBuf::from(manifest).join("shaders");
 
     let compiler = super::slang::SlangCompiler::new(shader_dir, out_dir);
     compiler

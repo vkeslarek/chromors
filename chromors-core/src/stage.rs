@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
-use crate::{Backend, Buffer, Data, Error, Kind};
 use crate::stage_cache::RegionCache;
 use crate::work_unit::WorkUnitFor;
+use crate::{Backend, Buffer, Data, Error, Kind};
 
 pub struct BoundarySource<K: Kind, B: Backend> {
     pub upstream: Data<K, B>,

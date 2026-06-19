@@ -580,7 +580,9 @@ fn edge_detection_kernels_compile_and_run() {
             h: 10,
             lod: chromors::work_unit::Lod(0),
         };
-        let bytes: Vec<u8> = img.pull(&chromors::data::image::RamImageTarget, rect).unwrap();
+        let bytes: Vec<u8> = img
+            .pull(&chromors::data::image::RamImageTarget, rect)
+            .unwrap();
         assert!(!bytes.is_empty());
     }
 }

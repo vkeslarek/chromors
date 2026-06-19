@@ -7,9 +7,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use crate::{AnyKind, Backend, Buffer, Data, Error, Kind, NodeId, Source, WorkUnit};
-use crate::work_unit::WorkUnitFor;
 use crate::stage::BoundarySource;
+use crate::work_unit::WorkUnitFor;
+use crate::{AnyKind, Backend, Buffer, Data, Error, Kind, NodeId, Source, WorkUnit};
 
 const MIB: u64 = 1024 * 1024;
 pub const DEFAULT_BUDGET: u64 = 256 * MIB;
@@ -154,20 +154,28 @@ impl<B: Backend> RegionCache<B> {
     fn evict(g: &mut Inner<B>) {
         let mut skips = 0usize;
         while g.bytes > g.budget {
-            let Some(key) = g.ring.pop_front() else { break; };
-            let Some(e) = g.map.get_mut(&key) else { continue; };
+            let Some(key) = g.ring.pop_front() else {
+                break;
+            };
+            let Some(e) = g.map.get_mut(&key) else {
+                continue;
+            };
             if Arc::strong_count(&e.payload) > 1 {
                 e.used = false;
                 g.ring.push_back(key);
                 skips += 1;
-                if skips > g.ring.len() { break; }
+                if skips > g.ring.len() {
+                    break;
+                }
                 continue;
             }
             if e.used {
                 e.used = false;
                 g.ring.push_back(key);
                 skips += 1;
-                if skips > g.ring.len() { break; }
+                if skips > g.ring.len() {
+                    break;
+                }
                 continue;
             }
             skips = 0;
@@ -254,7 +262,9 @@ impl<K: Kind, B: Backend> CacheExt<K, B> for Data<K, B> {
 // ── StageExt ────────────────────────────────────────────────────────────────
 
 pub trait StageExt {
-    fn stage(&self) -> Self where Self: Sized;
+    fn stage(&self) -> Self
+    where
+        Self: Sized;
 }
 
 impl<K: Kind, B: Backend> StageExt for Data<K, B>
@@ -284,7 +294,9 @@ mod tests {
     struct TestBuilder;
 
     impl Builder<TestBackend> for TestBuilder {
-        fn new(_ctx: Arc<()>) -> Self { TestBuilder }
+        fn new(_ctx: Arc<()>) -> Self {
+            TestBuilder
+        }
         fn enter(&mut self, _node: NodeId, _inputs: &[NodeId], _wu: &WorkUnit) {}
         fn finish(
             self,
@@ -305,8 +317,12 @@ mod tests {
     #[derive(Debug)]
     struct SizeKind(u64);
     impl AnyKind for SizeKind {
-        fn as_any(&self) -> &dyn Any { self }
-        fn byte_size(&self, _wu: &WorkUnit) -> u64 { self.0 }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn byte_size(&self, _wu: &WorkUnit) -> u64 {
+            self.0
+        }
         fn dyn_hash(&self, _state: &mut dyn Hasher) {}
     }
 
@@ -314,7 +330,10 @@ mod tests {
         CacheKey::new(
             content,
             &WorkUnit::Region(crate::Region {
-                x: n, y: 0, w: 1, h: 1,
+                x: n,
+                y: 0,
+                w: 1,
+                h: 1,
                 lod: crate::work_unit::Lod(0),
             }),
         )

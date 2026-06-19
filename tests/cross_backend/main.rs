@@ -5,10 +5,12 @@ use chromors::backend::vips::VipsBackend;
 use chromors::data::image::Image2D as GenImage;
 use chromors::data::mask2d::Mask2D;
 use chromors::operation::composite::{BlendMode, Composite2};
-use chromors::operation::geometry::{Angle, Angle45, CompassDirection, Direction, Extend, Interesting};
+use chromors::operation::geometry::{
+    Angle, Angle45, CompassDirection, Direction, Extend, Interesting,
+};
 use chromors::operation::{OperationBoolean, OperationMath, OperationMorphology, OperationRound};
 use chromors::pixel::Storage;
-use chromors::{VipsImageExt, GpuImageExt, GpuLutExt, GpuMask2DExt, VipsMask2DExt, VipsLutExt};
+use chromors::{GpuLutExt, GpuMask2DExt, VipsLutExt, VipsMask2DExt};
 
 /// Read a vips image whose runtime pixels are FLOAT (e.g. promoted by
 /// `linear`) but whose `format()` metadata still reports the pre-promotion
@@ -17,7 +19,6 @@ use chromors::{VipsImageExt, GpuImageExt, GpuLutExt, GpuMask2DExt, VipsMask2DExt
 /// `format()`. Returns normalized+clamped [0,1] values (raw vips `linear`
 /// output is `in_u8 * gain`, i.e. in the 0..255*gain range).
 fn vips_materialize_linear_f32_norm(img: &GenImage<VipsBackend>) -> Vec<f32> {
-    use chromors::io::Target;
     use chromors::work_unit::{Lod, Region};
     let (w, h) = (img.width(), img.height());
     let bands = img.layout().channel_count() as usize;
@@ -50,6 +51,7 @@ mod color;
 mod composite;
 mod edge;
 mod filters;
+mod generators;
 mod geometry;
 mod icc;
 mod lod_demand;

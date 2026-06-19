@@ -4,9 +4,9 @@
 //! tip serves from the store, and a second branch off the SAME boundary reuses
 //! those tiles instead of recomputing the upstream chain.
 
-use chromors::work_unit::{Lod, Region};
-use chromors::CacheExt;
 use crate::common;
+use chromors::CacheExt;
+use chromors::work_unit::{Lod, Region};
 
 fn full(w: i32, h: i32) -> Region {
     Region {

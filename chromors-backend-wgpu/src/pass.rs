@@ -22,18 +22,18 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hasher;
 use std::sync::Arc;
 
+use crate::AnyKind;
 use crate::Buffer;
 use crate::Error;
 use crate::Source;
-use crate::AnyKind;
 use crate::{Node, NodeId};
-use chromors_core::{AnyInput, AnyOperation};
 use crate::{Region, WorkUnit};
+use chromors_core::{AnyInput, AnyOperation};
 
+use super::{GpuBackend, GpuBuilder, GpuView};
 use crate::buffer::GpuBuffer;
 use crate::context::GpuContext;
 use crate::view::RegionParams;
-use super::{GpuBackend, GpuBuilder, GpuView};
 
 // ── Binding budget helpers ───────────────────────────────────────────────────
 

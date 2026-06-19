@@ -1,4 +1,4 @@
-use crate::color_params::{color_read_wrap, ConvertParams};
+use crate::color_params::{ConvertParams, color_read_wrap};
 use crate::prelude::*;
 
 impl Lower<GpuBackend> for crate::Convert<GpuBackend> {
@@ -21,4 +21,3 @@ impl Lower<GpuBackend> for crate::Convert<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

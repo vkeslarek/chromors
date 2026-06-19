@@ -1,8 +1,8 @@
 use std::ffi::CString;
 
-use crate::vips_error;
 use crate::Error;
-use crate::ffi as ffi;
+use crate::ffi;
+use crate::vips_error;
 
 /// A libvips output target (file or memory buffer).
 ///

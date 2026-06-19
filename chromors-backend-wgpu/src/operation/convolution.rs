@@ -104,4 +104,3 @@ impl Lower<GpuBackend> for crate::Convasep<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

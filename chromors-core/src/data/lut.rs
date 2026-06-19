@@ -71,4 +71,3 @@ pub type Lut<B> = Data<LutKind, B>;
 /// `float4` (`entries * 16` bytes), Vips side gives row-major `f64` (`entries
 /// * bands * 8` bytes, 1-band `Xsize x Ysize` matrix image).
 pub struct RawLutTarget;
-

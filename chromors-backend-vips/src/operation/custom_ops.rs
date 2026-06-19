@@ -1,5 +1,7 @@
 use crate::prelude::*;
-use chromors_core::operation::custom_ops::{CustomHistogram, HistogramSink, VectorscopeSink, VECTORSCOPE_GRID, CustomInvert, Checkerboard};
+use chromors_core::operation::custom_ops::{
+    Checkerboard, CustomHistogram, CustomInvert, HistogramSink, VECTORSCOPE_GRID, VectorscopeSink,
+};
 
 impl VipsCustomSink for HistogramSink {
     type Output = CustomHistogram;

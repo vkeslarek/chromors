@@ -4,7 +4,11 @@ impl GpuView for ImageKind {
     fn input(&self) -> View {
         View::new(
             "uint",
-            format!("CodecRegion<{}, {}>", self.layout.storage.gpu_codec(), self.layout.channel_count()),
+            format!(
+                "CodecRegion<{}, {}>",
+                self.layout.storage.gpu_codec(),
+                self.layout.channel_count()
+            ),
             "{ {buf}, {params}[0].region_in_{slot} }",
         )
     }
@@ -13,7 +17,15 @@ impl GpuView for ImageKind {
         OutputWrap {
             arg: View::new("uint", "RWRegion", "{ {buf}, {region} }"),
             dest: OutBuffer::Scratch,
-            encode: Some(View::new("Atomic<uint>", format!("RWCodecRegion<{}, {}>", self.layout.storage.gpu_codec(), self.layout.channel_count()), "{ {buf}, {region} }")),
+            encode: Some(View::new(
+                "Atomic<uint>",
+                format!(
+                    "RWCodecRegion<{}, {}>",
+                    self.layout.storage.gpu_codec(),
+                    self.layout.channel_count()
+                ),
+                "{ {buf}, {region} }",
+            )),
             params: RegionParams::tight(r.w, r.h).into_block("region_out"),
         }
     }
@@ -21,7 +33,12 @@ impl GpuView for ImageKind {
 
 impl Target<ImageKind, GpuBackend> for GpuBufferTarget {
     type Out = Arc<GpuBuffer>;
-    fn extract(&self, buf: &Buffer<GpuBackend>, _wu: &Region, _ctx: &GpuContext) -> Result<Self::Out, Error> {
+    fn extract(
+        &self,
+        buf: &Buffer<GpuBackend>,
+        _wu: &Region,
+        _ctx: &GpuContext,
+    ) -> Result<Self::Out, Error> {
         Ok(buf.payload.clone())
     }
 }

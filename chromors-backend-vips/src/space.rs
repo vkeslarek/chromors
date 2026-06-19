@@ -1,9 +1,9 @@
+use crate::AlphaState;
 use crate::ColorModel;
 use crate::ColorSpace;
 use crate::RgbPrimaries;
 use crate::TransferFn;
 use crate::WhitePoint;
-use crate::AlphaState;
 use crate::ffi;
 
 pub fn to_vips_interpretation(model: ColorModel, cs: ColorSpace) -> Option<i32> {
@@ -62,11 +62,19 @@ pub fn from_vips_interpretation(interp: i32, bands: i32) -> (ColorModel, AlphaSt
                 1 => (ColorModel::Gray, AlphaState::None, ColorSpace::SRGB),
                 3 => (ColorModel::Rgb, AlphaState::None, ColorSpace::SRGB),
                 4 => (ColorModel::Rgb, AlphaState::Straight, ColorSpace::SRGB),
-                n => (ColorModel::Multiband(n.clamp(0, 255) as u8), AlphaState::None, ColorSpace::SRGB),
+                n => (
+                    ColorModel::Multiband(n.clamp(0, 255) as u8),
+                    AlphaState::None,
+                    ColorSpace::SRGB,
+                ),
             };
         }
     };
 
-    let alpha = if bands > model.color_channels() as i32 { AlphaState::Straight } else { AlphaState::None };
+    let alpha = if bands > model.color_channels() as i32 {
+        AlphaState::Straight
+    } else {
+        AlphaState::None
+    };
     (model, alpha, default_cs)
 }

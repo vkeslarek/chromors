@@ -1,15 +1,12 @@
-use chromors_core::backend::Backend;
+use chromors_backend_wgpu::view::RegionParams;
+use chromors_backend_wgpu::{GpuBackend, GpuBuffer, GpuBuilder, GpuContext, GpuView};
+use chromors_core::buffer::Buffer;
+use chromors_core::data::image::ImageKind;
+use chromors_core::error::Error;
 use chromors_core::io::Source;
 use chromors_core::work_unit::Region;
-use chromors_core::data::image::{Image2D, ImageKind, RamImageTarget};
-use chromors_core::node::Data;
-use chromors_core::buffer::Buffer;
-use chromors_core::error::Error;
-use chromors_backend_wgpu::{GpuBackend, GpuContext, GpuBuffer, GpuBuilder, GpuView};
-use chromors_backend_wgpu::view::{View, RegionParams};
-use chromors_backend_vips::VipsBackend;
-use std::sync::Arc;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 pub struct RamImageSource {
     pub spec: Arc<ImageKind>,
@@ -25,11 +22,13 @@ impl Source<GpuBackend> for RamImageSource {
 
     fn fetch(&self, ctx: &GpuContext, _wu: &Region) -> Result<Buffer<GpuBackend>, Error> {
         use wgpu::util::DeviceExt;
-        let buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("RamImageSource"),
-            contents: &self.data,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("RamImageSource"),
+                contents: &self.data,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
         let gpu_buf = GpuBuffer::from_raw(Arc::new(buf), self.data.len() as u64);
         Ok(Buffer {
             payload: gpu_buf,
@@ -40,7 +39,9 @@ impl Source<GpuBackend> for RamImageSource {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let chromors_core::work_unit::WorkUnit::Region(region) = &wu else {
-            cx.fail(Error::InvalidWorkUnit("RamImageSource expects a Region".into()));
+            cx.fail(Error::InvalidWorkUnit(
+                "RamImageSource expects a Region".into(),
+            ));
             return;
         };
         match self.fetch(cx.ctx().as_ref(), region) {

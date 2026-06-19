@@ -1,19 +1,38 @@
-use chromors_core::*;
+use crate::{
+    GpuBackend, GpuBuffer, GpuBuilder, GpuContext, GpuView, OutBuffer, OutputWrap, RegionParams,
+    View,
+};
 use chromors_core::lut::RawLutTarget;
-use crate::{GpuBackend, GpuBuffer, GpuContext, GpuBuilder, GpuView, View, OutputWrap, OutBuffer, RegionParams};
+use chromors_core::*;
 use std::hash::Hasher;
 use std::sync::Arc;
 
 impl GpuView for LutKind {
     fn input(&self) -> View {
-        View::new("float4", "Region", "{ {buf}, {params}[0].region_in_{slot} }")
+        View::new(
+            "float4",
+            "Region",
+            "{ {buf}, {params}[0].region_in_{slot} }",
+        )
     }
 
     fn output(&self, wu: &WorkUnit) -> OutputWrap {
         let r = match wu {
             WorkUnit::Region(r) => r.clone(),
-            WorkUnit::Range(range) => Region { x: range.start, y: 0, w: range.end - range.start, h: 1, lod: chromors_core::Lod(0) },
-            _ => Region { x: 0, y: 0, w: self.entries as i32, h: 1, lod: chromors_core::Lod(0) },
+            WorkUnit::Range(range) => Region {
+                x: range.start,
+                y: 0,
+                w: range.end - range.start,
+                h: 1,
+                lod: chromors_core::Lod(0),
+            },
+            _ => Region {
+                x: 0,
+                y: 0,
+                w: self.entries as i32,
+                h: 1,
+                lod: chromors_core::Lod(0),
+            },
         };
         OutputWrap {
             arg: View::new("float4", "RWRegion", "{ {buf}, {region} }"),
@@ -58,9 +77,7 @@ impl Source<GpuBackend> for GpuConstantLutSource {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let WorkUnit::Range(range) = &wu else {
-            cx.fail(Error::InvalidWorkUnit(
-                "lut source expects a Range".into(),
-            ));
+            cx.fail(Error::InvalidWorkUnit("lut source expects a Range".into()));
             return;
         };
         let region = Region {

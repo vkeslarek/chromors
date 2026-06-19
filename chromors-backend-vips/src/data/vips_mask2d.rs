@@ -1,13 +1,19 @@
-use chromors_core::*;
+use crate::{VipsBackend, VipsBuilder, VipsHandle};
 use chromors_core::data::mask2d::{Mask2D, Mask2DKind, RamMaskTarget};
-use crate::{VipsBackend, VipsHandle, VipsBuilder};
-use std::sync::Arc;
+use chromors_core::*;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 pub trait VipsMask2DExt {
     fn extract_target(&self) -> RawMaskTarget;
     fn from_values(width: i32, height: i32, values: &[f32]) -> Mask2D<VipsBackend>;
-    fn from_values_scaled(width: i32, height: i32, values: &[f32], scale: f64, offset: f64) -> Mask2D<VipsBackend>;
+    fn from_values_scaled(
+        width: i32,
+        height: i32,
+        values: &[f32],
+        scale: f64,
+        offset: f64,
+    ) -> Mask2D<VipsBackend>;
     fn identity(n: i32) -> Mask2D<VipsBackend>;
 }
 
@@ -62,7 +68,11 @@ impl Source<VipsBackend> for VipsConstantMaskSource {
         self.spec.clone()
     }
 
-    fn fetch(&self, _ctx: &(), _wu: &chromors_core::work_unit::Region) -> Result<Buffer<VipsBackend>, Error> {
+    fn fetch(
+        &self,
+        _ctx: &(),
+        _wu: &chromors_core::work_unit::Region,
+    ) -> Result<Buffer<VipsBackend>, Error> {
         let ptr = unsafe {
             crate::ffi::vips_image_new_from_memory_copy(
                 self.data.as_ptr() as *const std::ffi::c_void,

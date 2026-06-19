@@ -282,8 +282,7 @@ impl Lower<VipsBackend> for crate::Saturation<VipsBackend> {
         let luma1 = add(luma_r, luma_g);
         let luma = add(luma1, luma_b);
 
-        let mut op_rgb =
-            VipsGObject::new(b"extract_band\0").unwrap();
+        let mut op_rgb = VipsGObject::new(b"extract_band\0").unwrap();
         op_rgb.set_image("in", ptr);
         op_rgb.set_int("band", 0);
         op_rgb.set_int("n", 3);
@@ -295,8 +294,7 @@ impl Lower<VipsBackend> for crate::Saturation<VipsBackend> {
         let out_rgb = add(rgb_scaled, luma_scaled);
 
         let out_ptr = if bands > 3 {
-            let mut op_a =
-                VipsGObject::new(b"extract_band\0").unwrap();
+            let mut op_a = VipsGObject::new(b"extract_band\0").unwrap();
             op_a.set_image("in", ptr);
             op_a.set_int("band", 3);
             op_a.set_int("n", bands - 3);
@@ -305,12 +303,7 @@ impl Lower<VipsBackend> for crate::Saturation<VipsBackend> {
             let mut out: *mut crate::ffi::VipsImage = std::ptr::null_mut();
             let arr = [out_rgb, a_ptr];
             let ret = unsafe {
-                crate::ffi::vips_bandjoin(
-                    arr.as_ptr() as *mut *mut _,
-                    &mut out,
-                    2,
-                    crate::null(),
-                )
+                crate::ffi::vips_bandjoin(arr.as_ptr() as *mut *mut _, &mut out, 2, crate::null())
             };
             if ret != 0 {
                 panic!("vips_bandjoin failed");
@@ -364,8 +357,7 @@ impl Lower<VipsBackend> for crate::BooleanConst<VipsBackend> {
 impl Lower<VipsBackend> for crate::RelationalConst<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op =
-            VipsGObject::new(b"relational_const\0").unwrap();
+        let mut op = VipsGObject::new(b"relational_const\0").unwrap();
         op.set_image("in", input_handle.ptr);
         op.set_int("relational", self.relational.into_vips());
         op.set_array_double("c", &self.c);
@@ -373,4 +365,3 @@ impl Lower<VipsBackend> for crate::RelationalConst<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

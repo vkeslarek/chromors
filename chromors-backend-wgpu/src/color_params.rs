@@ -5,15 +5,13 @@
 //! the §3.6 `Gpu*Id` traits are in scope, from the AGNOSTIC
 //! [`crate::color::pipeline::convert_matrices`] math.
 
-use crate::{
-    GpuAlphaId, GpuModelId, GpuTransferId, ParamBlock, ReadWrap, SlangPod, WriteWrap,
-};
-use crate::color::matrix::Matrix3x3;
 use crate::ColorModel;
-use crate::color::pipeline::convert_matrices;
-use crate::TransferFn;
 use crate::Error;
+use crate::TransferFn;
+use crate::color::matrix::Matrix3x3;
+use crate::color::pipeline::convert_matrices;
 use crate::pixel::{AlphaState, PixelLayout};
+use crate::{GpuAlphaId, GpuModelId, GpuTransferId, ParamBlock, ReadWrap, SlangPod, WriteWrap};
 
 /// Param block for `Convert`'s view-wrap read/write (§5.5-§5.12, §6.1).
 #[repr(C)]
@@ -113,8 +111,8 @@ pub fn color_write_wrap(p: ConvertParams) -> WriteWrap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::color::space::ColorSpace;
     use crate::Storage;
+    use crate::color::space::ColorSpace;
 
     fn layout(model: ColorModel, alpha: AlphaState, cs: ColorSpace) -> PixelLayout {
         PixelLayout {

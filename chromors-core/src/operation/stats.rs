@@ -1,5 +1,5 @@
-use std::hash::Hasher;
 use crate::operation::IntoVipsEnum;
+use std::hash::Hasher;
 
 use crate::backend::Backend;
 use crate::data::image::{Image2D, ImageKind};
@@ -398,7 +398,6 @@ where
         })
     }
 }
-
 
 impl<B: crate::backend::Backend> crate::data::image::Image2D<B>
 where

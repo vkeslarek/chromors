@@ -77,4 +77,3 @@ impl Lower<VipsBackend> for crate::Abs<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

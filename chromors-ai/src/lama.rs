@@ -4,17 +4,17 @@
 //! Output: `Image2D<B>` (inpainted result)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
 use chromors::data::mask2d::{Mask2D, RamMaskTarget};
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -41,7 +41,13 @@ pub struct LamaConfig {
 
 impl Default for LamaConfig {
     fn default() -> Self {
-        Self { input_size: 512, pad_multiple: 8, mask_threshold: 0.5, output_is_255: true, blend_alpha: 1.0 }
+        Self {
+            input_size: 512,
+            pad_multiple: 8,
+            mask_threshold: 0.5,
+            output_is_255: true,
+            blend_alpha: 1.0,
+        }
     }
 }
 
@@ -66,7 +72,9 @@ impl LamaModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &LamaConfig { &self.config }
+    pub fn config(&self) -> &LamaConfig {
+        &self.config
+    }
 
     /// Inpaints masked regions of an image.
     ///
@@ -87,11 +95,25 @@ impl LamaModel {
         let iw = img_resized.width() as usize;
         let ih = img_resized.height() as usize;
 
-        let pad_w = if iw % pm != 0 { ((iw / pm) + 1) * pm } else { iw };
-        let pad_h = if ih % pm != 0 { ((ih / pm) + 1) * pm } else { ih };
+        let pad_w = if iw % pm != 0 {
+            ((iw / pm) + 1) * pm
+        } else {
+            iw
+        };
+        let pad_h = if ih % pm != 0 {
+            ((ih / pm) + 1) * pm
+        } else {
+            ih
+        };
 
-        let img_bytes = img_resized.pull(&RamImageTarget, Region::full((iw as i32, ih as i32), Lod(0)))?;
-        let mask_values = mask.pull(&RamMaskTarget, Region::full((mask.width(), mask.height()), Lod(0)))?;
+        let img_bytes = img_resized.pull(
+            &RamImageTarget,
+            Region::full((iw as i32, ih as i32), Lod(0)),
+        )?;
+        let mask_values = mask.pull(
+            &RamMaskTarget,
+            Region::full((mask.width(), mask.height()), Lod(0)),
+        )?;
         let mw = mask.width() as usize;
         let mh = mask.height() as usize;
 
@@ -127,7 +149,8 @@ impl LamaModel {
             .map_err(|e| chromors::error::Error::Backend(format!("LaMa mask tensor: {e:?}")))?
             .into_dyn();
 
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(ort::inputs!["image" => image_tensor, "mask" => mask_tensor])
             .map_err(|e| chromors::error::Error::Backend(format!("LaMa inference: {e:?}")))?;
 
@@ -139,7 +162,11 @@ impl LamaModel {
         let out_h = shape[2] as usize;
         let out_w = shape[3] as usize;
         // Normalize to [0, 255]: model outputs either [0, 255] or [0, 1]
-        let to_255 = if self.config.output_is_255 { 1.0f32 } else { 255.0 };
+        let to_255 = if self.config.output_is_255 {
+            1.0f32
+        } else {
+            255.0
+        };
         let blend = self.config.blend_alpha;
 
         let crop_h = ih.min(out_h);
@@ -155,7 +182,8 @@ impl LamaModel {
                 let in_mask = mi < mask_values.len() && mask_values[mi] > thresh;
 
                 for c in 0..3 {
-                    let inpainted = (slice[c * out_h * out_w + y * out_w + x] * to_255).clamp(0.0, 255.0);
+                    let inpainted =
+                        (slice[c * out_h * out_w + y * out_w + x] * to_255).clamp(0.0, 255.0);
                     output_bytes[dst + c] = if in_mask && blend < 1.0 {
                         let original = img_bytes[(y * iw + x) * 3 + c] as f32;
                         (original * (1.0 - blend) + inpainted * blend) as u8
@@ -166,6 +194,11 @@ impl LamaModel {
             }
         }
 
-        Ok(B::image_from_bytes(output_bytes, crop_w as i32, crop_h as i32, RGB_U8_LAYOUT))
+        Ok(B::image_from_bytes(
+            output_bytes,
+            crop_w as i32,
+            crop_h as i32,
+            RGB_U8_LAYOUT,
+        ))
     }
 }

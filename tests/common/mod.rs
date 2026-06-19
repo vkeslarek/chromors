@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex, Once};
 
 use bytemuck;
 pub mod ram_image_source;
-use chromors::{VipsImageExt, GpuImageExt, GpuLutExt, GpuMask2DExt, VipsMask2DExt, VipsLutExt};
-use chromors_backend_wgpu::{GpuBackend, GpuContext};
+use chromors::VipsImageExt;
 use chromors_backend_vips::VipsBackend;
+use chromors_backend_wgpu::{GpuBackend, GpuContext};
 use chromors_core::data::image::Image2D as GenImage;
 use chromors_core::data::image::Image2D;
 use chromors_core::work_unit::{Lod, Region};
@@ -57,9 +57,14 @@ pub fn gpu_ctx() -> Arc<GpuContext> {
 
 /// Upload a vips image to the POC GpuBackend.
 pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImage<GpuBackend> {
-    let wu = chromors_core::work_unit::Region::full((img.width() as i32, img.height() as i32), chromors_core::work_unit::Lod(0));
-    use chromors_core::io::Target;
-    let bytes = img.pull(&chromors_core::data::image::RamImageTarget, wu.clone()).unwrap();
+    let wu = chromors_core::work_unit::Region::full(
+        (img.width() as i32, img.height() as i32),
+        chromors_core::work_unit::Lod(0),
+    );
+
+    let bytes = img
+        .pull(&chromors_core::data::image::RamImageTarget, wu.clone())
+        .unwrap();
     let src = Arc::new(ram_image_source::RamImageSource {
         spec: Arc::new(chromors_core::data::image::ImageKind {
             layout: img.spec.layout,
@@ -73,7 +78,6 @@ pub fn vips_to_gpu(img: &Image2D<VipsBackend>, ctx: &Arc<GpuContext>) -> GenImag
 
 /// Materialize a POC GPU image and read back the raw f32 bytes.
 pub fn poc_materialize(img: &GenImage<GpuBackend>) -> Vec<u8> {
-    use chromors::io::Target;
     let (w, h) = (img.width() as i32, img.height() as i32);
     let rect = Region {
         x: 0,
@@ -88,7 +92,6 @@ pub fn poc_materialize(img: &GenImage<GpuBackend>) -> Vec<u8> {
 
 /// Read vips bytes as f32 in [0, 1] range.
 pub fn vips_to_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
-    use chromors::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = chromors_core::data::image::RamImageTarget;
     let bytes = img
@@ -107,7 +110,6 @@ pub fn vips_to_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
 }
 
 pub fn vips_materialize(img: &Image2D<VipsBackend>) -> Vec<u8> {
-    use chromors::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = chromors_core::data::image::RamImageTarget;
     img.pull(
@@ -174,7 +176,6 @@ pub fn rms_f32(a: &[u8], b: &[u8]) -> f64 {
 /// Convert any Vips materialized image bytes to normalized f32 [0, 1].
 /// Handles u8, u16, and f32 formats.
 pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
-    use chromors::io::Target;
     let (w, h) = (img.width(), img.height());
     let bands = img.layout().channel_count() as usize;
     let target = chromors_core::data::image::RamImageTarget;
@@ -217,7 +218,6 @@ pub fn vips_materialize_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
 /// (possibly stale) `format()` metadata. Needed for ops like `multiply` that
 /// vips promotes uchar->ushort at runtime without updating `format()`.
 pub fn vips_materialize_raw_u16(img: &Image2D<VipsBackend>) -> Vec<u16> {
-    use chromors::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = chromors_core::data::image::RamImageTarget;
     let bytes = img
@@ -239,7 +239,6 @@ pub fn vips_materialize_raw_u16(img: &Image2D<VipsBackend>) -> Vec<u16> {
 /// (possibly stale) `format()` metadata. Needed for ops like `divide` that
 /// vips promotes uchar->float at runtime without updating `format()`.
 pub fn vips_materialize_raw_f32(img: &Image2D<VipsBackend>) -> Vec<f32> {
-    use chromors::io::Target;
     let (w, h) = (img.width(), img.height());
     let target = chromors_core::data::image::RamImageTarget;
     let bytes = img

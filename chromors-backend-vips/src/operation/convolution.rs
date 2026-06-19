@@ -123,4 +123,3 @@ impl Lower<VipsBackend> for crate::Convasep<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

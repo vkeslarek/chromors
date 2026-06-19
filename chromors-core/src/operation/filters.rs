@@ -335,7 +335,7 @@ where
     pub fn guided_filter(&self, p: &crate::data::image::Image2D<B>, radius: f32, eps: f64) -> Self {
         // Guidance image: self (I)
         // Filtering input image: p
-        
+
         let mean_i = self.blur(radius);
         let mean_p = p.blur(radius);
 
@@ -356,7 +356,7 @@ where
 
         // a = cov_ip / (var_i + eps)
         let a = cov_ip.divide(&var_i_eps);
-        
+
         // b = mean_p - a * mean_i
         let a_mean_i = a.multiply(&mean_i);
         let b = mean_p.subtract(&a_mean_i);

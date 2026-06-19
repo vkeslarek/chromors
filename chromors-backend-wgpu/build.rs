@@ -13,7 +13,9 @@ fn main() {
         let slang_bindings = bindgen::Builder::default()
             .header("../cpp/wrapper_slang.h")
             .clang_arg(format!("-I{}", slang_include.display()))
-            .clang_arg("-x").clang_arg("c++").clang_arg("-std=c++17")
+            .clang_arg("-x")
+            .clang_arg("c++")
+            .clang_arg("-std=c++17")
             .allowlist_function("slang_.*")
             .allowlist_type("(Slang.*|ISlang.*|IBlob)")
             .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -28,7 +30,8 @@ fn main() {
         cc::Build::new()
             .file("../cpp/slang_wrapper.cpp")
             .include(slang_include.to_str().unwrap())
-            .cpp(true).std("c++17")
+            .cpp(true)
+            .std("c++17")
             .compile("slang_wrapper");
 
         let wrapper_bindings = bindgen::Builder::default()

@@ -44,5 +44,3 @@ where
         self.spec.dyn_hash(state);
     }
 }
-
-

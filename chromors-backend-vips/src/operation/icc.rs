@@ -12,4 +12,3 @@ impl Lower<VipsBackend> for crate::Gamma<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

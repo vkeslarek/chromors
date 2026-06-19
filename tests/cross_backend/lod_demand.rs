@@ -3,12 +3,12 @@
 //! uploads, or processes full resolution on the GPU — this is what keeps large
 //! images smooth (the chromors-viewer mip path). No GPU `Shrink` op involved.
 use super::common;
+use chromors::VipsImageExt;
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::RamImageTarget;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::VipsImageExt;
 
 fn disp() -> PixelLayout {
     PixelLayout {
@@ -25,7 +25,10 @@ fn disp() -> PixelLayout {
 fn lod_demand_matches_vips_shrink() {
     let _g = common::vips_serial();
     let ctx = common::gpu_ctx();
-    let vips = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap();
+    let vips = chromors::data::image::Image2D::<chromors::backend::vips::VipsBackend>::open(
+        "tests/fixtures/rgb.jpg",
+    )
+    .unwrap();
     let gpu = common::vips_to_gpu(&vips, &ctx);
     let disp_img = gpu.convert(disp());
 

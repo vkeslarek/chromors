@@ -45,8 +45,8 @@ pub struct VectorscopeOp<B: Backend> {
     pub grid: u32,
 }
 
-impl<B: Backend> Operation<B> for VectorscopeOp<B> 
-where 
+impl<B: Backend> Operation<B> for VectorscopeOp<B>
+where
     Self: crate::operation::Lower<B>,
 {
     type Output = VectorscopeKind;

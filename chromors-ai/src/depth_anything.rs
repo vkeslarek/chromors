@@ -4,17 +4,17 @@
 //! Output: `Mask2D<B>` (depth map, 0..1 normalized, near=0 far=1 by default)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
 use chromors::data::mask2d::Mask2D;
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -64,9 +64,16 @@ impl DepthAnythingModel {
     }
 
     pub fn with_config(model_path: &str, config: DepthAnythingConfig) -> ort::Result<Self> {
-        assert!(config.input_size % 14 == 0,
-            "input_size must be divisible by 14 (DINOv2 patch size), got {}", config.input_size);
-        assert!(config.gamma > 0.0, "gamma must be positive, got {}", config.gamma);
+        assert!(
+            config.input_size % 14 == 0,
+            "input_size must be divisible by 14 (DINOv2 patch size), got {}",
+            config.input_size
+        );
+        assert!(
+            config.gamma > 0.0,
+            "gamma must be positive, got {}",
+            config.gamma
+        );
 
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
@@ -79,7 +86,9 @@ impl DepthAnythingModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &DepthAnythingConfig { &self.config }
+    pub fn config(&self) -> &DepthAnythingConfig {
+        &self.config
+    }
 
     /// Estimates depth from a single image.
     ///
@@ -95,7 +104,10 @@ impl DepthAnythingModel {
             .resize(sz as f64 / w as f64, None, Some(sz as f64 / h as f64), None)
             .convert(RGB_U8_LAYOUT);
 
-        let bytes = preprocessed.pull(&RamImageTarget, Region::full((sz as i32, sz as i32), Lod(0)))?;
+        let bytes = preprocessed.pull(
+            &RamImageTarget,
+            Region::full((sz as i32, sz as i32), Lod(0)),
+        )?;
 
         let mean = self.config.normalize_mean;
         let std = self.config.normalize_std;
@@ -113,9 +125,12 @@ impl DepthAnythingModel {
             .map_err(|e| chromors::error::Error::Backend(format!("DepthAnything tensor: {e:?}")))?
             .into_dyn();
 
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(ort::inputs!["pixel_values" => input_tensor])
-            .map_err(|e| chromors::error::Error::Backend(format!("DepthAnything inference: {e:?}")))?;
+            .map_err(|e| {
+                chromors::error::Error::Backend(format!("DepthAnything inference: {e:?}"))
+            })?;
 
         let out_key = outputs.keys().next().unwrap();
         let (shape, slice) = outputs[out_key]
@@ -134,14 +149,24 @@ impl DepthAnythingModel {
         if self.config.normalize_output {
             let min_v = depth_values.iter().cloned().fold(f32::MAX, f32::min);
             let max_v = depth_values.iter().cloned().fold(f32::MIN, f32::max);
-            let range = if (max_v - min_v).abs() > 1e-6 { max_v - min_v } else { 1.0 };
-            for v in depth_values.iter_mut() { *v = (*v - min_v) / range; }
+            let range = if (max_v - min_v).abs() > 1e-6 {
+                max_v - min_v
+            } else {
+                1.0
+            };
+            for v in depth_values.iter_mut() {
+                *v = (*v - min_v) / range;
+            }
         }
 
         let gamma = self.config.gamma;
         for v in depth_values.iter_mut() {
-            if self.config.invert { *v = 1.0 - *v; }
-            if (gamma - 1.0).abs() > 1e-6 { *v = v.powf(gamma); }
+            if self.config.invert {
+                *v = 1.0 - *v;
+            }
+            if (gamma - 1.0).abs() > 1e-6 {
+                *v = v.powf(gamma);
+            }
             *v = v.clamp(0.0, 1.0);
         }
 

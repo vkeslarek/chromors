@@ -1,12 +1,17 @@
-use chromors_core::*;
+use crate::{GpuBackend, GpuBuffer, GpuBuilder, GpuContext, GpuView, RegionParams};
 use chromors_core::data::mask2d::{Mask2D, Mask2DKind, RamMaskTarget};
-use crate::{GpuBackend, GpuBuffer, GpuContext, GpuBuilder, RegionParams, GpuView};
-use std::sync::Arc;
+use chromors_core::*;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 pub trait GpuMask2DExt {
     fn identity(ctx: Arc<GpuContext>, n: i32) -> Mask2D<GpuBackend>;
-    fn from_values(ctx: Arc<GpuContext>, width: i32, height: i32, values: &[f32]) -> Mask2D<GpuBackend>;
+    fn from_values(
+        ctx: Arc<GpuContext>,
+        width: i32,
+        height: i32,
+        values: &[f32],
+    ) -> Mask2D<GpuBackend>;
     fn extract_target(&self) -> GpuBufferTarget;
 }
 
@@ -46,7 +51,11 @@ impl Source<GpuBackend> for GpuConstantMaskSource {
         self.spec.clone()
     }
 
-    fn fetch(&self, ctx: &GpuContext, _wu: &chromors_core::work_unit::Region) -> Result<Buffer<GpuBackend>, Error> {
+    fn fetch(
+        &self,
+        ctx: &GpuContext,
+        _wu: &chromors_core::work_unit::Region,
+    ) -> Result<Buffer<GpuBackend>, Error> {
         use wgpu::util::DeviceExt;
         let bytes = unsafe {
             std::slice::from_raw_parts(self.data.as_ptr() as *const u8, self.data.len() * 4)
@@ -77,16 +86,25 @@ impl Source<GpuBackend> for GpuConstantMaskSource {
             Ok(buf) => {
                 let geom = RegionParams::tight(self.spec.width, self.spec.height);
                 cx.input(
-                    crate::view::View::new("float", "MaskRegion", "{ {buf}, {params}[0].region_in_{slot} }"),
+                    crate::view::View::new(
+                        "float",
+                        "MaskRegion",
+                        "{ {buf}, {params}[0].region_in_{slot} }",
+                    ),
                     geom.into_block("region_in_{slot}"),
                     buf.payload,
                 );
                 let r = chromors_core::work_unit::Region::typed(&wu).unwrap();
                 cx.output(crate::view::OutputWrap {
-                    arg: crate::view::View::new("float", "RWMaskRegion", "{ {buf}, {params}[0].region_out }"),
+                    arg: crate::view::View::new(
+                        "float",
+                        "RWMaskRegion",
+                        "{ {buf}, {params}[0].region_out }",
+                    ),
                     dest: crate::view::OutBuffer::Target,
                     encode: None,
-                    params: crate::view::RegionParams::tight(r.w as i32, r.h as i32).into_block("region_out"),
+                    params: crate::view::RegionParams::tight(r.w as i32, r.h as i32)
+                        .into_block("region_out"),
                 });
             }
             Err(e) => cx.fail(e),

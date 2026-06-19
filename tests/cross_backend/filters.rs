@@ -359,7 +359,11 @@ fn canny_runs_and_is_sane() {
 
     let vips_zero_frac =
         vips_floats.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / vips_floats.len() as f64;
-    let gpu_zero_frac = gpu_bytes.iter().filter(|&&v| v == 0).count() as f64 / gpu_bytes.len() as f64;
-    println!("canny zero-fraction: vips = {:.3}, gpu = {:.3}", vips_zero_frac, gpu_zero_frac);
+    let gpu_zero_frac =
+        gpu_bytes.iter().filter(|&&v| v == 0).count() as f64 / gpu_bytes.len() as f64;
+    println!(
+        "canny zero-fraction: vips = {:.3}, gpu = {:.3}",
+        vips_zero_frac, gpu_zero_frac
+    );
     assert!(gpu_zero_frac > 0.5, "gpu canny output not sparse");
 }

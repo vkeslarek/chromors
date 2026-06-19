@@ -80,4 +80,3 @@ impl Lower<VipsBackend> for crate::Bandjoin<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-

@@ -1,13 +1,13 @@
 use std::hash::Hasher;
 
-use chromors_core::backend::Backend;
 use crate::view::{ParamBlock, ViewAdapter};
 use crate::{GpuBackend, GpuBuilder, GpuView};
+use bytemuck;
+use chromors_core::IntoVipsEnum;
+use chromors_core::backend::Backend;
 use chromors_core::operation::geometry::*;
 use chromors_core::operation::{Lower, Operation};
-use chromors_core::IntoVipsEnum;
 use chromors_core::work_unit::{Region, WorkUnit};
-use bytemuck;
 
 // ── Remap (zero-cost index-remapping view adapter) ──────────────────────────
 
@@ -65,35 +65,18 @@ pub fn remap_adapter(kind: RemapKind, geo: RemapParams) -> ViewAdapter {
     }
 }
 
-use chromors_core::operation::geometry::{Kernel, Direction, Angle, Angle45, Extend, Interesting, CompassDirection, Size};
 use chromors_core::operation::geometry::*;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+use chromors_core::operation::geometry::{
+    Angle, Angle45, CompassDirection, Direction, Extend, Interesting, Kernel, Size,
+};
 
 // ── Operations ────────────────────────────────────────────────────────────────
 
-
-
-
-
 // ── GPU Lowering ──────────────────────────────────────────────────────────────
 
-
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Crop<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Crop<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.adapt(remap_adapter(
             RemapKind::Translate,
@@ -107,7 +90,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ExtractArea<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::ExtractArea<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.adapt(remap_adapter(
             RemapKind::Translate,
@@ -121,7 +106,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Flip<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Flip<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let kind = match self.direction {
             Direction::Horizontal => RemapKind::FlipH,
@@ -140,7 +127,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Rot90<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Rot90<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let out_spec = self.output_spec();
         match self.angle {
@@ -180,7 +169,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Subsample<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Subsample<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.adapt(remap_adapter(
             RemapKind::Scale,
@@ -194,7 +185,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Zoom<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Zoom<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.adapt(remap_adapter(
             RemapKind::Scale,
@@ -208,7 +201,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Replicate<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Replicate<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         cx.adapt(remap_adapter(
@@ -223,7 +218,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Resize<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Resize<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let hscale = self.scale;
         let vscale = self.vertical_scale.unwrap_or(self.scale);
@@ -237,7 +234,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Reduce<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Reduce<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(
             crate::view::ParamBlock::new()
@@ -249,7 +248,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ReduceHorizontal<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::ReduceHorizontal<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(
             crate::view::ParamBlock::new()
@@ -261,7 +262,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ReduceVertical<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::ReduceVertical<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         cx.param_block(
             crate::view::ParamBlock::new()
@@ -273,7 +276,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Embed<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Embed<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
@@ -300,7 +305,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Rot45<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Rot45<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let out_spec = self.output_spec();
@@ -343,7 +350,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Rotate<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Rotate<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let out_spec = self.output_spec();
@@ -377,7 +386,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Gravity<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Gravity<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let old_w = in_spec.width;
@@ -397,8 +408,14 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
         };
         let bg = self.background.unwrap_or([0.0, 0.0, 0.0]);
         let extend_mode = self.extend.map(|e| e.into_vips()).unwrap_or(0);
+        let (out_x, out_y) = match cx.wu() {
+            chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
+            _ => (0, 0),
+        };
         cx.param_block(
             crate::view::ParamBlock::new()
+                .param("out_x", out_x)
+                .param("out_y", out_y)
                 .param("ox", ox)
                 .param("oy", oy)
                 .param("in_w", in_spec.width as u32)
@@ -413,7 +430,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Thumbnail<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Thumbnail<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let out_spec = self.output_spec();
@@ -429,7 +448,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Shrink<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Shrink<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let (out_x, out_y) = match cx.wu() {
             chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
@@ -447,7 +468,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ShrinkHorizontal<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::ShrinkHorizontal<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let (out_x, out_y) = match cx.wu() {
             chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
@@ -465,7 +488,9 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::ShrinkVertical<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::ShrinkVertical<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let (out_x, out_y) = match cx.wu() {
             chromors_core::work_unit::WorkUnit::Region(r) => (r.x, r.y),
@@ -483,11 +508,13 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
     }
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Smartcrop<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Smartcrop<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
-        use chromors_core::operation::geometry::Interesting;
         use chromors_core::data::image::{Image2D, RamImageTarget};
         use chromors_core::io::Target;
+        use chromors_core::operation::geometry::Interesting;
         use chromors_core::work_unit::Lod;
 
         let spec = &*self.input.spec;
@@ -528,7 +555,10 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
                                 // Horizontal gradient (right neighbor, clamped).
                                 if x + 1 < w {
                                     for b in 0..bands.min(3) {
-                                        let d = (bytes[idx + b] as i32 - bytes[idx + bands + b] as i32).unsigned_abs() as u64;
+                                        let d = (bytes[idx + b] as i32
+                                            - bytes[idx + bands + b] as i32)
+                                            .unsigned_abs()
+                                            as u64;
                                         col_scores[x] += d;
                                         col_scores[x + 1] += d;
                                     }
@@ -536,7 +566,10 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
                                 // Vertical gradient (bottom neighbor, clamped).
                                 if y + 1 < h {
                                     for b in 0..bands.min(3) {
-                                        let d = (bytes[idx + b] as i32 - bytes[idx + stride + b] as i32).unsigned_abs() as u64;
+                                        let d = (bytes[idx + b] as i32
+                                            - bytes[idx + stride + b] as i32)
+                                            .unsigned_abs()
+                                            as u64;
                                         row_scores[y] += d;
                                         row_scores[y + 1] += d;
                                     }
@@ -560,26 +593,37 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
 
         cx.adapt(remap_adapter(
             RemapKind::Translate,
-            RemapParams { tx: left, ty: top, ..Default::default() },
+            RemapParams {
+                tx: left,
+                ty: top,
+                ..Default::default()
+            },
         ));
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
 
 fn smartcrop_best_window(scores: &[u64], window: usize) -> usize {
-    if window == 0 || window >= scores.len() { return 0; }
+    if window == 0 || window >= scores.len() {
+        return 0;
+    }
     let mut sum: u64 = scores[..window].iter().sum();
     let mut best = sum;
     let mut best_off = 0;
     for i in 1..=(scores.len() - window) {
         sum += scores[i + window - 1];
         sum -= scores[i - 1];
-        if sum > best { best = sum; best_off = i; }
+        if sum > best {
+            best = sum;
+            best_off = i;
+        }
     }
     best_off
 }
 
-impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::operation::geometry::Grid<crate::GpuBackend> {
+impl chromors_core::operation::Lower<crate::GpuBackend>
+    for chromors_core::operation::geometry::Grid<crate::GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         let in_spec = &*self.input.spec;
         let (out_x, out_y) = match cx.wu() {
@@ -598,4 +642,3 @@ impl chromors_core::operation::Lower<crate::GpuBackend> for chromors_core::opera
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

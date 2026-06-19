@@ -3,14 +3,14 @@ use std::ffi::CStr;
 use std::ptr;
 use std::sync::Arc;
 
-use crate::Backend;
-use crate::Builder;
-use crate::Buffer;
-use crate::Error;
-use crate::ffi;
 use crate::AnyKind;
+use crate::Backend;
+use crate::Buffer;
+use crate::Builder;
+use crate::Error;
 use crate::Node;
 use crate::WorkUnit;
+use crate::ffi;
 
 pub fn null() -> *const std::ffi::c_void {
     ptr::null()
@@ -108,6 +108,7 @@ pub struct VipsBuilder {
     outputs: HashMap<NodeKey, VipsHandle>,
     current: Option<NodeKey>,
     current_wu: Option<WorkUnit>,
+    error: Option<Error>,
 }
 
 impl Default for VipsBuilder {
@@ -116,6 +117,7 @@ impl Default for VipsBuilder {
             outputs: HashMap::new(),
             current: None,
             current_wu: None,
+            error: None,
         }
     }
 }
@@ -131,6 +133,14 @@ impl VipsBuilder {
         let k = self.current.expect("emit() called outside a lower()");
         self.outputs.insert(k, handle);
     }
+    pub fn fail(&mut self, e: Error) {
+        if self.error.is_none() {
+            self.error = Some(e);
+        }
+    }
+    pub fn take_error(&mut self) -> Option<Error> {
+        self.error.take()
+    }
     fn take(&mut self, node: NodeKey) -> Option<VipsHandle> {
         self.outputs.remove(&node)
     }
@@ -139,6 +149,31 @@ impl VipsBuilder {
             .as_ref()
             .expect("VipsBuilder::wu called outside a lower()")
     }
+}
+
+pub fn image_from_memory(
+    bytes: &[u8],
+    w: i32,
+    h: i32,
+    layout: chromors_core::pixel::PixelLayout,
+) -> Result<Arc<VipsHandle>, Error> {
+    ensure_init();
+    let vips_format = layout.storage.into_vips_band_format();
+    let bands = layout.channel_count() as i32;
+    let ptr = unsafe {
+        ffi::vips_image_new_from_memory_copy(
+            bytes.as_ptr() as *const std::ffi::c_void,
+            bytes.len(),
+            w,
+            h,
+            bands,
+            vips_format,
+        )
+    };
+    if ptr.is_null() {
+        return Err(Error::Vips(vips_error()));
+    }
+    Ok(Arc::new(VipsHandle { ptr }))
 }
 
 impl Backend for VipsBackend {
@@ -163,6 +198,9 @@ impl Builder<VipsBackend> for VipsBuilder {
         spec: Arc<dyn AnyKind>,
         _root_wu: &WorkUnit,
     ) -> Result<Buffer<VipsBackend>, Error> {
+        if let Some(e) = self.take_error() {
+            return Err(e);
+        }
         let handle = self
             .take(root)
             .ok_or_else(|| Error::Vips("root node produced no handle".into()))?;

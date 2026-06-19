@@ -175,7 +175,6 @@ fn bandmean_matches_vips() {
     println!("bandmean RMS = {}", rms);
     assert!(rms < 5.0, "bandmean diff too high: {}", rms);
 }
-use super::*;
 /// GPU Gaussian blur must match vips `gaussblur` on the same linear data.
 /// Interior-only — edge handling differs (vips extend vs GPU clamp).
 /// Cast round trip u8 RGBA -> f32 RGBA -> u8 RGBA must be ~lossless on both

@@ -11,7 +11,7 @@ fn histogram_extracts_channel() {
     let hist = gpu_img.histogram(256, 0);
 
     use chromors::data::histogram::RawTarget;
-    use chromors::io::Target;
+
     use chromors::work_unit::Atomic;
 
     let bytes: Vec<u8> = hist.pull(&RawTarget, Atomic).unwrap();
@@ -36,7 +36,7 @@ fn histogram_capability_matches_gpu() {
 
     // Vips: hist_find on a single band -> 256x1 uint image, sum of all bins.
     use chromors::data::histogram::GpuImageExt;
-    use chromors::io::Target;
+
     use chromors::work_unit::{Lod, Region};
     let vips_hist = vips_img.histogram_find(Some(0));
     let target = chromors::data::image::RamImageTarget;
@@ -93,7 +93,7 @@ fn histogram_gpu_capability_counts_pixels() {
     let (w, h) = (gpu_img.width(), gpu_img.height());
 
     use chromors::data::histogram::RawTarget;
-    use chromors::io::Target;
+
     use chromors::work_unit::Atomic;
 
     for channel in [0u32, 1, 2] {
@@ -130,7 +130,7 @@ fn histogram_find_matches_vips_gray() {
     let (w, h) = (vips_img.width(), vips_img.height());
 
     use chromors::data::image::RamImageTarget;
-    use chromors::io::Target;
+
     use chromors::work_unit::{Lod, Region};
 
     let vips_hist = vips_img.histogram_find(Some(0));
@@ -225,7 +225,7 @@ fn histogram_cumulative_normalize_plot_gpu_smoke() {
     let gpu_img = common::vips_to_gpu(&vips_img, &ctx);
 
     use chromors::data::image::RamImageTarget;
-    use chromors::io::Target;
+
     use chromors::work_unit::{Lod, Region};
 
     let hist = gpu_img.histogram_find(Some(0));
@@ -296,4 +296,3 @@ fn histogram_cumulative_normalize_plot_gpu_smoke() {
 }
 
 // ── Band / channel operations ─────────────────────────────────────────────────
-

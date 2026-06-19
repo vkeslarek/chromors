@@ -1,8 +1,17 @@
-pub use chromors_core::*;
-pub use chromors_core::pixel::*;
 pub use chromors_core::color::*;
+pub use chromors_core::pixel::*;
+pub use chromors_core::*;
 
-#[allow(non_upper_case_globals, non_camel_case_types, non_snake_case, dead_code, warnings, clippy::all, unnecessary_transmutes, unsafe_op_in_unsafe_fn)]
+#[allow(
+    non_upper_case_globals,
+    non_camel_case_types,
+    non_snake_case,
+    dead_code,
+    warnings,
+    clippy::all,
+    unnecessary_transmutes,
+    unsafe_op_in_unsafe_fn
+)]
 pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/ffi.rs"));
 }
@@ -13,13 +22,15 @@ pub use backend::*;
 
 // Vips infrastructure (formerly backend/vips/)
 pub mod custom;
+pub mod generator;
+pub mod generator_rng;
 pub mod gobject;
-pub mod working;
 pub mod interpolate;
 pub mod region;
 pub mod sbuf;
 pub mod source;
 pub mod target;
+pub mod working;
 
 // Vips-specific mappings (formerly color/ and pixel/ subdirs)
 pub mod space;

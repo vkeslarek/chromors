@@ -33,4 +33,3 @@ impl Lower<GpuBackend> for crate::Insert<GpuBackend> {
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

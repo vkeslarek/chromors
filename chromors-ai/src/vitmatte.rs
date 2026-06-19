@@ -4,17 +4,17 @@
 //! Output: `Mask2D<B>` (refined alpha matte, f32, 0..1)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
 use chromors::data::mask2d::{Mask2D, RamMaskTarget};
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -59,12 +59,22 @@ impl ViTMatteConfig {
         &self,
         alpha: &Mask2D<B>,
     ) -> Result<Mask2D<B>, chromors::error::Error> {
-        let values = alpha.pull(&RamMaskTarget, Region::full((alpha.width(), alpha.height()), Lod(0)))?;
-        let trimap: Vec<f32> = values.iter().map(|&v| {
-            if v > self.trimap_fg_threshold { 1.0 }
-            else if v < self.trimap_bg_threshold { 0.0 }
-            else { 0.5 }
-        }).collect();
+        let values = alpha.pull(
+            &RamMaskTarget,
+            Region::full((alpha.width(), alpha.height()), Lod(0)),
+        )?;
+        let trimap: Vec<f32> = values
+            .iter()
+            .map(|&v| {
+                if v > self.trimap_fg_threshold {
+                    1.0
+                } else if v < self.trimap_bg_threshold {
+                    0.0
+                } else {
+                    0.5
+                }
+            })
+            .collect();
         Ok(B::mask_from_values(&trimap, alpha.width(), alpha.height()))
     }
 }
@@ -90,7 +100,9 @@ impl ViTMatteModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &ViTMatteConfig { &self.config }
+    pub fn config(&self) -> &ViTMatteConfig {
+        &self.config
+    }
 
     /// Refines a trimap into a precise alpha matte.
     ///
@@ -108,9 +120,14 @@ impl ViTMatteModel {
         let pad_w = if w % pm != 0 { ((w / pm) + 1) * pm } else { w };
         let pad_h = if h % pm != 0 { ((h / pm) + 1) * pm } else { h };
 
-        let img_bytes = image.clone().convert(RGB_U8_LAYOUT)
+        let img_bytes = image
+            .clone()
+            .convert(RGB_U8_LAYOUT)
             .pull(&RamImageTarget, Region::full((w as i32, h as i32), Lod(0)))?;
-        let trimap_values = trimap.pull(&RamMaskTarget, Region::full((trimap.width(), trimap.height()), Lod(0)))?;
+        let trimap_values = trimap.pull(
+            &RamMaskTarget,
+            Region::full((trimap.width(), trimap.height()), Lod(0)),
+        )?;
         let tw = trimap.width() as usize;
         let th = trimap.height() as usize;
 
@@ -123,7 +140,8 @@ impl ViTMatteModel {
             for x in 0..w {
                 let img_idx = (y * w + x) * 3;
                 for c in 0..3 {
-                    input[[0, c, y, x]] = (img_bytes[img_idx + c] as f32 / 255.0 - mean[c]) / std[c];
+                    input[[0, c, y, x]] =
+                        (img_bytes[img_idx + c] as f32 / 255.0 - mean[c]) / std[c];
                 }
                 let tx = (x as f32 * tw as f32 / w as f32) as usize;
                 let ty = (y as f32 * th as f32 / h as f32) as usize;
@@ -138,7 +156,8 @@ impl ViTMatteModel {
             .map_err(|e| chromors::error::Error::Backend(format!("ViTMatte tensor: {e:?}")))?
             .into_dyn();
 
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(ort::inputs!["pixel_values" => input_tensor])
             .map_err(|e| chromors::error::Error::Backend(format!("ViTMatte inference: {e:?}")))?;
 
@@ -151,9 +170,9 @@ impl ViTMatteModel {
         let lo = self.config.alpha_clip_low;
         let hi = self.config.alpha_clip_high;
 
-        let alpha_values: Vec<f32> = (0..h).flat_map(|y| {
-            (0..w).map(move |x| slice[y * out_w + x].clamp(lo, hi))
-        }).collect();
+        let alpha_values: Vec<f32> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| slice[y * out_w + x].clamp(lo, hi)))
+            .collect();
 
         Ok(B::mask_from_values(&alpha_values, w as i32, h as i32))
     }

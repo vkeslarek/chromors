@@ -4,16 +4,16 @@
 //! Output: `Image2D<B>` (restored, potentially upscaled depending on model variant)
 
 use ndarray::Array4;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -77,7 +77,9 @@ impl SwinIrModel {
         Ok(Self { session, config })
     }
 
-    pub fn config(&self) -> &SwinIrConfig { &self.config }
+    pub fn config(&self) -> &SwinIrConfig {
+        &self.config
+    }
 
     /// Restores / denoises / upscales an image using SwinIR.
     ///
@@ -93,7 +95,9 @@ impl SwinIrModel {
         let max = self.config.max_input_size;
         let preprocessed = if w > max || h > max {
             let sc = max as f64 / w.max(h) as f64;
-            let img = image.resize(sc, None, Some(sc), None).convert(RGB_U8_LAYOUT);
+            let img = image
+                .resize(sc, None, Some(sc), None)
+                .convert(RGB_U8_LAYOUT);
             w = img.width() as usize;
             h = img.height() as usize;
             img
@@ -105,7 +109,8 @@ impl SwinIrModel {
         let pad_w = if w % ws != 0 { ((w / ws) + 1) * ws } else { w };
         let pad_h = if h % ws != 0 { ((h / ws) + 1) * ws } else { h };
 
-        let bytes = preprocessed.pull(&RamImageTarget, Region::full((w as i32, h as i32), Lod(0)))?;
+        let bytes =
+            preprocessed.pull(&RamImageTarget, Region::full((w as i32, h as i32), Lod(0)))?;
 
         let mut input = Array4::<f32>::zeros((1, 3, pad_h, pad_w));
         for y in 0..h {
@@ -126,7 +131,8 @@ impl SwinIrModel {
             .map_err(|e| chromors::error::Error::Backend(format!("SwinIR tensor: {e:?}")))?
             .into_dyn();
 
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(ort::inputs!["input" => input_tensor])
             .map_err(|e| chromors::error::Error::Backend(format!("SwinIR inference: {e:?}")))?;
 
@@ -149,12 +155,19 @@ impl SwinIrModel {
                 let dst_idx = (y * crop_w + x) * 3;
                 for c in 0..3 {
                     let mut val = slice[c * out_h * out_w + y * out_w + x];
-                    if self.config.clamp_output { val = val.clamp(0.0, 1.0); }
+                    if self.config.clamp_output {
+                        val = val.clamp(0.0, 1.0);
+                    }
                     output_bytes[dst_idx + c] = (val * 255.0).clamp(0.0, 255.0) as u8;
                 }
             }
         }
 
-        Ok(B::image_from_bytes(output_bytes, crop_w as i32, crop_h as i32, RGB_U8_LAYOUT))
+        Ok(B::image_from_bytes(
+            output_bytes,
+            crop_w as i32,
+            crop_h as i32,
+            RGB_U8_LAYOUT,
+        ))
     }
 }

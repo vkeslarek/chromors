@@ -3,8 +3,7 @@ use crate::prelude::*;
 impl Lower<VipsBackend> for crate::Sharpen<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"sharpen\0")
-            .expect("failed to create vips sharpen op");
+        let mut op = VipsGObject::new(b"sharpen\0").expect("failed to create vips sharpen op");
         op.set_image("in", input_handle.ptr);
         if let Some(v) = self.sigma {
             op.set_double("sigma", v);
@@ -32,8 +31,7 @@ impl Lower<VipsBackend> for crate::Sharpen<VipsBackend> {
 impl Lower<VipsBackend> for crate::Canny<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"canny\0")
-            .expect("failed to create vips canny op");
+        let mut op = VipsGObject::new(b"canny\0").expect("failed to create vips canny op");
         op.set_image("in", input_handle.ptr);
         if let Some(v) = self.sigma {
             op.set_double("sigma", v);
@@ -49,8 +47,7 @@ impl Lower<VipsBackend> for crate::Canny<VipsBackend> {
 impl Lower<VipsBackend> for crate::Median<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"rank\0")
-            .expect("failed to create vips rank op");
+        let mut op = VipsGObject::new(b"rank\0").expect("failed to create vips rank op");
         op.set_image("in", input_handle.ptr);
         op.set_int("width", self.size);
         op.set_int("height", self.size);
@@ -63,8 +60,8 @@ impl Lower<VipsBackend> for crate::Median<VipsBackend> {
 impl Lower<VipsBackend> for crate::HoughLine<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"hough_line\0")
-            .expect("failed to create vips hough_line op");
+        let mut op =
+            VipsGObject::new(b"hough_line\0").expect("failed to create vips hough_line op");
         op.set_image("in", input_handle.ptr);
         if let Some(v) = self.width {
             op.set_int("width", v);
@@ -80,8 +77,8 @@ impl Lower<VipsBackend> for crate::HoughLine<VipsBackend> {
 impl Lower<VipsBackend> for crate::HoughCircle<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"hough_circle\0")
-            .expect("failed to create vips hough_circle op");
+        let mut op =
+            VipsGObject::new(b"hough_circle\0").expect("failed to create vips hough_circle op");
         op.set_image("in", input_handle.ptr);
         if let Some(v) = self.scale {
             op.set_int("scale", v);
@@ -100,12 +97,10 @@ impl Lower<VipsBackend> for crate::HoughCircle<VipsBackend> {
 impl Lower<VipsBackend> for crate::Blur<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let input_handle = cx.input(self.input.src());
-        let mut op = VipsGObject::new(b"gaussblur\0")
-            .expect("failed to create vips gaussblur op");
+        let mut op = VipsGObject::new(b"gaussblur\0").expect("failed to create vips gaussblur op");
         op.set_image("in", input_handle.ptr);
         op.set_double("sigma", self.sigma as f64);
         let out_handle = op.run().expect("vips gaussblur failed");
         cx.emit(out_handle);
     }
 }
-

@@ -4,8 +4,6 @@ use std::path::PathBuf;
 fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-
-
     let vips = pkg_config::Config::new()
         .atleast_version("8.6")
         .probe("vips")

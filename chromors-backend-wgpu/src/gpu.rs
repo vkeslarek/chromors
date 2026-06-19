@@ -1,11 +1,11 @@
-use crate::view::*;
-use crate::context::GpuContext;
 use crate::buffer::GpuBuffer;
+use crate::context::GpuContext;
+use crate::view::*;
 
 use crate::Builder;
 use crate::Error;
-use crate::{AnyKind, Kind};
 use crate::NodeId;
+use crate::{AnyKind, Kind};
 use crate::{Region, WorkUnit, WorkUnitFor};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -540,6 +540,32 @@ impl GpuBuilder {
         self
     }
 
+    /// A `float2` param for the current step. Namespaced by step index.
+    pub fn param2(&mut self, name: &str, value: [f32; 2]) -> &mut Self {
+        let idx = self.steps.len() - 1;
+        let field = format!("s{idx}_{name}");
+        self.params.fields.push((field.clone(), "float2"));
+        self.params.field_sizes.push(8);
+        self.params
+            .bytes
+            .extend_from_slice(bytemuck::bytes_of(&value));
+        self.steps[idx].params.push(field);
+        self
+    }
+
+    /// A `float4` param for the current step. Namespaced by step index.
+    pub fn param4(&mut self, name: &str, value: [f32; 4]) -> &mut Self {
+        let idx = self.steps.len() - 1;
+        let field = format!("s{idx}_{name}");
+        self.params.fields.push((field.clone(), "float4"));
+        self.params.field_sizes.push(16);
+        self.params
+            .bytes
+            .extend_from_slice(bytemuck::bytes_of(&value));
+        self.steps[idx].params.push(field);
+        self
+    }
+
     /// Register the output, as described by its **Kind** (`GpuView::output`).
     /// Merges the wrap's own `params` (e.g. a reduction's `bin_count`, or an
     /// image's `region_out`) into the shared `ChainParams`. If no dispatch
@@ -778,7 +804,8 @@ impl chromors_core::Builder<GpuBackend> for GpuBuilder {
         let compiled = crate::compile::compile(self.ctx.as_ref(), &self, slang, hash)?;
 
         let out_bytes = spec.byte_size(root_wu);
-        let payload = crate::compile::dispatch(self.ctx.as_ref(), &compiled, &self, out_bytes, dims)?;
+        let payload =
+            crate::compile::dispatch(self.ctx.as_ref(), &compiled, &self, out_bytes, dims)?;
 
         Ok(crate::Buffer { payload, spec })
     }

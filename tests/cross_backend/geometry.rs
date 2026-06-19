@@ -511,7 +511,7 @@ fn with_lod_tile_offset_matches_vips() {
     let vips_ref = vips_shrunk.crop(24, 0, 26, 50);
 
     let gpu_res = gpu_img.with_lod(lod);
-    use chromors::io::Target;
+
     let target = chromors::data::image::RamImageTarget;
     let gpu_bytes = gpu_res
         .pull(
@@ -550,7 +550,7 @@ fn with_lod_unaligned_region_matches_vips() {
     let vips_ref = vips_shrunk.crop(25, 0, 25, 50);
 
     let gpu_res = gpu_img.with_lod(lod);
-    use chromors::io::Target;
+
     let target = chromors::data::image::RamImageTarget;
     let gpu_bytes = gpu_res
         .pull(

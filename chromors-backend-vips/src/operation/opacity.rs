@@ -42,16 +42,14 @@ impl Lower<VipsBackend> for crate::Opacity<VipsBackend> {
         }
 
         // 2. Extract RGB
-        let mut op_rgb =
-            VipsGObject::new(b"extract_band\0").unwrap();
+        let mut op_rgb = VipsGObject::new(b"extract_band\0").unwrap();
         op_rgb.set_image("in", ptr);
         op_rgb.set_int("band", 0);
         op_rgb.set_int("n", bands - 1);
         let rgb_handle = op_rgb.run().unwrap();
 
         // 3. Extract Alpha
-        let mut op_alpha =
-            VipsGObject::new(b"extract_band\0").unwrap();
+        let mut op_alpha = VipsGObject::new(b"extract_band\0").unwrap();
         op_alpha.set_image("in", ptr);
         op_alpha.set_int("band", bands - 1);
         op_alpha.set_int("n", 1);
@@ -92,4 +90,3 @@ impl Lower<VipsBackend> for crate::Opacity<VipsBackend> {
         cx.emit(VipsHandle { ptr: out });
     }
 }
-

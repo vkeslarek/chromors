@@ -19,10 +19,8 @@ macro_rules! assert_approx_eq {
     }};
 }
 
-pub use chromors_core::*;
-pub use chromors_core::color::*;
 pub use chromors_core::pixel::*;
-pub use chromors_core::work_unit::*;
+pub use chromors_core::*;
 
 // Compatibility re-export modules so existing code using `chromors::backend::gpu::*`
 // or `chromors::backend::vips::*` continues to compile after the backend crates were flattened.
@@ -42,20 +40,20 @@ pub mod backend {
     }
 }
 
-pub use chromors_backend_wgpu::StageExt;
-pub use chromors_backend_wgpu::data::histogram::GpuImageExt;
-pub use chromors_backend_wgpu::data::gpu_lut::GpuLutExt;
-pub use chromors_backend_wgpu::data::gpu_mask2d::GpuMask2DExt;
 pub use chromors_backend_vips::data::vips_image::VipsImageExt;
 pub use chromors_backend_vips::data::vips_lut::VipsLutExt;
 pub use chromors_backend_vips::data::vips_mask2d::VipsMask2DExt;
 pub use chromors_backend_wgpu::CacheExt;
+pub use chromors_backend_wgpu::StageExt;
+pub use chromors_backend_wgpu::data::gpu_lut::GpuLutExt;
+pub use chromors_backend_wgpu::data::gpu_mask2d::GpuMask2DExt;
+pub use chromors_backend_wgpu::data::histogram::GpuImageExt;
 
 pub mod export;
 
 pub mod data {
-    pub mod image;
     pub mod histogram;
+    pub mod image;
     pub mod mask2d {
         pub use chromors_core::data::mask2d::*;
     }

@@ -1,5 +1,5 @@
-use crate::context::GpuContext;
 use crate::Error;
+use crate::context::GpuContext;
 use std::sync::Arc;
 use wgpu;
 

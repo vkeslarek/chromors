@@ -7,12 +7,12 @@
 //! then read garbage and the dispatch wrote nothing (fully black/transparent
 //! output). This pins the fix (CLAUDE.md §5.2.4).
 use super::common;
+use chromors::VipsImageExt;
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::RamImageTarget;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::VipsImageExt;
 
 fn disp() -> PixelLayout {
     PixelLayout {

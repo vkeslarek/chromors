@@ -10,12 +10,12 @@
 //! (they rely on existing core traits). Steps 4's constructors (`image_from_bytes`,
 //! `mask_from_values`) are the only backend-specific additions.
 
-use std::sync::Arc;
+use chromors::Backend;
 use chromors::data::image::Image2D;
 use chromors::data::mask2d::Mask2D;
-use chromors::pixel::PixelLayout;
 use chromors::error::Error;
-use chromors::Backend;
+use chromors::pixel::PixelLayout;
+use std::sync::Arc;
 
 /// A backend that can round-trip image and mask data through raw bytes —
 /// the minimum required by all chromors-ai inference models.
@@ -29,9 +29,9 @@ pub trait AiBackend: Backend + Sized + 'static {
 
 // ── VipsBackend impl ─────────────────────────────────────────────────────────
 
-use chromors::backend::vips::VipsBackend;
 use chromors::VipsImageExt;
 use chromors::VipsMask2DExt;
+use chromors::backend::vips::VipsBackend;
 
 impl AiBackend for VipsBackend {
     fn image_from_bytes(bytes: Vec<u8>, w: i32, h: i32, layout: PixelLayout) -> Image2D<Self> {

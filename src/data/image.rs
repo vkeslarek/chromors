@@ -1,14 +1,14 @@
-use std::sync::Arc;
 use std::hash::Hasher;
+use std::sync::Arc;
 
-pub use chromors_core::data::image::{Image2D, ImageKind, GpuBufferTarget, RamImageTarget};
+use chromors_backend_vips::VipsBackend;
 pub use chromors_backend_vips::data::vips_image::VipsImageExt;
+use chromors_backend_wgpu::view::RegionParams;
+use chromors_backend_wgpu::{GpuBackend, GpuBuffer, GpuBuilder, GpuContext, GpuView};
 use chromors_core::buffer::Buffer;
+pub use chromors_core::data::image::{GpuBufferTarget, Image2D, ImageKind, RamImageTarget};
 use chromors_core::io::Source;
 use chromors_core::work_unit::{Region, WorkUnit};
-use chromors_backend_wgpu::view::RegionParams;
-use chromors_backend_wgpu::{GpuBackend, GpuBuilder, GpuView, GpuContext, GpuBuffer};
-use chromors_backend_vips::VipsBackend;
 
 pub struct VipsImageSource {
     pub vips_img: Image2D<VipsBackend>,
@@ -61,7 +61,10 @@ impl Source<GpuBackend> for VipsImageSource {
             self.vips_img.clone()
         };
 
-        let vips_buffer = src.materialize(Region::full((lod_w, lod_h), chromors_core::work_unit::Lod(0)))?;
+        let vips_buffer = src.materialize(Region::full(
+            (lod_w, lod_h),
+            chromors_core::work_unit::Lod(0),
+        ))?;
 
         let region = clamp_region(wu, lod_w, lod_h);
         let mut crop = chromors_backend_vips::gobject::VipsGObject::new(b"extract_area\0")
@@ -71,21 +74,33 @@ impl Source<GpuBackend> for VipsImageSource {
         crop.set_int("top", region.y);
         crop.set_int("width", region.w);
         crop.set_int("height", region.h);
-        let cropped: chromors_backend_vips::VipsHandle = crop.run()
+        let cropped: chromors_backend_vips::VipsHandle = crop
+            .run()
             .map_err(|e| chromors_core::error::Error::Vips(format!("{e:?}")))?;
 
         let mut size: usize = 0;
-        let ptr = unsafe { chromors_backend_vips::ffi::vips_image_write_to_memory(cropped.ptr, &mut size as *mut usize) };
+        let ptr = unsafe {
+            chromors_backend_vips::ffi::vips_image_write_to_memory(
+                cropped.ptr,
+                &mut size as *mut usize,
+            )
+        };
         if ptr.is_null() {
-            return Err(chromors_core::error::Error::Vips(chromors_backend_vips::vips_error()));
+            return Err(chromors_core::error::Error::Vips(
+                chromors_backend_vips::vips_error(),
+            ));
         }
         let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) };
 
-        let wgpu_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("gpu_vips_source"),
-            contents: slice,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        });
+        let wgpu_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gpu_vips_source"),
+                contents: slice,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+            });
 
         unsafe { chromors_backend_vips::ffi::g_free(ptr as *mut std::ffi::c_void) };
 
@@ -98,7 +113,9 @@ impl Source<GpuBackend> for VipsImageSource {
     fn lower(&self, cx: &mut GpuBuilder) {
         let wu = cx.wu().clone();
         let WorkUnit::Region(ref region) = wu else {
-            cx.fail(chromors_core::error::Error::InvalidWorkUnit("image source expects a Region".into()));
+            cx.fail(chromors_core::error::Error::InvalidWorkUnit(
+                "image source expects a Region".into(),
+            ));
             return;
         };
         match self.fetch(cx.ctx().as_ref(), region) {
@@ -116,7 +133,11 @@ impl Source<GpuBackend> for VipsImageSource {
                     pad_x,
                     pad_y,
                 );
-                cx.input(self.spec().input(), geom.into_block("region_in_{slot}"), buf.payload);
+                cx.input(
+                    self.spec().input(),
+                    geom.into_block("region_in_{slot}"),
+                    buf.payload,
+                );
             }
             Err(e) => cx.fail(e),
         }

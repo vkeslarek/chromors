@@ -13,13 +13,13 @@
 //!  - target parity: `GpuBufferTarget` (viewport path) == `RamImageTarget`.
 use super::common;
 
-use std::sync::Arc;
+use chromors::VipsImageExt;
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{GpuBufferTarget, RamImageTarget};
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::VipsImageExt;
+use std::sync::Arc;
 
 fn display_layout() -> PixelLayout {
     PixelLayout {

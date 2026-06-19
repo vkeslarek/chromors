@@ -124,7 +124,10 @@ fn ergonomic_convert_wrappers_mutate_one_axis() {
     assert_eq!(st.spec.layout.model, base.model);
 
     let model = gpu_img.to_model(chromors::color::model::ColorModel::Gray);
-    assert_eq!(model.spec.layout.model, chromors::color::model::ColorModel::Gray);
+    assert_eq!(
+        model.spec.layout.model,
+        chromors::color::model::ColorModel::Gray
+    );
     assert_eq!(model.spec.layout.storage, base.storage);
     assert_eq!(model.spec.layout.color_space, base.color_space);
 
@@ -140,8 +143,12 @@ fn ergonomic_convert_wrappers_mutate_one_axis() {
     // Cross-check linearize against GPU vs vips materialization. Both sides
     // first move to F32 storage so the comparison is over linear float
     // values, not a degenerate cast-to-u8 of a linear signal.
-    let gpu_lin = gpu_img.to_storage(chromors::pixel::Storage::F32).linearize();
-    let vips_lin = vips_img.to_storage(chromors::pixel::Storage::F32).linearize();
+    let gpu_lin = gpu_img
+        .to_storage(chromors::pixel::Storage::F32)
+        .linearize();
+    let vips_lin = vips_img
+        .to_storage(chromors::pixel::Storage::F32)
+        .linearize();
     let gpu_bytes = common::poc_materialize(&gpu_lin);
     let vips_f32 = common::vips_materialize_raw_f32(&vips_lin);
     let vips_bytes = common::f32_to_bytes_u8(&vips_f32);

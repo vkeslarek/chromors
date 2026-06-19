@@ -71,7 +71,10 @@ fn merge_horizontal_matches_vips_outside_overlap() {
     }
     let outside_rms = (outside_rms_acc / outside_bytes as f64).sqrt();
     println!("merge_horizontal outside-overlap RMS = {}", outside_rms);
-    assert_eq!(outside_rms, 0.0, "non-overlap region should match vips exactly");
+    assert_eq!(
+        outside_rms, 0.0,
+        "non-overlap region should match vips exactly"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
-use chromors_core::pixel::Storage;
-use crate::{FromVipsBandFormat, IntoVipsBandFormat};
 use crate::ffi;
+use crate::{FromVipsBandFormat, IntoVipsBandFormat};
+use chromors_core::pixel::Storage;
 
 impl IntoVipsBandFormat for Storage {
     fn into_vips_band_format(self) -> i32 {

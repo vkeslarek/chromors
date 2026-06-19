@@ -52,7 +52,11 @@ impl ExportConfig {
 }
 
 pub trait ExportExt {
-    fn save_with_config(&self, filename: &str, config: &ExportConfig) -> Result<(), crate::error::Error>;
+    fn save_with_config(
+        &self,
+        filename: &str,
+        config: &ExportConfig,
+    ) -> Result<(), crate::error::Error>;
 }
 
 impl ExportExt for chromors_core::Image2D<chromors_backend_vips::VipsBackend> {

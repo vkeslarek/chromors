@@ -27,8 +27,8 @@ use std::slice;
 
 use super::FromVipsBandFormat;
 use crate::Error;
-use crate::ffi;
 use crate::Storage;
+use crate::ffi;
 
 // glib's data-with-destructor attach — not in the generated bindings, declared
 // here (links against the already-linked glib).

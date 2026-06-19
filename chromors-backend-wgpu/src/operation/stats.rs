@@ -33,9 +33,9 @@ impl chromors_core::operation::Lower<GpuBackend> for crate::HistogramFind<GpuBac
     }
 }
 
-
-
-impl chromors_core::operation::Lower<GpuBackend> for chromors_core::operation::stats::HistogramCumulative<GpuBackend> {
+impl chromors_core::operation::Lower<GpuBackend>
+    for chromors_core::operation::stats::HistogramCumulative<GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         if !stage_histogram_image(cx, &self.input) {
             return;
@@ -49,7 +49,9 @@ impl chromors_core::operation::Lower<GpuBackend> for chromors_core::operation::s
     }
 }
 
-impl chromors_core::operation::Lower<GpuBackend> for chromors_core::operation::stats::HistogramNormalize<GpuBackend> {
+impl chromors_core::operation::Lower<GpuBackend>
+    for chromors_core::operation::stats::HistogramNormalize<GpuBackend>
+{
     fn lower(&self, cx: &mut GpuBuilder) {
         if !stage_histogram_image(cx, &self.input) {
             return;
@@ -145,4 +147,3 @@ impl chromors_core::operation::Lower<GpuBackend> for HistogramEqualize<GpuBacken
         cx.output(self.output_spec().output(cx.wu()));
     }
 }
-

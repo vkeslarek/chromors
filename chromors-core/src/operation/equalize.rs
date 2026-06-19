@@ -10,8 +10,8 @@ pub struct EqualizeLut<B: Backend> {
     pub histogram: Input<HistogramKind, B>,
 }
 
-impl<B: Backend> Operation<B> for EqualizeLut<B> 
-where 
+impl<B: Backend> Operation<B> for EqualizeLut<B>
+where
     Self: crate::operation::Lower<B>,
 {
     type Output = LutKind;
@@ -31,8 +31,8 @@ pub struct HistogramCumulative<B: Backend> {
     pub histogram: Input<HistogramKind, B>,
 }
 
-impl<B: Backend> Operation<B> for HistogramCumulative<B> 
-where 
+impl<B: Backend> Operation<B> for HistogramCumulative<B>
+where
     Self: crate::operation::Lower<B>,
 {
     type Output = HistogramKind;
@@ -52,8 +52,8 @@ pub struct HistogramNormalize<B: Backend> {
     pub histogram: Input<HistogramKind, B>,
 }
 
-impl<B: Backend> Operation<B> for HistogramNormalize<B> 
-where 
+impl<B: Backend> Operation<B> for HistogramNormalize<B>
+where
     Self: crate::operation::Lower<B>,
 {
     type Output = HistogramKind;
@@ -69,7 +69,7 @@ where
     fn dyn_hash(&self, _state: &mut dyn Hasher) {}
 }
 
-impl<B: Backend> Histogram<B> 
+impl<B: Backend> Histogram<B>
 where
     EqualizeLut<B>: crate::operation::Lower<B>,
     HistogramCumulative<B>: crate::operation::Lower<B>,

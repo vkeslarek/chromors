@@ -4,17 +4,17 @@
 //! Supports bounding-box prompts; point prompts can be added similarly.
 
 use ndarray::{Array2, Array3, Array4, ArrayView2, ArrayView4};
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 
 use chromors::color::model::ColorModel;
 use chromors::color::space::ColorSpace;
 use chromors::data::image::{Image2D, RamImageTarget};
 use chromors::data::mask2d::Mask2D;
+use chromors::io::Target;
 use chromors::pixel::{AlphaState, PixelLayout, Storage};
 use chromors::work_unit::{Lod, Region};
-use chromors::io::Target;
 
 use crate::prelude::AiBackend;
 
@@ -66,7 +66,11 @@ impl Sam3Model {
         Self::with_config(encoder_path, decoder_path, Sam3Config::default())
     }
 
-    pub fn with_config(encoder_path: &str, decoder_path: &str, config: Sam3Config) -> ort::Result<Self> {
+    pub fn with_config(
+        encoder_path: &str,
+        decoder_path: &str,
+        config: Sam3Config,
+    ) -> ort::Result<Self> {
         let build = || {
             Session::builder()?
                 .with_optimization_level(GraphOptimizationLevel::Level3)?
@@ -77,10 +81,16 @@ impl Sam3Model {
         };
         let encoder = build()?.commit_from_file(encoder_path)?;
         let decoder = build()?.commit_from_file(decoder_path)?;
-        Ok(Self { encoder, decoder, config })
+        Ok(Self {
+            encoder,
+            decoder,
+            config,
+        })
     }
 
-    pub fn config(&self) -> &Sam3Config { &self.config }
+    pub fn config(&self) -> &Sam3Config {
+        &self.config
+    }
 
     /// Encodes an image into SAM3 embeddings (reuse for multiple decode calls).
     ///
@@ -96,7 +106,10 @@ impl Sam3Model {
             .resize(sz as f64 / w as f64, None, Some(sz as f64 / h as f64), None)
             .convert(RGB_U8_LAYOUT);
 
-        let bytes = preprocessed.pull(&RamImageTarget, Region::full((sz as i32, sz as i32), Lod(0)))?;
+        let bytes = preprocessed.pull(
+            &RamImageTarget,
+            Region::full((sz as i32, sz as i32), Lod(0)),
+        )?;
 
         let mut image_arr = Array3::<u8>::zeros((sz, sz, 3));
         for y in 0..sz {
@@ -150,11 +163,14 @@ impl Sam3Model {
 
         let mask_h = masks.dim().2;
         let mask_w = masks.dim().3;
-        let values: Vec<f32> = (0..mask_h).flat_map(|y| {
-            (0..mask_w).map(move |x| masks[[0, best_idx, y, x]])
-        }).collect();
+        let values: Vec<f32> = (0..mask_h)
+            .flat_map(|y| (0..mask_w).map(move |x| masks[[0, best_idx, y, x]]))
+            .collect();
 
-        Ok((B::mask_from_values(&values, mask_w as i32, mask_h as i32), iou_scores))
+        Ok((
+            B::mask_from_values(&values, mask_w as i32, mask_h as i32),
+            iou_scores,
+        ))
     }
 
     // ── Private inference ────────────────────────────────────────────────────
@@ -166,7 +182,12 @@ impl Sam3Model {
         let extract = |name: &str| -> ort::Result<Array4<f32>> {
             let (shape, slice) = outputs[name].try_extract_tensor::<f32>()?;
             Ok(ArrayView4::from_shape(
-                (shape[0] as usize, shape[1] as usize, shape[2] as usize, shape[3] as usize),
+                (
+                    shape[0] as usize,
+                    shape[1] as usize,
+                    shape[2] as usize,
+                    shape[3] as usize,
+                ),
                 slice,
             )
             .unwrap()
@@ -223,16 +244,26 @@ impl Sam3Model {
 
         let (shape_m, slice_m) = outputs["masks"].try_extract_tensor::<bool>()?;
         let masks_bool = ArrayView4::from_shape(
-            (shape_m[0] as usize, shape_m[1] as usize, shape_m[2] as usize, shape_m[3] as usize),
+            (
+                shape_m[0] as usize,
+                shape_m[1] as usize,
+                shape_m[2] as usize,
+                shape_m[3] as usize,
+            ),
             slice_m,
-        ).unwrap();
+        )
+        .unwrap();
         let masks = masks_bool.mapv(|b| if b { 1.0f32 } else { 0.0 });
 
         let (shape_i, slice_i) = outputs["scores"].try_extract_tensor::<f32>()?;
         let ious = if shape_i.len() == 1 {
-            ArrayView2::from_shape((1, shape_i[0] as usize), slice_i).unwrap().to_owned()
+            ArrayView2::from_shape((1, shape_i[0] as usize), slice_i)
+                .unwrap()
+                .to_owned()
         } else {
-            ArrayView2::from_shape((shape_i[0] as usize, shape_i[1] as usize), slice_i).unwrap().to_owned()
+            ArrayView2::from_shape((shape_i[0] as usize, shape_i[1] as usize), slice_i)
+                .unwrap()
+                .to_owned()
         };
 
         Ok((masks, ious))

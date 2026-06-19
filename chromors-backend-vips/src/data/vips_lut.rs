@@ -1,6 +1,6 @@
-use chromors_core::*;
+use crate::{VipsBackend, VipsBand, VipsBuilder, VipsHandle};
 use chromors_core::lut::RawLutTarget;
-use crate::{VipsBackend, VipsHandle, VipsBuilder, VipsBand};
+use chromors_core::*;
 use std::hash::Hasher;
 use std::sync::Arc;
 

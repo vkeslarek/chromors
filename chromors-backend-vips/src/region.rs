@@ -1,6 +1,6 @@
-use crate::VipsBackend;
 use crate::Error;
-use crate::ffi as ffi;
+use crate::VipsBackend;
+use crate::ffi;
 
 /// A libvips region — a demand-driven viewport into a `VipsImage`.
 ///

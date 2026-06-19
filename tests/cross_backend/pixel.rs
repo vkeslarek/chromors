@@ -1,6 +1,5 @@
-use chromors::data::image::VipsImageExt;
-use std::sync::Arc;
 use super::*;
+use chromors::data::image::VipsImageExt;
 
 #[test]
 fn convert_roundtrip() {
@@ -52,19 +51,22 @@ fn file_image_source_detects_layout() {
     use chromors::color::model::ColorModel;
     use chromors::pixel::AlphaState;
 
-    let rgb = chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap();
+    let rgb =
+        chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/rgb.jpg").unwrap();
     let rgb_layout = rgb.layout();
     assert_eq!(rgb_layout.model, ColorModel::Rgb);
     assert_eq!(rgb_layout.alpha, AlphaState::None);
     assert_eq!(rgb_layout.storage, Storage::U8);
 
-    let rgba = chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/rgba.png").unwrap();
+    let rgba =
+        chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/rgba.png").unwrap();
     let rgba_layout = rgba.layout();
     assert_eq!(rgba_layout.model, ColorModel::Rgb);
     assert_eq!(rgba_layout.alpha, AlphaState::Straight);
     assert_eq!(rgba_layout.storage, Storage::U8);
 
-    let vips_img = chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/lab.tif").unwrap();
+    let vips_img =
+        chromors::data::image::Image2D::<VipsBackend>::open("tests/fixtures/lab.tif").unwrap();
     let lab_layout = vips_img.layout();
     assert_eq!(lab_layout.model, ColorModel::Lab);
     assert_eq!(lab_layout.alpha, AlphaState::None);

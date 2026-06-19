@@ -3,8 +3,8 @@ use crate::prelude::*;
 impl Lower<VipsBackend> for crate::Composite2<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let base_handle = cx.input(self.base.src());
-        let mut op = VipsGObject::new(b"composite2\0")
-            .expect("failed to create vips composite2 op");
+        let mut op =
+            VipsGObject::new(b"composite2\0").expect("failed to create vips composite2 op");
         op.set_image("base", base_handle.ptr);
         let overlay_handle = cx.input(self.overlay.src());
         op.set_image("overlay", overlay_handle.ptr);
@@ -26,8 +26,7 @@ impl Lower<VipsBackend> for crate::Composite2<VipsBackend> {
 impl Lower<VipsBackend> for crate::Join<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let in1_handle = cx.input(self.in1.src());
-        let mut op = VipsGObject::new(b"join\0")
-            .expect("failed to create vips join op");
+        let mut op = VipsGObject::new(b"join\0").expect("failed to create vips join op");
         op.set_image("in1", in1_handle.ptr);
         let in2_handle = cx.input(self.in2.src());
         op.set_image("in2", in2_handle.ptr);
@@ -49,8 +48,7 @@ impl Lower<VipsBackend> for crate::Join<VipsBackend> {
 impl Lower<VipsBackend> for crate::Insert<VipsBackend> {
     fn lower(&self, cx: &mut VipsBuilder) {
         let main_handle = cx.input(self.main.src());
-        let mut op = VipsGObject::new(b"insert\0")
-            .expect("failed to create vips insert op");
+        let mut op = VipsGObject::new(b"insert\0").expect("failed to create vips insert op");
         op.set_image("main", main_handle.ptr);
         let sub_handle = cx.input(self.sub.src());
         op.set_image("sub", sub_handle.ptr);
@@ -63,4 +61,3 @@ impl Lower<VipsBackend> for crate::Insert<VipsBackend> {
         cx.emit(out_handle);
     }
 }
-
